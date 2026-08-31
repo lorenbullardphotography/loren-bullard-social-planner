@@ -48,7 +48,8 @@
         <button id="syncBtn" class="ghost">↻ Sync Instagram</button>
         <button id="exportBtn" class="ghost">↓ Export backup</button>
         <label class="ghost">↑ Import backup<input id="importInput" type="file" accept="application/json,.json" hidden></label>
-        <label class="primary">+ Add asset<input id="upload" type="file" accept="image/*,video/*" multiple hidden></label>
+        <label id="addAssetLabel" class="primary">+ Add asset<input id="upload" type="file" accept="image/*,video/*" multiple hidden></label>
+        <span id="uploadStatus" class="upload-status hidden"></span>
       </div>
     </header>
 
@@ -98,6 +99,11 @@
     <section id="view-approvals" class="view hidden">
       <div class="intro"><div><h3>Approvals</h3><p>A simple review queue for you and your social media manager.</p></div></div>
       <div id="approvalBoard" class="approval-board"></div>
+    </section>
+
+    <section id="view-editor" class="view hidden">
+      <div class="intro"><div><p class="eyebrow">POST WORKSPACE</p><h3>Edit post</h3><p>Edit this content outside the grid, then save it back to the shared planner.</p></div><button id="backToGrid" class="ghost">← Back to grid</button></div>
+      <div id="postEditor" class="standalone-editor"></div>
     </section>
 
     <section id="view-settings" class="view hidden">

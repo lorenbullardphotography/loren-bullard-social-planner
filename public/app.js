@@ -183,12 +183,18 @@ function renderAll() {
   renderAttention();
   renderGrid();
   renderInspector();
+  if (currentView === "editor") renderInspector("#postEditor");
   renderCalendar();
   renderLibrary();
   renderApprovals();
   renderTeam();
   renderActivity();
   renderPlannerSettings();
+}
+function assetPreview(post) {
+  return post.assetKind === "video"
+    ? '<video src="' + esc(post.image) + '" controls muted playsinline></video>'
+    : '<img src="' + esc(post.image) + '" alt="">';
 }
 function renderPlannerSettings() {
   const pillars = $("#settingsPillars");
@@ -307,8 +313,8 @@ async function reorder(a, b) {
   renderAll();
   await persistPlanner("reordered the grid");
 }
-function renderInspector() {
-  const host = $("#inspector");
+function renderInspector(hostSelector = "#inspector") {
+  const host = $(hostSelector);
   const post = posts.find(item => item.id === selected);
   if (!post) {
     host.innerHTML = `<div class="inspector-empty"><b>Select a post</b>Click a tile to edit its caption, date, notes, approval, or scheduling.</div>`;
@@ -316,7 +322,7 @@ function renderInspector() {
   }
   if (post.status === "posted") {
     host.innerHTML = `<div class="editor">
-      <div class="preview-wrap"><img src="${post.image}"></div>
+      <div class="preview-wrap">${assetPreview(post)}</div>
       <div class="posted-lock">This post is live on Instagram and stays locked in the grid.<br><br><b>${post.timestamp ? new Date(post.timestamp).toLocaleDateString() : "Posted"}</b>${post.permalink ? ` · <a href="${esc(post.permalink)}" target="_blank" rel="noopener noreferrer">Open on Instagram</a>` : ""}<br>${esc(formatSchedule(post))}</div>
       <label class="field">Caption<textarea rows="8" readonly>${esc(post.caption || "")}</textarea></label>
     </div>`;
@@ -327,7 +333,7 @@ function renderInspector() {
   const pillarOptions = `<option value="">Choose a pillar</option>` + settings.pillars.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${esc(pillar)}</option>`).join("");
   const checklistHtml = checklistFor(post).map((item, index) => `<label class="check-item"><input type="checkbox" data-check="${index}" ${item.done ? "checked" : ""}><span>${esc(item.label)}</span></label>`).join("");
   host.innerHTML = `<div class="editor">
-    <div class="preview-wrap"><img src="${post.image}"></div>
+    <div class="preview-wrap">${assetPreview(post)}</div>
     <div class="two">
       <label class="field">Workflow<select id="eWorkflow">${workflowOptions}</select></label>
       <label class="field">Assigned to<input id="eAssignee" value="${esc(post.assignee || "")}" placeholder="Loren or social planner"></label>
@@ -500,8 +506,9 @@ function switchView(name) {
   $$(".view").forEach(view => view.classList.add("hidden"));
   $(`#view-${name}`).classList.remove("hidden");
   $$(".nav").forEach(nav => nav.classList.toggle("active", nav.dataset.view === name));
-  $("#pageTitle").textContent = { grid: "Grid Planner", calendar: "Calendar", library: "Content Library", approvals: "Approvals", settings: "Settings" }[name];
+  $("#pageTitle").textContent = { grid: "Grid Planner", calendar: "Calendar", library: "Content Library", approvals: "Approvals", editor: "Edit post", settings: "Settings" }[name];
   if (name === "settings") renderPlannerSettings();
+  if (name === "editor") renderInspector("#postEditor");
 }
 async function readFile(file) {
   return new Promise((resolve, reject) => {
@@ -516,29 +523,51 @@ $("#upload").onchange = async event => {
   const files = [...event.target.files];
   const oversized = files.filter(file => file.size > 30 * 1024 * 1024);
   if (oversized.length) notify("Assets over 30 MB were skipped");
-  for (const file of files.filter(file => file.size <= 30 * 1024 * 1024)) {
-    const uploaded = await api("/api/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, data: await readFile(file) }) });
-    posts.unshift({
-      id: crypto.randomUUID(),
-      image: uploaded.url,
-      assetKind: uploaded.kind,
-      status: "draft",
-      approval: "draft",
-      type: uploaded.kind === "video" ? "REEL" : "IMAGE",
-      date: "",
-      time: "",
-      scheduleState: "draft",
-      caption: "",
-      notes: "",
-      comments: [],
-      updatedBy: currentUser.name,
-      updatedAt: new Date().toISOString()
-    });
+  const validFiles = files.filter(file => file.size <= 30 * 1024 * 1024);
+  if (!validFiles.length) return event.target.value = "";
+  const uploadStatus = $("#uploadStatus");
+  const addAssetLabel = $("#addAssetLabel");
+  uploadStatus.classList.remove("hidden");
+  $("#upload").disabled = true;
+  addAssetLabel.classList.add("disabled");
+  let firstId = null;
+  try {
+    for (const [index, file] of validFiles.entries()) {
+      uploadStatus.textContent = "Uploading " + (index + 1) + " of " + validFiles.length + "…";
+      const uploaded = await api("/api/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, data: await readFile(file) }) });
+      const id = crypto.randomUUID();
+      firstId ||= id;
+      posts.unshift({
+        id,
+        image: uploaded.url,
+        assetKind: uploaded.kind,
+        status: "draft",
+        approval: "draft",
+        type: uploaded.kind === "video" ? "REEL" : "IMAGE",
+        date: "",
+        time: "",
+        scheduleState: "draft",
+        caption: "",
+        notes: "",
+        comments: [],
+        updatedBy: currentUser.name,
+        updatedAt: new Date().toISOString()
+      });
+    }
+    selected = firstId;
+    renderAll();
+    await persistPlanner("uploaded new content");
+    switchView("editor");
+    notify(validFiles.length === 1 ? "Asset uploaded — finish editing the post" : validFiles.length + " assets uploaded — editing the first post");
+  } catch (error) {
+    notify(error.message || "Asset upload failed");
+  } finally {
+    uploadStatus.textContent = "";
+    uploadStatus.classList.add("hidden");
+    $("#upload").disabled = false;
+    addAssetLabel.classList.remove("disabled");
+    event.target.value = "";
   }
-  renderAll();
-  event.target.value = "";
-  await persistPlanner("added new content");
-  notify("Content added");
 };
 $("#exportBtn").onclick = exportBackup;
 $("#importInput").onchange = async event => {
@@ -637,6 +666,7 @@ $("#settingsDisconnect").onclick = async () => {
   await checkInstagram();
   notify("Instagram disconnected");
 };
+$("#backToGrid").onclick = () => switchView("grid");
 $("#closeSettings").onclick = () => $("#settingsModal").classList.add("hidden");
 $("#settingsModal").onclick = event => { if (event.target.id === "settingsModal") $("#settingsModal").classList.add("hidden"); };
 $("#disconnectBtn").onclick = async () => {
