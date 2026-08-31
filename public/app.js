@@ -416,7 +416,6 @@ function renderInspector(hostSelector = "#inspector") {
     notify("Post updated");
   };
   $("#deleteEdit").onclick = async () => {
-    if (!window.confirm("Delete this post and its uploaded asset from the shared planner?")) return;
     const previousPosts = posts;
     const deleteButton = $("#deleteEdit");
     deleteButton.disabled = true;
