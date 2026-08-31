@@ -459,13 +459,18 @@ export async function handleRequest(req, res) {
       const error = url.searchParams.get("error_description") || url.searchParams.get("error");
       if (error) return redirect(res, `/?meta=error&message=${encodeURIComponent(error)}`);
       if (!code) return redirect(res, "/?meta=error&message=No%20authorization%20code%20returned");
-      if (!isValidOAuthState(state)) return redirect(res, "/?meta=error&message=OAuth%20state%20did%20not%20match");
+      if (!isValidOAuthState(state)) {
+        console.error("Instagram OAuth callback rejected: invalid or expired state");
+        return redirect(res, "/?meta=error&message=OAuth%20state%20did%20not%20match");
+      }
       try {
         const session = await exchangeCodeForToken(code);
         await writeSession(session);
+        console.log("Instagram OAuth callback completed and session was saved");
         return redirect(res, "/?meta=connected");
       } catch (e) {
-        return redirect(res, `/?meta=error&message=${encodeURIComponent(e.message)}`);
+        console.error("Instagram OAuth callback token exchange failed:", e.message);
+        return redirect(res, `/?meta=error&message=${encodeURIComponent(`Instagram connection failed: ${e.message}`)}`);
       }
     }
 
