@@ -112,6 +112,20 @@ function passwordsMatch(candidate) {
   const b = Buffer.from(PLANNER_PASSWORD);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
+function createOAuthState() {
+  const payload = `${Date.now()}.${crypto.randomBytes(24).toString("hex")}`;
+  const signature = crypto.createHmac("sha256", AUTH_SECRET).update(payload).digest("hex");
+  return `${payload}.${signature}`;
+}
+function isValidOAuthState(state) {
+  const [issued, nonce, signature] = String(state || "").split(".");
+  if (!issued || !nonce || !signature || Date.now() - Number(issued) > 1000 * 60 * 10) return false;
+  const payload = `${issued}.${nonce}`;
+  const expected = crypto.createHmac("sha256", AUTH_SECRET).update(payload).digest("hex");
+  const a = Buffer.from(signature);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 function contentType(file) {
   const ext = path.extname(file).toLowerCase();
   return ({
@@ -429,9 +443,7 @@ export async function handleRequest(req, res) {
 
     if (url.pathname === "/auth/instagram") {
       if (!APP_ID || !APP_SECRET) return redirect(res, "/?meta=config");
-      const state = crypto.randomBytes(24).toString("hex");
-      const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-      res.setHeader("Set-Cookie", `ig_oauth_state=${encodeURIComponent(state)}; HttpOnly; SameSite=Lax; Path=/${secure}; Max-Age=600`);
+      const state = createOAuthState();
       const auth = new URL("https://www.instagram.com/oauth/authorize");
       auth.searchParams.set("client_id", APP_ID);
       auth.searchParams.set("redirect_uri", REDIRECT_URI);
@@ -447,11 +459,10 @@ export async function handleRequest(req, res) {
       const error = url.searchParams.get("error_description") || url.searchParams.get("error");
       if (error) return redirect(res, `/?meta=error&message=${encodeURIComponent(error)}`);
       if (!code) return redirect(res, "/?meta=error&message=No%20authorization%20code%20returned");
-      if (!state || state !== readCookies(req).ig_oauth_state) return redirect(res, "/?meta=error&message=OAuth%20state%20did%20not%20match");
+      if (!isValidOAuthState(state)) return redirect(res, "/?meta=error&message=OAuth%20state%20did%20not%20match");
       try {
         const session = await exchangeCodeForToken(code);
         await writeSession(session);
-        res.setHeader("Set-Cookie", "ig_oauth_state=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
         return redirect(res, "/?meta=connected");
       } catch (e) {
         return redirect(res, `/?meta=error&message=${encodeURIComponent(e.message)}`);
