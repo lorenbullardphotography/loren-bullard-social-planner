@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loren Bullard Photography — Content Planner</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div id="toast" class="toast hidden"></div>
+
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <div class="monogram">LB</div>
+      <div><h1>Content Planner</h1><p>Loren Bullard Photography</p></div>
+    </div>
+    <nav>
+      <button class="nav active" data-view="grid"><span>▦</span> Grid Planner</button>
+      <button class="nav" data-view="calendar"><span>□</span> Calendar</button>
+      <button class="nav" data-view="library"><span>◫</span> Content Library</button>
+      <button class="nav" data-view="approvals"><span>✓</span> Approvals</button>
+    </nav>
+    <div class="side-bottom">
+      <section class="team-card">
+        <p class="eyebrow">SHARED WORKSPACE</p>
+        <strong id="teamSummary">Setting up shared planner…</strong>
+        <small id="teamDetail">Shared planner and Instagram connection for your whole team.</small>
+        <button id="identityBtn" class="ghost light">Your name</button>
+      </section>
+      <div class="account-mini">
+        <span id="connectionDot" class="status-dot"></span>
+        <div><strong>@lorenbullardphotography</strong><small id="sideStatus">Checking Instagram…</small></div>
+      </div>
+      <button id="settingsBtn" class="ghost light">Instagram settings</button>
+    </div>
+  </aside>
+
+  <main>
+    <header class="top">
+      <div>
+        <p class="eyebrow">LOREN BULLARD PHOTOGRAPHY</p>
+        <h2 id="pageTitle">Grid Planner</h2>
+      </div>
+      <div class="top-actions">
+        <button id="syncBtn" class="ghost">↻ Sync Instagram</button>
+        <button id="exportBtn" class="ghost">↓ Export backup</button>
+        <label class="ghost">↑ Import backup<input id="importInput" type="file" accept="application/json,.json" hidden></label>
+        <label class="primary">+ Add content<input id="upload" type="file" accept="image/*" multiple hidden></label>
+      </div>
+    </header>
+
+    <section id="view-grid" class="view">
+      <div class="intro">
+        <div><h3>Feed Preview</h3><p>Plan new content above your live Instagram posts. Drag planned posts into the order you want.</p></div>
+        <div class="stats">
+          <div><strong id="plannedCount">0</strong><span>Planned</span></div>
+          <div><strong id="postedCount">0</strong><span>Synced posts</span></div>
+          <div><strong id="approvalCount">0</strong><span>Need approval</span></div>
+        </div>
+      </div>
+      <div class="workspace">
+        <section class="phone-card">
+          <div class="profile-row">
+            <div class="avatar">LB</div>
+            <div><strong id="profileUsername">@lorenbullardphotography</strong><small id="profileMeta">Northwest Arkansas • Newborn • Family</small></div>
+            <span id="liveBadge" class="live-badge offline">Not connected</span>
+          </div>
+          <div id="grid" class="ig-grid"></div>
+          <div id="gridEmpty" class="empty hidden">Add content to start planning your grid.</div>
+        </section>
+        <aside id="inspector" class="inspector"></aside>
+      </div>
+      <section class="activity-panel">
+        <div class="intro slim">
+          <div><h3>Team Activity</h3><p>Recent edits, approvals, and syncs for the shared planner.</p></div>
+        </div>
+        <div id="activityList" class="activity-list"></div>
+      </section>
+    </section>
+
+    <section id="view-calendar" class="view hidden">
+      <div class="intro"><div><h3>Content Calendar</h3><p>See planned publishing dates at a glance.</p></div><div class="month-nav"><button id="prevMonth">‹</button><strong id="monthLabel"></strong><button id="nextMonth">›</button></div></div>
+      <div id="calendar" class="calendar"></div>
+    </section>
+
+    <section id="view-library" class="view hidden">
+      <div class="intro"><div><h3>Content Library</h3><p>All drafts and future posts in one place.</p></div><div class="filters"><button class="chip active" data-filter="all">All</button><button class="chip" data-filter="draft">Drafts</button><button class="chip" data-filter="planned">Planned</button><button class="chip" data-filter="approved">Approved</button></div></div>
+      <div id="library" class="library"></div>
+    </section>
+
+    <section id="view-approvals" class="view hidden">
+      <div class="intro"><div><h3>Approvals</h3><p>A simple review queue for you and your social media manager.</p></div></div>
+      <div id="approvalBoard" class="approval-board"></div>
+    </section>
+  </main>
+</div>
+
+<div id="settingsModal" class="modal-backdrop hidden">
+  <div class="modal">
+    <button id="closeSettings" class="modal-x">×</button>
+    <p class="eyebrow">INSTAGRAM CONNECTION</p>
+    <h3>@lorenbullardphotography</h3>
+    <div id="settingsStatus" class="connection-card"></div>
+    <div class="modal-actions">
+      <a id="connectLink" href="/auth/instagram" class="primary button-link">Connect Instagram</a>
+      <button id="modalSync" class="ghost">Sync posted content</button>
+      <button id="disconnectBtn" class="danger">Disconnect</button>
+    </div>
+    <p class="fine">The Instagram connection and planner live on this server, so you and your social media manager can use the same connection from separate browsers.</p>
+  </div>
+</div>
+
+<div id="identityModal" class="modal-backdrop hidden">
+  <div class="modal">
+    <button id="closeIdentity" class="modal-x">×</button>
+    <p class="eyebrow">TEAM PROFILE</p>
+    <h3>Your planner identity</h3>
+    <label class="field">Display name<input id="identityName" maxlength="80" placeholder="Loren"></label>
+    <label class="field">Role<select id="identityRole"><option>Photographer</option><option>Social Media Manager</option><option>Assistant</option><option>Editor</option></select></label>
+    <div class="modal-actions">
+      <button id="saveIdentity" class="primary">Save identity</button>
+    </div>
+    <p class="fine">Comments and activity updates will use this name so the shared planner stays clear for everyone.</p>
+  </div>
+</div>
+
+<template id="tileTpl">
+  <article class="tile"><img><div class="shade"><span class="tag"></span><span class="handle">⋮⋮</span></div><span class="type-icon"></span></article>
+</template>
+
+<script src="/app.js"></script>
+</body>
+</html>
