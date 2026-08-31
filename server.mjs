@@ -34,6 +34,54 @@ const REDIRECT_URI = process.env.INSTAGRAM_REDIRECT_URI || `http://localhost:${P
 const API_VERSION = process.env.META_API_VERSION || "v25.0";
 const PLANNER_PASSWORD = process.env.PLANNER_PASSWORD || "";
 const AUTH_SECRET = process.env.AUTH_SECRET || PLANNER_PASSWORD || "planner-development-secret";
+const ACCOUNT_SESSION_DAYS = 14;
+
+const ROLE_VALUES = ["Photographer", "Social Media Manager", "Assistant", "Editor"];
+function publicUser(user) {
+  return user ? { id: user.id, name: user.name, role: user.role } : null;
+}
+async function readUsers() {
+  const users = await readStored("planner-users", []);
+  return Array.isArray(users) ? users : [];
+}
+async function writeUsers(users) {
+  return writeStored("planner-users", users);
+}
+function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+  return `scrypt$${salt}$${crypto.scryptSync(String(password), salt, 64).toString("hex")}`;
+}
+function passwordMatches(password, stored) {
+  const [scheme, salt, digest] = String(stored || "").split("$");
+  if (scheme !== "scrypt" || !salt || !digest) return false;
+  const candidate = crypto.scryptSync(String(password || ""), salt, 64).toString("hex");
+  const a = Buffer.from(candidate), b = Buffer.from(digest);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function createAccountSession(userId) {
+  const issued = String(Date.now());
+  const payload = `${userId}.${issued}`;
+  const signature = crypto.createHmac("sha256", AUTH_SECRET).update(payload).digest("hex");
+  return `${payload}.${signature}`;
+}
+function userFromSession(req, users) {
+  const value = readCookies(req).planner_session || "";
+  const parts = value.split(".");
+  if (parts.length !== 3) return null;
+  const [userId, issued, signature] = parts;
+  if (!userId || !issued || !signature || Date.now() - Number(issued) > 1000 * 60 * 60 * 24 * ACCOUNT_SESSION_DAYS) return null;
+  const payload = `${userId}.${issued}`;
+  const expected = crypto.createHmac("sha256", AUTH_SECRET).update(payload).digest("hex");
+  const a = Buffer.from(signature), b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  return users.find(user => user.id === userId) || null;
+}
+function setAccountCookie(res, userId) {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  res.setHeader("Set-Cookie", `planner_session=${encodeURIComponent(createAccountSession(userId))}; HttpOnly; SameSite=Lax; Path=/${secure}; Max-Age=${ACCOUNT_SESSION_DAYS * 86400}`);
+}
+function clearAccountCookie(res) {
+  res.setHeader("Set-Cookie", "planner_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
+}
 
 function readJsonFile(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); }
@@ -411,22 +459,62 @@ export async function handleRequest(req, res) {
   try {
     await seedEnvironmentSession();
     const url = new URL(req.url, `http://${req.headers.host}`);
+    const users = await readUsers();
+    const account = userFromSession(req, users);
 
     if (url.pathname === "/auth/login" && req.method === "POST") {
       const body = await readBody(req);
-      if (!PLANNER_PASSWORD || !passwordsMatch(body.password)) {
-        return sendJson(res, 401, {error: "Incorrect planner password."});
+      const login = String(body.login || body.name || "").trim().toLowerCase();
+      let user = users.find(item => item.name.toLowerCase() === login);
+      let valid = user && passwordMatches(body.password, user.passwordHash);
+      // Keep existing deployments working: the old shared password can create
+      // the first Loren account, after which all sign-ins use named accounts.
+      if (!user && !users.length && PLANNER_PASSWORD && passwordsMatch(body.password) && (!login || login === "loren")) {
+        user = { id: crypto.randomUUID(), name: "Loren", role: "Photographer", passwordHash: hashPassword(body.password), createdAt: new Date().toISOString() };
+        await writeUsers([user]);
+        valid = true;
       }
-      setAuthCookie(res);
-      return sendJson(res, 200, {ok:true});
+      if (!valid) {
+        return sendJson(res, 401, {error: "That name or password didn’t match."});
+      }
+      setAccountCookie(res, user.id);
+      return sendJson(res, 200, {ok:true, user: publicUser(user)});
+    }
+    if (url.pathname === "/auth/register" && req.method === "POST") {
+      const body = await readBody(req);
+      const name = String(body.name || "").trim().slice(0, 80);
+      const role = ROLE_VALUES.includes(body.role) ? body.role : "Assistant";
+      const password = String(body.password || "");
+      if (name.length < 2) return sendJson(res, 400, {error: "Enter a display name."});
+      if (password.length < 8) return sendJson(res, 400, {error: "Use a password with at least 8 characters."});
+      if (users.some(item => item.name.toLowerCase() === name.toLowerCase())) return sendJson(res, 409, {error: "That display name is already in use."});
+      const user = { id: crypto.randomUUID(), name, role, passwordHash: hashPassword(password), createdAt: new Date().toISOString() };
+      await writeUsers([...users, user]);
+      setAccountCookie(res, user.id);
+      return sendJson(res, 201, {ok:true, user: publicUser(user)});
     }
     if (url.pathname === "/auth/logout" && req.method === "POST") {
-      clearAuthCookie(res);
+      clearAccountCookie(res);
       return sendJson(res, 200, {ok:true});
     }
-    if (PLANNER_PASSWORD && !isAuthenticated(req)) {
+    if (url.pathname === "/api/auth/me" && req.method === "GET") {
+      return sendJson(res, account ? 200 : 401, account ? { user: publicUser(account) } : { error: "Please sign in to the planner." });
+    }
+    if (url.pathname === "/api/auth/profile" && req.method === "PUT") {
+      if (!account) return sendJson(res, 401, {error: "Please sign in to the planner."});
+      const body = await readBody(req);
+      const name = String(body.name || "").trim().slice(0, 80);
+      const role = ROLE_VALUES.includes(body.role) ? body.role : account.role;
+      if (name.length < 2) return sendJson(res, 400, {error: "Enter a display name."});
+      if (users.some(item => item.id !== account.id && item.name.toLowerCase() === name.toLowerCase())) return sendJson(res, 409, {error: "That display name is already in use."});
+      account.name = name;
+      account.role = role;
+      await writeUsers(users);
+      return sendJson(res, 200, {user: publicUser(account)});
+    }
+    if (!account) {
       if (url.pathname.startsWith("/api/")) return sendJson(res, 401, {error: "Please sign in to the planner."});
-      if (url.pathname !== "/login.html" && url.pathname !== "/login.js") return redirect(res, "/login.html");
+      if (url.pathname !== "/login.html" && url.pathname !== "/login.js" && url.pathname !== "/auth/login" && url.pathname !== "/auth/register") return redirect(res, "/login.html");
     }
 
     if (url.pathname === "/api/planner" && req.method === "GET") {

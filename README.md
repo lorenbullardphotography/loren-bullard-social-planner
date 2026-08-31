@@ -17,6 +17,8 @@ A Planoly/Planable-style local content planner customized for **@lorenbullardpho
 - Published posts stay locked beneath future content
 - Synced Instagram captions, timestamps, formats, thumbnails, and permalinks
 - Server-side shared planner data, available to every browser using the same planner URL
+- Individual named accounts for Loren and the social media manager
+- Account sessions and passwords stored server-side; each account can update its name and role
 - Meta access token is stored server-side instead of inside browser JavaScript
 - Portable JSON backup export/import
 - Optimistic concurrency protection so simultaneous edits do not silently overwrite each other
@@ -52,9 +54,10 @@ Once connected, press **Sync Instagram**. The app fetches published media and pl
 - Do not share your `.env` file.
 - Do not commit `.data/instagram-session.json` to GitHub.
 - The app secret and Instagram access token are never stored in browser localStorage.
-- The Instagram connection and planner data are shared server-side. Browser storage only remembers the display name and role for that browser; it does not store planner posts or Instagram credentials.
+- The Instagram connection, planner data, and user accounts are shared server-side. Browser storage is only a convenience cache; it does not store planner posts or Instagram credentials.
 - To let you and your social media manager use it from separate computers, host this app on one reachable server and have both of you open that same URL. Running `localhost` on each computer creates two separate planners because each machine runs its own server/data folder.
-- Set `PLANNER_PASSWORD` in `.env` before sharing the hosted URL. This adds a shared sign-in gate for you and your social media manager; each person can use the same password.
+- On first launch, choose **Create account** to make the Loren account. Your social media manager can then create their own account from the same sign-in page. Both accounts see the same planner and Instagram connection when they use the same hosted URL.
+- Existing deployments may use `PLANNER_PASSWORD` for the first Loren sign-in; after that, named accounts are used.
 - For production hosting, use HTTPS and store `PLANNER_PASSWORD`, `INSTAGRAM_APP_SECRET`, and `INSTAGRAM_ACCESS_TOKEN` as private hosting environment variables.
 
 ## Publish the planner on Vercel
@@ -68,7 +71,7 @@ Also add these environment variables in the Vercel project:
 - `INSTAGRAM_APP_ID`
 - `INSTAGRAM_APP_SECRET`
 - `INSTAGRAM_REDIRECT_URI` (your production HTTPS callback URL)
-- `PLANNER_PASSWORD`
+- `PLANNER_PASSWORD` (optional legacy first-account migration)
 - `AUTH_SECRET` (optional when `PLANNER_PASSWORD` is set, but recommended)
 
 Set the Meta callback URL to:
@@ -85,7 +88,7 @@ Do not use GitHub Pages for this app: it cannot run the server, protect the page
 
 ## Optional future additions
 
-- Shared cloud database + separate team logins
+- Granular team permissions and invitations
 - Real-time commenting
 - File upload storage in the cloud
 - Meta content publishing/scheduling
@@ -96,4 +99,4 @@ Do not use GitHub Pages for this app: it cannot run the server, protect the page
 
 ## Current product boundaries
 
-This is a strong planning and review workspace, but it is not yet a full publishing platform. Before relying on it as the system of record for a larger team, add durable cloud asset storage, individual user accounts/permissions, direct Meta publishing, timezone-aware scheduling, notifications, and platform analytics. The JSON backup in the top bar is the recommended safety net for the current local-file storage model.
+This is a strong planning and review workspace, but it is not yet a full publishing platform. Before relying on it as the system of record for a larger team, add durable cloud asset storage, granular user permissions, direct Meta publishing, timezone-aware scheduling, notifications, and platform analytics. The JSON backup in the top bar is the recommended safety net for the current local-file storage model.

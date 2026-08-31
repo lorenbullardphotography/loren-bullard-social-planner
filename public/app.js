@@ -20,6 +20,13 @@ let plannerVersion = 0;
 let currentUser = loadUser();
 let initialInstagramSyncDone = false;
 
+async function loadAccount() {
+  const data = await api("/api/auth/me");
+  if (!data.user) throw new Error("Please sign in to the planner.");
+  currentUser = data.user;
+  saveUser();
+}
+
 function loadUser() {
   try {
     const saved = JSON.parse(localStorage.getItem(USER_KEY));
@@ -208,6 +215,8 @@ function renderPlannerSettings() {
   $("#settingsConnectLink").classList.toggle("hidden", connected);
   $("#settingsSync").classList.toggle("hidden", !connected);
   $("#settingsDisconnect").classList.toggle("hidden", !connected);
+  $("#accountSettingsName").value = currentUser.name;
+  $("#accountSettingsRole").value = currentUser.role;
 }
 function renderAttention() {
   const items = future().filter(post => isOverdue(post) || workflowOf(post) === "needs-review" || workflowOf(post) === "ready-meta" || (post.assignee && post.assignee === currentUser.name)).sort((a, b) => {
@@ -693,12 +702,33 @@ $("#identityModal").onclick = event => { if (event.target.id === "identityModal"
 $("#saveIdentity").onclick = async () => {
   const name = $("#identityName").value.trim() || "Loren";
   const role = $("#identityRole").value;
-  currentUser = { name, role };
-  saveUser();
-  $("#identityModal").classList.add("hidden");
-  await loadPlanner();
-  renderAll();
-  notify("Identity updated");
+  try {
+    const data = await api("/api/auth/profile", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, role }) });
+    currentUser = data.user;
+    saveUser();
+    $("#identityModal").classList.add("hidden");
+    await loadPlanner();
+    renderAll();
+    notify("Account updated");
+  } catch (error) { notify(error.message); }
+};
+$("#logoutBtn").onclick = async () => {
+  await fetch("/auth/logout", { method: "POST" });
+  location.href = "/login.html";
+};
+$("#saveAccountSettings").onclick = async () => {
+  try {
+    const data = await api("/api/auth/profile", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("#accountSettingsName").value.trim(), role: $("#accountSettingsRole").value }) });
+    currentUser = data.user;
+    saveUser();
+    await loadPlanner();
+    renderAll();
+    notify("User settings saved");
+  } catch (error) { notify(error.message); }
+};
+$("#accountLogoutBtn").onclick = async () => {
+  await fetch("/auth/logout", { method: "POST" });
+  location.href = "/login.html";
 };
 
 const query = new URLSearchParams(location.search);
@@ -719,6 +749,7 @@ if (query.get("meta") === "error") {
 }
 
 async function init() {
+  await loadAccount();
   await loadPlanner();
   renderAll();
   await heartbeat();

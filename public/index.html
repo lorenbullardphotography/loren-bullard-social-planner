@@ -112,6 +112,7 @@
         <section class="settings-card"><p class="eyebrow">CONTENT SYSTEM</p><h4>Content pillars</h4><p class="settings-help">One per line. These appear on every planned post.</p><textarea id="settingsPillars" rows="9"></textarea></section>
         <section class="settings-card"><p class="eyebrow">CONTENT SYSTEM</p><h4>Formats</h4><p class="settings-help">One per line. Add any format your team uses.</p><textarea id="settingsFormats" rows="6"></textarea><h4 class="settings-subhead">Content goals</h4><textarea id="settingsGoals" rows="6"></textarea></section>
         <section class="settings-card"><p class="eyebrow">INSTAGRAM SYNC</p><h4>Photos to sync</h4><p class="settings-help">Limit how many recent Instagram posts are pulled into the shared grid each time you sync.</p><label class="setting-number"><input id="settingsSyncCount" type="number" min="3" max="100"><span>recent posts</span></label><div id="settingsConnection" class="connection-card"></div><div class="modal-actions"><a id="settingsConnectLink" href="/auth/instagram" class="primary button-link">Connect Instagram</a><button id="settingsSync" class="ghost">Sync Instagram now</button><button id="settingsDisconnect" class="danger">Disconnect Instagram</button></div></section>
+        <section class="settings-card"><p class="eyebrow">YOUR ACCOUNT</p><h4>User settings</h4><p class="settings-help">Choose the name and role your teammates will see in comments, activity, and assignments.</p><label class="field">Display name<input id="accountSettingsName" maxlength="80" placeholder="Loren"></label><label class="field account-setting-field">Role<select id="accountSettingsRole"><option>Photographer</option><option>Social Media Manager</option><option>Assistant</option><option>Editor</option></select></label><div class="modal-actions account-actions"><button id="saveAccountSettings" class="primary">Save user settings</button><button id="accountLogoutBtn" class="danger">Sign out</button></div></section>
       </div>
     </section>
   </main>
@@ -141,8 +142,9 @@
     <label class="field">Role<select id="identityRole"><option>Photographer</option><option>Social Media Manager</option><option>Assistant</option><option>Editor</option></select></label>
     <div class="modal-actions">
       <button id="saveIdentity" class="primary">Save identity</button>
+      <button id="logoutBtn" class="danger">Sign out</button>
     </div>
-    <p class="fine">Comments and activity updates will use this name so the shared planner stays clear for everyone.</p>
+    <p class="fine">Your account is shared across browsers. Comments and activity updates use this name so the shared planner stays clear for everyone.</p>
   </div>
 </div>
 
