@@ -61,14 +61,15 @@ Once connected, press **Sync Instagram**. The app fetches published media and pl
 
 Vercel deploys the app from GitHub automatically. This repository includes the Vercel routing adapter in `api/index.mjs` and `vercel.json`.
 
-For durable shared data, connect a Neon Postgres database through Vercel's Marketplace and add these environment variables in the Vercel project:
+For durable shared data, connect a Supabase Postgres database through Vercel's Marketplace. The integration supplies the database connection variables automatically. The app accepts `POSTGRES_URL`, `POSTGRES_URL_NON_POOLING`, or `DATABASE_URL`.
 
-- `DATABASE_URL`
+Also add these environment variables in the Vercel project:
+
 - `INSTAGRAM_APP_ID`
 - `INSTAGRAM_APP_SECRET`
 - `INSTAGRAM_REDIRECT_URI` (your production HTTPS callback URL)
 - `PLANNER_PASSWORD`
-- `AUTH_SECRET` (a long random value)
+- `AUTH_SECRET` (optional when `PLANNER_PASSWORD` is set, but recommended)
 
 Set the Meta callback URL to:
 
