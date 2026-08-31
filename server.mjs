@@ -391,6 +391,7 @@ export async function handleRequest(req, res) {
 
     if (url.pathname === "/api/instagram/status") {
       const session = await readSession();
+      console.log("Instagram status session present:", Boolean(session.access_token));
       if (!session.access_token) {
         return sendJson(res, 200, publicInstagramStatus(session, {redirect_uri: REDIRECT_URI}));
       }
@@ -415,6 +416,7 @@ export async function handleRequest(req, res) {
 
     if (url.pathname === "/api/instagram/sync" && req.method === "POST") {
       const session = await readSession();
+      console.log("Instagram sync session present:", Boolean(session.access_token));
       if (!session.access_token) return sendJson(res, 401, {error:"Instagram is not connected yet."});
       const body = await readBody(req);
       const planner = await readPlanner();
