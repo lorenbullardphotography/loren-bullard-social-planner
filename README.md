@@ -37,7 +37,7 @@ You need Node.js 18 or newer.
 
    http://localhost:8787
 
-There are **no npm packages to install**.
+For local use, no packages are required unless you set `DATABASE_URL`. Vercel installs the listed dependency during deployment.
 
 ## Connect @lorenbullardphotography to Instagram
 
@@ -57,9 +57,28 @@ Once connected, press **Sync Instagram**. The app fetches published media and pl
 - Set `PLANNER_PASSWORD` in `.env` before sharing the hosted URL. This adds a shared sign-in gate for you and your social media manager; each person can use the same password.
 - For production hosting, use HTTPS and store `PLANNER_PASSWORD`, `INSTAGRAM_APP_SECRET`, and `INSTAGRAM_ACCESS_TOKEN` as private hosting environment variables.
 
+## Publish the planner on Vercel
+
+Vercel deploys the app from GitHub automatically. This repository includes the Vercel routing adapter in `api/index.mjs` and `vercel.json`.
+
+For durable shared data, connect a Neon Postgres database through Vercel's Marketplace and add these environment variables in the Vercel project:
+
+- `DATABASE_URL`
+- `INSTAGRAM_APP_ID`
+- `INSTAGRAM_APP_SECRET`
+- `INSTAGRAM_REDIRECT_URI` (your production HTTPS callback URL)
+- `PLANNER_PASSWORD`
+- `AUTH_SECRET` (a long random value)
+
+Set the Meta callback URL to:
+
+`https://your-planner-domain.com/auth/instagram/callback`
+
+The local JSON files remain available as a development fallback when `DATABASE_URL` is absent.
+
 ## Publish the planner at your domain
 
-The included `render.yaml` prepares the app for a Node host with persistent storage. Deploy the repository as a Render web service, add the environment values marked `sync: false`, and attach a subdomain such as `planner.yourdomain.com`. Render will provide HTTPS; add the resulting callback URL to Meta and set the same value as `INSTAGRAM_REDIRECT_URI`.
+The included `render.yaml` is retained as an alternative for a traditional Node host with persistent storage. It is not needed for Vercel.
 
 Do not use GitHub Pages for this app: it cannot run the server, protect the page with the password gate, or keep the Instagram token private.
 

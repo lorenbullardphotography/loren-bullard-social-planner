@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { deleteStored, readStored, storageMode, writeStored } from "./lib/store.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
@@ -25,37 +26,34 @@ function loadDotEnv() {
 }
 loadDotEnv();
 
-const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, ".data");
-const sessionFile = path.join(dataDir, "instagram-session.json");
-const plannerFile = path.join(dataDir, "planner-data.json");
-fs.mkdirSync(dataDir, { recursive: true });
-
 const PORT = Number(process.env.PORT || 8787);
 const APP_ID = process.env.INSTAGRAM_APP_ID || "";
 const APP_SECRET = process.env.INSTAGRAM_APP_SECRET || "";
 const REDIRECT_URI = process.env.INSTAGRAM_REDIRECT_URI || `http://localhost:${PORT}/auth/instagram/callback`;
 const API_VERSION = process.env.META_API_VERSION || "v25.0";
-const oauthStates = new Set();
-const authSessions = new Set();
 const PLANNER_PASSWORD = process.env.PLANNER_PASSWORD || "";
+const AUTH_SECRET = process.env.AUTH_SECRET || PLANNER_PASSWORD || "planner-development-secret";
 
 function readJsonFile(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); }
   catch { return fallback; }
 }
 
-function readSession() {
-  return readJsonFile(sessionFile, {});
+async function readSession() {
+  return readStored("instagram-session", {});
 }
-function writeSession(value) {
-  fs.writeFileSync(sessionFile, JSON.stringify(value, null, 2));
+async function writeSession(value) {
+  return writeStored("instagram-session", value);
 }
-if (process.env.INSTAGRAM_ACCESS_TOKEN && !readSession().access_token) {
-  writeSession({
-    access_token: process.env.INSTAGRAM_ACCESS_TOKEN,
-    source: "environment",
-    stored_at: new Date().toISOString()
-  });
+async function seedEnvironmentSession() {
+  const existing = await readSession();
+  if (process.env.INSTAGRAM_ACCESS_TOKEN && !existing.access_token) {
+    await writeSession({
+      access_token: process.env.INSTAGRAM_ACCESS_TOKEN,
+      source: "environment",
+      stored_at: new Date().toISOString()
+    });
+  }
 }
 
 function sendJson(res, status, data) {
@@ -91,10 +89,20 @@ function readCookies(req) {
   }));
 }
 function isAuthenticated(req) {
-  return !PLANNER_PASSWORD || authSessions.has(readCookies(req).planner_auth);
+  if (!PLANNER_PASSWORD) return true;
+  const value = readCookies(req).planner_auth || "";
+  const [issued, signature] = value.split(".");
+  if (!issued || !signature || Date.now() - Number(issued) > 1000 * 60 * 60 * 24 * 14) return false;
+  const expected = crypto.createHmac("sha256", AUTH_SECRET).update(issued).digest("hex");
+  const a = Buffer.from(signature);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 function setAuthCookie(res, token) {
-  res.setHeader("Set-Cookie", `planner_auth=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/`);
+  const issued = String(Date.now());
+  const signature = crypto.createHmac("sha256", AUTH_SECRET).update(issued).digest("hex");
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  res.setHeader("Set-Cookie", `planner_auth=${encodeURIComponent(`${issued}.${signature}`)}; HttpOnly; SameSite=Lax; Path=/${secure}; Max-Age=1209600`);
 }
 function clearAuthCookie(res) {
   res.setHeader("Set-Cookie", "planner_auth=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
@@ -193,7 +201,7 @@ async function refreshLongLivedToken(session) {
     stored_at: new Date().toISOString(),
     source: "refreshed"
   };
-  writeSession(next);
+  await writeSession(next);
   return next;
 }
 
@@ -242,8 +250,8 @@ function defaultPlanner() {
   return { version: 0, posts: [], team: [], activity: [], updatedAt: null };
 }
 
-function readPlanner() {
-  const planner = readJsonFile(plannerFile, defaultPlanner());
+async function readPlanner() {
+  const planner = await readStored("planner-data", defaultPlanner());
   return {
     version: Number(planner?.version || 0),
     posts: Array.isArray(planner?.posts) ? planner.posts.map(normalizePost) : [],
@@ -273,7 +281,7 @@ function addActivity(planner, text) {
   planner.activity = planner.activity.slice(0, 40);
 }
 
-function writePlanner(nextPlanner) {
+async function writePlanner(nextPlanner) {
   const normalized = {
     version: Number(nextPlanner?.version || 0) + 1,
     posts: Array.isArray(nextPlanner?.posts) ? nextPlanner.posts.map(normalizePost) : [],
@@ -281,8 +289,7 @@ function writePlanner(nextPlanner) {
     activity: Array.isArray(nextPlanner?.activity) ? nextPlanner.activity.slice(0, 40) : [],
     updatedAt: new Date().toISOString()
   };
-  fs.writeFileSync(plannerFile, JSON.stringify(normalized, null, 2));
-  return normalized;
+  return writeStored("planner-data", normalized);
 }
 
 function mergeInstagramPosts(planner, media, actorName = "Instagram sync") {
@@ -314,8 +321,9 @@ function mergeInstagramPosts(planner, media, actorName = "Instagram sync") {
   }
 }
 
-const server = http.createServer(async (req, res) => {
+export async function handleRequest(req, res) {
   try {
+    await seedEnvironmentSession();
     const url = new URL(req.url, `http://${req.headers.host}`);
 
     if (url.pathname === "/auth/login" && req.method === "POST") {
@@ -323,13 +331,10 @@ const server = http.createServer(async (req, res) => {
       if (!PLANNER_PASSWORD || !passwordsMatch(body.password)) {
         return sendJson(res, 401, {error: "Incorrect planner password."});
       }
-      const token = crypto.randomBytes(32).toString("hex");
-      authSessions.add(token);
-      setAuthCookie(res, token);
+      setAuthCookie(res);
       return sendJson(res, 200, {ok:true});
     }
     if (url.pathname === "/auth/logout" && req.method === "POST") {
-      authSessions.delete(readCookies(req).planner_auth);
       clearAuthCookie(res);
       return sendJson(res, 200, {ok:true});
     }
@@ -339,39 +344,39 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/planner" && req.method === "GET") {
-      return sendJson(res, 200, readPlanner());
+      return sendJson(res, 200, await readPlanner());
     }
 
     if (url.pathname === "/api/planner/bootstrap" && req.method === "POST") {
       const body = await readBody(req);
-      const planner = readPlanner();
+      const planner = await readPlanner();
       if (!planner.posts.length && Array.isArray(body.seedPosts) && body.seedPosts.length) {
         planner.posts = body.seedPosts.map(normalizePost);
         upsertTeamMember(planner, body.actor);
         addActivity(planner, `${body?.actor?.name || "Team"} started the shared planner`);
-        return sendJson(res, 200, writePlanner(planner));
+        return sendJson(res, 200, await writePlanner(planner));
       }
       if (body?.actor?.name) {
         upsertTeamMember(planner, body.actor);
-        return sendJson(res, 200, writePlanner(planner));
+        return sendJson(res, 200, await writePlanner(planner));
       }
       return sendJson(res, 200, planner);
     }
 
     if (url.pathname === "/api/planner" && req.method === "PUT") {
       const body = await readBody(req);
-      const planner = readPlanner();
+      const planner = await readPlanner();
       if (Number.isFinite(Number(body.version)) && Number(body.version) !== planner.version) {
         return sendJson(res, 409, { error: "This planner changed in another browser. Refresh to review the latest version before saving.", planner });
       }
       planner.posts = Array.isArray(body.posts) ? body.posts.map(post => normalizePost({ ...post, updatedBy: body?.actor?.name || post.updatedBy })) : planner.posts;
       upsertTeamMember(planner, body.actor);
       addActivity(planner, body.reason ? `${body?.actor?.name || "Team"} ${body.reason}` : "");
-      return sendJson(res, 200, writePlanner(planner));
+      return sendJson(res, 200, await writePlanner(planner));
     }
 
     if (url.pathname === "/api/instagram/status") {
-      const session = readSession();
+      const session = await readSession();
       if (!session.access_token) {
         return sendJson(res, 200, publicInstagramStatus(session, {redirect_uri: REDIRECT_URI}));
       }
@@ -384,7 +389,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/instagram/media") {
-      const session = readSession();
+      const session = await readSession();
       if (!session.access_token) return sendJson(res, 401, {error:"Instagram is not connected yet."});
       const [profile, media] = await Promise.all([
         getInstagramProfile(session.access_token),
@@ -394,10 +399,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/instagram/sync" && req.method === "POST") {
-      const session = readSession();
+      const session = await readSession();
       if (!session.access_token) return sendJson(res, 401, {error:"Instagram is not connected yet."});
       const body = await readBody(req);
-      const planner = readPlanner();
+      const planner = await readPlanner();
       const [profile, media] = await Promise.all([
         getInstagramProfile(session.access_token),
         getInstagramMedia(session.access_token)
@@ -405,27 +410,28 @@ const server = http.createServer(async (req, res) => {
       upsertTeamMember(planner, body.actor);
       mergeInstagramPosts(planner, media, body?.actor?.name || "Instagram sync");
       addActivity(planner, `${body?.actor?.name || "Team"} synced Instagram`);
-      const saved = writePlanner(planner);
-      writeSession({...session, last_synced_at: new Date().toISOString()});
+      const saved = await writePlanner(planner);
+      await writeSession({...session, last_synced_at: new Date().toISOString()});
       return sendJson(res, 200, { profile, mediaCount: media.length, planner: saved });
     }
 
     if (url.pathname === "/api/instagram/refresh" && req.method === "POST") {
-      const session = readSession();
+      const session = await readSession();
       if (!session.access_token) return sendJson(res, 401, {error:"Instagram is not connected yet."});
       const refreshed = await refreshLongLivedToken(session);
       return sendJson(res, 200, {ok:true, stored_at:refreshed.stored_at});
     }
 
     if (url.pathname === "/api/instagram/disconnect" && req.method === "POST") {
-      try { fs.unlinkSync(sessionFile); } catch {}
+      await deleteStored("instagram-session");
       return sendJson(res, 200, {ok:true});
     }
 
     if (url.pathname === "/auth/instagram") {
       if (!APP_ID || !APP_SECRET) return redirect(res, "/?meta=config");
       const state = crypto.randomBytes(24).toString("hex");
-      oauthStates.add(state);
+      const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+      res.setHeader("Set-Cookie", `ig_oauth_state=${encodeURIComponent(state)}; HttpOnly; SameSite=Lax; Path=/${secure}; Max-Age=600`);
       const auth = new URL("https://www.instagram.com/oauth/authorize");
       auth.searchParams.set("client_id", APP_ID);
       auth.searchParams.set("redirect_uri", REDIRECT_URI);
@@ -441,11 +447,11 @@ const server = http.createServer(async (req, res) => {
       const error = url.searchParams.get("error_description") || url.searchParams.get("error");
       if (error) return redirect(res, `/?meta=error&message=${encodeURIComponent(error)}`);
       if (!code) return redirect(res, "/?meta=error&message=No%20authorization%20code%20returned");
-      if (!state || !oauthStates.has(state)) return redirect(res, "/?meta=error&message=OAuth%20state%20did%20not%20match");
+      if (!state || state !== readCookies(req).ig_oauth_state) return redirect(res, "/?meta=error&message=OAuth%20state%20did%20not%20match");
       try {
         const session = await exchangeCodeForToken(code);
-        writeSession(session);
-        oauthStates.delete(state);
+        await writeSession(session);
+        res.setHeader("Set-Cookie", "ig_oauth_state=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
         return redirect(res, "/?meta=connected");
       } catch (e) {
         return redirect(res, `/?meta=error&message=${encodeURIComponent(e.message)}`);
@@ -465,11 +471,16 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     sendJson(res, 500, {error:e.message || "Server error"});
   }
-});
+}
 
-server.listen(PORT, () => {
-  console.log(`\nLoren Bullard Content Planner`);
-  console.log(`Open: http://localhost:${PORT}`);
-  console.log(APP_ID && APP_SECRET ? "Meta app credentials: configured" : "Meta app credentials: not configured yet");
-  console.log("");
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const server = http.createServer(handleRequest);
+  server.listen(PORT, async () => {
+    await seedEnvironmentSession();
+    console.log(`\nLoren Bullard Content Planner`);
+    console.log(`Open: http://localhost:${PORT}`);
+    console.log(APP_ID && APP_SECRET ? "Meta app credentials: configured" : "Meta app credentials: not configured yet");
+    console.log(`Storage: ${storageMode()}`);
+    console.log("");
+  });
+}
