@@ -7,6 +7,7 @@ import { deleteStored, readStored, storageMode, writeStored } from "./lib/store.
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
+const uploadsDir = path.join(publicDir, "uploads");
 
 function loadDotEnv() {
   const envPath = path.join(__dirname, ".env");
@@ -69,7 +70,7 @@ function readBody(req) {
     let raw = "";
     req.on("data", chunk => {
       raw += chunk;
-      if (raw.length > 10 * 1024 * 1024) {
+      if (raw.length > 45 * 1024 * 1024) {
         reject(new Error("Request body is too large."));
         req.destroy();
       }
@@ -138,6 +139,9 @@ function contentType(file) {
     ".jpeg":"image/jpeg",
     ".webp":"image/webp",
     ".ico":"image/x-icon"
+    ,".mp4":"video/mp4"
+    ,".mov":"video/quicktime"
+    ,".webm":"video/webm"
   })[ext] || "application/octet-stream";
 }
 async function fetchJson(url, options={}) {
@@ -160,11 +164,11 @@ async function getInstagramProfile(token) {
   url.searchParams.set("access_token", token);
   return fetchJson(url);
 }
-async function getInstagramMedia(token) {
+async function getInstagramMedia(token, limit = 12) {
   const all = [];
   let url = new URL(`https://graph.instagram.com/${API_VERSION}/me/media`);
   url.searchParams.set("fields", "id,caption,media_type,media_url,thumbnail_url,permalink,timestamp");
-  url.searchParams.set("limit", "100");
+  url.searchParams.set("limit", String(Math.min(100, Math.max(3, Number(limit) || 12))));
   url.searchParams.set("access_token", token);
 
   for (let page = 0; page < 10 && url; page++) {
@@ -173,7 +177,7 @@ async function getInstagramMedia(token) {
     const next = result.paging?.next;
     url = next ? new URL(next) : null;
   }
-  return all;
+  return all.slice(0, Math.min(100, Math.max(3, Number(limit) || 12)));
 }
 async function exchangeCodeForToken(code) {
   const body = new URLSearchParams({
@@ -254,9 +258,10 @@ function normalizePost(post) {
     id: String(post?.id || crypto.randomUUID()),
     metaId: post?.metaId ? String(post.metaId) : "",
     image: String(post?.image || ""),
+    assetKind: post?.assetKind === "video" ? "video" : "image",
     status: post?.status === "posted" ? "posted" : (post?.status === "draft" ? "draft" : "planned"),
     approval: ["draft", "needs-review", "approved"].includes(post?.approval) ? post.approval : "draft",
-    type: ["IMAGE", "REEL", "CAROUSEL"].includes(post?.type) ? post.type : "IMAGE",
+    type: String(post?.type || "IMAGE").trim().toUpperCase().slice(0, 30) || "IMAGE",
     date: String(post?.date || ""),
     time: String(post?.time || ""),
     scheduleState: ["draft", "ready", "scheduled"].includes(post?.scheduleState) ? post.scheduleState : "draft",
@@ -290,7 +295,24 @@ function normalizePost(post) {
 }
 
 function defaultPlanner() {
-  return { version: 0, posts: [], team: [], activity: [], updatedAt: null };
+  return { version: 0, posts: [], team: [], activity: [], settings: defaultSettings(), updatedAt: null };
+}
+function defaultSettings() {
+  return {
+    pillars: ["Newborn education", "Family sessions", "Motherhood", "Behind the scenes", "Client stories", "Photographer education", "Personal connection", "Offers and availability"],
+    formats: ["IMAGE", "REEL", "CAROUSEL"],
+    goals: ["Educate", "Connect", "Showcase work", "Book sessions", "Build trust"],
+    syncPhotoCount: 12
+  };
+}
+function normalizeSettings(settings) {
+  const base = defaultSettings();
+  return {
+    pillars: Array.isArray(settings?.pillars) && settings.pillars.length ? settings.pillars.map(item => String(item).trim()).filter(Boolean).slice(0, 40) : base.pillars,
+    formats: Array.isArray(settings?.formats) && settings.formats.length ? settings.formats.map(item => String(item).trim().toUpperCase()).filter(Boolean).slice(0, 20) : base.formats,
+    goals: Array.isArray(settings?.goals) && settings.goals.length ? settings.goals.map(item => String(item).trim()).filter(Boolean).slice(0, 30) : base.goals,
+    syncPhotoCount: Math.min(100, Math.max(3, Number(settings?.syncPhotoCount) || base.syncPhotoCount))
+  };
 }
 
 async function readPlanner() {
@@ -300,6 +322,7 @@ async function readPlanner() {
     posts: Array.isArray(planner?.posts) ? planner.posts.map(normalizePost) : [],
     team: Array.isArray(planner?.team) ? planner.team : [],
     activity: Array.isArray(planner?.activity) ? planner.activity.slice(0, 40) : [],
+    settings: normalizeSettings(planner?.settings),
     updatedAt: planner?.updatedAt || null
   };
 }
@@ -330,6 +353,7 @@ async function writePlanner(nextPlanner) {
     posts: Array.isArray(nextPlanner?.posts) ? nextPlanner.posts.map(normalizePost) : [],
     team: Array.isArray(nextPlanner?.team) ? nextPlanner.team : [],
     activity: Array.isArray(nextPlanner?.activity) ? nextPlanner.activity.slice(0, 40) : [],
+    settings: normalizeSettings(nextPlanner?.settings),
     updatedAt: new Date().toISOString()
   };
   return writeStored("planner-data", normalized);
@@ -438,6 +462,7 @@ export async function handleRequest(req, res) {
         return sendJson(res, 409, { error: "This planner changed in another browser. Refresh to review the latest version before saving.", planner });
       }
       planner.posts = Array.isArray(body.posts) ? body.posts.map(post => normalizePost({ ...post, updatedBy: body?.actor?.name || post.updatedBy })) : planner.posts;
+      planner.settings = normalizeSettings(body.settings || planner.settings);
       upsertTeamMember(planner, body.actor);
       addActivity(planner, body.reason ? `${body?.actor?.name || "Team"} ${body.reason}` : "");
       return sendJson(res, 200, await writePlanner(planner));
@@ -476,7 +501,7 @@ export async function handleRequest(req, res) {
       const planner = await readPlanner();
       const [profile, media] = await Promise.all([
         getInstagramProfile(session.access_token),
-        getInstagramMedia(session.access_token)
+        getInstagramMedia(session.access_token, planner.settings.syncPhotoCount)
       ]);
       upsertTeamMember(planner, body.actor);
       mergeInstagramPosts(planner, media, body?.actor?.name || "Instagram sync");
@@ -484,6 +509,21 @@ export async function handleRequest(req, res) {
       const saved = await writePlanner(planner);
       await writeSession({...session, last_synced_at: new Date().toISOString()});
       return sendJson(res, 200, { profile, mediaCount: media.length, planner: saved });
+    }
+
+    if (url.pathname === "/api/assets" && req.method === "POST") {
+      const body = await readBody(req);
+      const match = String(body?.data || "").match(/^data:([^;]+);base64,(.+)$/s);
+      if (!match) return sendJson(res, 400, { error: "Please choose a valid image or video file." });
+      const mime = match[1].toLowerCase();
+      if (!mime.startsWith("image/") && !mime.startsWith("video/")) return sendJson(res, 400, { error: "Only images and reels are supported." });
+      const bytes = Buffer.from(match[2], "base64");
+      if (bytes.length > 30 * 1024 * 1024) return sendJson(res, 413, { error: "Assets must be 30 MB or smaller." });
+      fs.mkdirSync(uploadsDir, { recursive: true });
+      const ext = mime === "video/quicktime" ? "mov" : (mime.split("/")[1] || "bin").replace(/[^a-z0-9]/g, "");
+      const filename = `${crypto.randomUUID()}.${ext}`;
+      fs.writeFileSync(path.join(uploadsDir, filename), bytes);
+      return sendJson(res, 201, { url: `/uploads/${filename}`, kind: mime.startsWith("video/") ? "video" : "image" });
     }
 
     if (url.pathname === "/api/instagram/refresh" && req.method === "POST") {

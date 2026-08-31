@@ -1,6 +1,7 @@
 const USER_KEY = "lb-content-planner-user-v1";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 let selected = null, dragId = null, currentView = "grid", libraryFilter = "all", librarySearch = "";
+let settings = { pillars: [], formats: ["IMAGE", "REEL", "CAROUSEL"], goals: [], syncPhotoCount: 12 };
 let calCursor = new Date(); calCursor.setDate(1);
 
 const demo = (text, bg, fg = "#fff") => `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000"><rect width="100%" height="100%" fill="${bg}"/><circle cx="500" cy="390" r="165" fill="rgba(255,255,255,.15)"/><text x="500" y="585" text-anchor="middle" font-family="Georgia" font-size="57" fill="${fg}">${text}</text></svg>`)}`;
@@ -56,7 +57,7 @@ const WORKFLOW_LABELS = {
   "needs-review": "Needs review", approved: "Approved", "ready-meta": "Ready for Meta",
   "meta-scheduled": "Scheduled in Meta", published: "Published", archived: "Archived"
 };
-const PILLARS = ["Newborn education", "Family sessions", "Motherhood", "Behind the scenes", "Client stories", "Photographer education", "Personal connection", "Offers and availability"];
+const DEFAULT_PILLARS = ["Newborn education", "Family sessions", "Motherhood", "Behind the scenes", "Client stories", "Photographer education", "Personal connection", "Offers and availability"];
 const CHECKLIST = ["Select assets", "Write caption", "Add hashtags", "Choose audio / cover", "Review", "Approve", "Schedule in Meta", "Confirm published"];
 function workflowOf(post) {
   if (post.status === "posted") return "published";
@@ -82,6 +83,7 @@ function setPlanner(data) {
   team = Array.isArray(data?.team) ? data.team : [];
   activity = Array.isArray(data?.activity) ? data.activity : [];
   presence = Array.isArray(data?.presence) ? data.presence : [];
+  settings = { pillars: DEFAULT_PILLARS, formats: ["IMAGE", "REEL", "CAROUSEL"], goals: ["Educate", "Connect", "Showcase work", "Book sessions", "Build trust"], syncPhotoCount: 12, ...(data?.settings || {}) };
   plannerVersion = Number(data?.version || 0);
   if (selected && !posts.find(post => post.id === selected)) selected = null;
 }
@@ -132,7 +134,7 @@ async function persistPlanner(reason) {
     const saved = await api("/api/planner", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ version: plannerVersion, posts, actor: currentUser, reason })
+      body: JSON.stringify({ version: plannerVersion, posts, settings, actor: currentUser, reason })
     });
     setPlanner(saved);
   } catch (error) {
@@ -181,6 +183,20 @@ function renderAll() {
   renderApprovals();
   renderTeam();
   renderActivity();
+  renderPlannerSettings();
+}
+function renderPlannerSettings() {
+  const pillars = $("#settingsPillars");
+  if (!pillars) return;
+  pillars.value = settings.pillars.join("\n");
+  $("#settingsGoals").value = settings.goals.join("\n");
+  $("#settingsSyncCount").value = settings.syncPhotoCount;
+  $("#settingsFormats").value = settings.formats.join("\n");
+  const connected = igStatus.connected;
+  $("#settingsConnection").innerHTML = connected ? "<b>Connected ✓</b><br>@" + esc(igStatus.profile?.username || "lorenbullardphotography") + " · " + (igStatus.profile?.media_count ?? "—") + " published items" : "<b>Instagram not connected</b><br>Connect it to sync live posts into the shared planner.";
+  $("#settingsConnectLink").classList.toggle("hidden", connected);
+  $("#settingsSync").classList.toggle("hidden", !connected);
+  $("#settingsDisconnect").classList.toggle("hidden", !connected);
 }
 function renderAttention() {
   const items = future().filter(post => isOverdue(post) || workflowOf(post) === "needs-review" || workflowOf(post) === "ready-meta" || (post.assignee && post.assignee === currentUser.name)).sort((a, b) => {
@@ -235,7 +251,16 @@ function renderGrid() {
     node.dataset.id = post.id;
     node.dataset.status = post.status;
     node.draggable = post.status !== "posted";
-    node.querySelector("img").src = post.image;
+    if (post.assetKind === "video" || post.type === "REEL" && /\.((mp4)|(mov)|(webm))($|\?)/i.test(post.image)) {
+      const video = document.createElement("video");
+      video.src = post.image;
+      video.muted = true;
+      video.loop = true;
+      video.autoplay = true;
+      video.playsInline = true;
+      video.className = "tile-media";
+      node.querySelector("img").replaceWith(video);
+    } else node.querySelector("img").src = post.image;
     node.querySelector(".tag").textContent = post.status === "posted" ? "LIVE" : WORKFLOW_LABELS[workflowOf(post)];
     node.querySelector(".type-icon").textContent = post.type === "REEL" ? "▶" : post.type === "CAROUSEL" ? "▱" : "";
     if (selected === post.id) node.classList.add("selected");
@@ -294,7 +319,7 @@ function renderInspector() {
   }
   const comments = (post.comments || []).map(comment => `<div class="comment"><b>${esc(comment.author)}${comment.role ? ` · ${esc(comment.role)}` : ""}</b>${esc(comment.text)}</div>`).join("");
   const workflowOptions = Object.entries(WORKFLOW_LABELS).map(([key, label]) => `<option value="${key}" ${workflowOf(post) === key ? "selected" : ""}>${label}</option>`).join("");
-  const pillarOptions = `<option value="">Choose a pillar</option>` + PILLARS.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${pillar}</option>`).join("");
+  const pillarOptions = `<option value="">Choose a pillar</option>` + settings.pillars.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${esc(pillar)}</option>`).join("");
   const checklistHtml = checklistFor(post).map((item, index) => `<label class="check-item"><input type="checkbox" data-check="${index}" ${item.done ? "checked" : ""}><span>${esc(item.label)}</span></label>`).join("");
   host.innerHTML = `<div class="editor">
     <div class="preview-wrap"><img src="${post.image}"></div>
@@ -311,7 +336,7 @@ function renderInspector() {
       <label class="field">Client / session<input id="eClient" value="${esc(post.client || "")}" placeholder="Optional reference"></label>
     </div>
     <div class="two">
-      <label class="field">Format<select id="eType"><option ${post.type === "IMAGE" ? "selected" : ""}>IMAGE</option><option ${post.type === "REEL" ? "selected" : ""}>REEL</option><option ${post.type === "CAROUSEL" ? "selected" : ""}>CAROUSEL</option></select></label>
+      <label class="field">Format<select id="eType">${settings.formats.map(format => `<option ${post.type === format ? "selected" : ""}>${esc(format)}</option>`).join("")}</select></label>
       <label class="field">Publish date<input id="eDate" type="date" value="${post.date || ""}"></label>
     </div>
     <div class="two">
@@ -470,7 +495,8 @@ function switchView(name) {
   $$(".view").forEach(view => view.classList.add("hidden"));
   $(`#view-${name}`).classList.remove("hidden");
   $$(".nav").forEach(nav => nav.classList.toggle("active", nav.dataset.view === name));
-  $("#pageTitle").textContent = { grid: "Grid Planner", calendar: "Calendar", library: "Content Library", approvals: "Approvals" }[name];
+  $("#pageTitle").textContent = { grid: "Grid Planner", calendar: "Calendar", library: "Content Library", approvals: "Approvals", settings: "Settings" }[name];
+  if (name === "settings") renderPlannerSettings();
 }
 async function readFile(file) {
   return new Promise((resolve, reject) => {
@@ -483,15 +509,17 @@ async function readFile(file) {
 
 $("#upload").onchange = async event => {
   const files = [...event.target.files];
-  const oversized = files.filter(file => file.size > 8 * 1024 * 1024);
-  if (oversized.length) notify("Images over 8 MB were skipped");
-  for (const file of files.filter(file => file.size <= 8 * 1024 * 1024)) {
+  const oversized = files.filter(file => file.size > 30 * 1024 * 1024);
+  if (oversized.length) notify("Assets over 30 MB were skipped");
+  for (const file of files.filter(file => file.size <= 30 * 1024 * 1024)) {
+    const uploaded = await api("/api/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, data: await readFile(file) }) });
     posts.unshift({
       id: crypto.randomUUID(),
-      image: await readFile(file),
+      image: uploaded.url,
+      assetKind: uploaded.kind,
       status: "draft",
       approval: "draft",
-      type: "IMAGE",
+      type: uploaded.kind === "video" ? "REEL" : "IMAGE",
       date: "",
       time: "",
       scheduleState: "draft",
@@ -586,6 +614,24 @@ window.addEventListener("focus", () => { refreshSharedPlanner(); checkInstagram(
 $("#syncBtn").onclick = syncInstagram;
 $("#modalSync").onclick = syncInstagram;
 $("#settingsBtn").onclick = () => { $("#settingsModal").classList.remove("hidden"); renderSettings(); };
+$("#settingsBtn").onclick = () => switchView("settings");
+$("#saveSettings").onclick = async () => {
+  const pillars = $("#settingsPillars").value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  const goals = $("#settingsGoals").value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  const formats = $("#settingsFormats").value.split(/\r?\n/).map(value => value.trim().toUpperCase()).filter(Boolean);
+  if (!pillars.length || !formats.length) return notify("Add at least one pillar and one format");
+  settings = { pillars, formats, goals, syncPhotoCount: Math.min(100, Math.max(3, Number($("#settingsSyncCount").value) || 12)) };
+  await persistPlanner("updated planner settings");
+  renderAll();
+  notify("Settings saved for the whole team");
+};
+$("#settingsSync").onclick = syncInstagram;
+$("#settingsDisconnect").onclick = async () => {
+  await api("/api/instagram/disconnect", { method: "POST" });
+  igStatus = { connected: false, configured: true };
+  await checkInstagram();
+  notify("Instagram disconnected");
+};
 $("#closeSettings").onclick = () => $("#settingsModal").classList.add("hidden");
 $("#settingsModal").onclick = event => { if (event.target.id === "settingsModal") $("#settingsModal").classList.add("hidden"); };
 $("#disconnectBtn").onclick = async () => {

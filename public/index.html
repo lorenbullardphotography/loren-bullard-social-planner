@@ -20,6 +20,7 @@
       <button class="nav" data-view="calendar"><span>□</span> Calendar</button>
       <button class="nav" data-view="library"><span>◫</span> Content Library</button>
       <button class="nav" data-view="approvals"><span>✓</span> Approvals</button>
+      <button class="nav" data-view="settings"><span>⚙</span> Settings</button>
     </nav>
     <div class="side-bottom">
       <section class="team-card">
@@ -33,7 +34,7 @@
         <span id="connectionDot" class="status-dot"></span>
         <div><strong>@lorenbullardphotography</strong><small id="sideStatus">Checking Instagram…</small></div>
       </div>
-      <button id="settingsBtn" class="ghost light">Instagram settings</button>
+      <button id="settingsBtn" class="ghost light">Planner settings</button>
     </div>
   </aside>
 
@@ -47,7 +48,7 @@
         <button id="syncBtn" class="ghost">↻ Sync Instagram</button>
         <button id="exportBtn" class="ghost">↓ Export backup</button>
         <label class="ghost">↑ Import backup<input id="importInput" type="file" accept="application/json,.json" hidden></label>
-        <label class="primary">+ Add content<input id="upload" type="file" accept="image/*" multiple hidden></label>
+        <label class="primary">+ Add asset<input id="upload" type="file" accept="image/*,video/*" multiple hidden></label>
       </div>
     </header>
 
@@ -97,6 +98,15 @@
     <section id="view-approvals" class="view hidden">
       <div class="intro"><div><h3>Approvals</h3><p>A simple review queue for you and your social media manager.</p></div></div>
       <div id="approvalBoard" class="approval-board"></div>
+    </section>
+
+    <section id="view-settings" class="view hidden">
+      <div class="intro"><div><h3>Planner settings</h3><p>Shape the choices your team uses while planning content.</p></div><button id="saveSettings" class="primary">Save settings</button></div>
+      <div class="settings-grid">
+        <section class="settings-card"><p class="eyebrow">CONTENT SYSTEM</p><h4>Content pillars</h4><p class="settings-help">One per line. These appear on every planned post.</p><textarea id="settingsPillars" rows="9"></textarea></section>
+        <section class="settings-card"><p class="eyebrow">CONTENT SYSTEM</p><h4>Formats</h4><p class="settings-help">One per line. Add any format your team uses.</p><textarea id="settingsFormats" rows="6"></textarea><h4 class="settings-subhead">Content goals</h4><textarea id="settingsGoals" rows="6"></textarea></section>
+        <section class="settings-card"><p class="eyebrow">INSTAGRAM SYNC</p><h4>Photos to sync</h4><p class="settings-help">Limit how many recent Instagram posts are pulled into the shared grid each time you sync.</p><label class="setting-number"><input id="settingsSyncCount" type="number" min="3" max="100"><span>recent posts</span></label><div id="settingsConnection" class="connection-card"></div><div class="modal-actions"><a id="settingsConnectLink" href="/auth/instagram" class="primary button-link">Connect Instagram</a><button id="settingsSync" class="ghost">Sync Instagram now</button><button id="settingsDisconnect" class="danger">Disconnect Instagram</button></div></section>
+      </div>
     </section>
   </main>
 </div>
