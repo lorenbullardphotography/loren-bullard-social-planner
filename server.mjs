@@ -519,11 +519,16 @@ export async function handleRequest(req, res) {
       if (!mime.startsWith("image/") && !mime.startsWith("video/")) return sendJson(res, 400, { error: "Only images and reels are supported." });
       const bytes = Buffer.from(match[2], "base64");
       if (bytes.length > 30 * 1024 * 1024) return sendJson(res, 413, { error: "Assets must be 30 MB or smaller." });
-      fs.mkdirSync(uploadsDir, { recursive: true });
       const ext = mime === "video/quicktime" ? "mov" : (mime.split("/")[1] || "bin").replace(/[^a-z0-9]/g, "");
       const filename = `${crypto.randomUUID()}.${ext}`;
-      fs.writeFileSync(path.join(uploadsDir, filename), bytes);
-      return sendJson(res, 201, { url: `/uploads/${filename}`, kind: mime.startsWith("video/") ? "video" : "image" });
+      try {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+        fs.writeFileSync(path.join(uploadsDir, filename), bytes);
+        return sendJson(res, 201, { url: `/uploads/${filename}`, kind: mime.startsWith("video/") ? "video" : "image", storage: "server" });
+      } catch (error) {
+        if (!["EROFS", "EACCES", "ENOENT"].includes(error.code)) throw error;
+        return sendJson(res, 201, { url: body.data, kind: mime.startsWith("video/") ? "video" : "image", storage: "planner" });
+      }
     }
 
     if (url.pathname === "/api/instagram/refresh" && req.method === "POST") {
