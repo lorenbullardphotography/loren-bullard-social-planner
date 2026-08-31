@@ -416,11 +416,23 @@ function renderInspector(hostSelector = "#inspector") {
     notify("Post updated");
   };
   $("#deleteEdit").onclick = async () => {
+    if (!window.confirm("Delete this post and its uploaded asset from the shared planner?")) return;
+    const previousPosts = posts;
+    const deleteButton = $("#deleteEdit");
+    deleteButton.disabled = true;
+    deleteButton.textContent = "Deleting…";
     posts = posts.filter(item => item.id !== post.id);
     selected = null;
-    renderAll();
-    await persistPlanner("removed a post");
-    notify("Post deleted");
+    try {
+      await persistPlanner("removed a post");
+      if (currentView === "editor") switchView("grid");
+      renderAll();
+      notify("Post deleted from the shared planner");
+    } catch (error) {
+      posts = previousPosts;
+      renderAll();
+      notify(error.message || "The post could not be deleted");
+    }
   };
   const copyText = async (value, label) => {
     if (!value) return notify(`No ${label.toLowerCase()} to copy yet`);
