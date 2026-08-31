@@ -473,6 +473,8 @@ export async function handleRequest(req, res) {
   }
 }
 
+export default handleRequest;
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const server = http.createServer(handleRequest);
   server.listen(PORT, async () => {
