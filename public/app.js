@@ -39,7 +39,12 @@ function notify(msg) {
 }
 function future() { return posts.filter(post => post.status !== "posted" && workflowOf(post) !== "archived"); }
 function posted() { return posts.filter(post => post.status === "posted"); }
-function ordered() { return [...future(), ...posted().sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""))]; }
+function visiblePosted() {
+  return posted()
+    .sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""))
+    .slice(0, Number(settings.syncPhotoCount) || 12);
+}
+function ordered() { return [...future(), ...visiblePosted()]; }
 function esc(s = "") { return s.replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m])); }
 function scheduleLabel(post) {
   return post.scheduleState === "scheduled" ? "Scheduled" : post.scheduleState === "ready" ? "Ready" : "Draft";
@@ -211,7 +216,7 @@ function renderAttention() {
 }
 function renderStats() {
   $("#plannedCount").textContent = future().length;
-  $("#postedCount").textContent = posted().length;
+  $("#postedCount").textContent = visiblePosted().length;
   $("#approvalCount").textContent = future().filter(post => post.approval === "needs-review").length;
 }
 function renderTeam() {
