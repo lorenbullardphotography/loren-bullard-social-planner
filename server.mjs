@@ -398,6 +398,7 @@ export async function handleRequest(req, res) {
         const profile = await getInstagramProfile(session.access_token);
         return sendJson(res, 200, publicInstagramStatus(session, {profile}));
       } catch (e) {
+        console.error("Instagram profile lookup failed:", e.message);
         return sendJson(res, 200, publicInstagramStatus(session, {connected:false, error:e.message}));
       }
     }
