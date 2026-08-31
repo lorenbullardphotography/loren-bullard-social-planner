@@ -1,6 +1,6 @@
 const USER_KEY = "lb-content-planner-user-v1";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
-let selected = null, dragId = null, currentView = "grid", libraryFilter = "all";
+let selected = null, dragId = null, currentView = "grid", libraryFilter = "all", librarySearch = "";
 let calCursor = new Date(); calCursor.setDate(1);
 
 const demo = (text, bg, fg = "#fff") => `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000"><rect width="100%" height="100%" fill="${bg}"/><circle cx="500" cy="390" r="165" fill="rgba(255,255,255,.15)"/><text x="500" y="585" text-anchor="middle" font-family="Georgia" font-size="57" fill="${fg}">${text}</text></svg>`)}`;
@@ -13,6 +13,7 @@ const seed = [
 let posts = [];
 let team = [];
 let activity = [];
+let presence = [];
 let igStatus = { connected: false };
 let plannerVersion = 0;
 let currentUser = loadUser();
@@ -35,7 +36,7 @@ function notify(msg) {
   clearTimeout(notify.t);
   notify.t = setTimeout(() => t.classList.add("hidden"), 2600);
 }
-function future() { return posts.filter(post => post.status !== "posted"); }
+function future() { return posts.filter(post => post.status !== "posted" && workflowOf(post) !== "archived"); }
 function posted() { return posts.filter(post => post.status === "posted"); }
 function ordered() { return [...future(), ...posted().sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""))]; }
 function esc(s = "") { return s.replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m])); }
@@ -50,10 +51,37 @@ function formatSchedule(post) {
   pieces.push(scheduleLabel(post));
   return pieces.join(" · ");
 }
+const WORKFLOW_LABELS = {
+  idea: "Idea", drafting: "Drafting", "needs-assets": "Needs assets", "needs-caption": "Needs caption",
+  "needs-review": "Needs review", approved: "Approved", "ready-meta": "Ready for Meta",
+  "meta-scheduled": "Scheduled in Meta", published: "Published", archived: "Archived"
+};
+const PILLARS = ["Newborn education", "Family sessions", "Motherhood", "Behind the scenes", "Client stories", "Photographer education", "Personal connection", "Offers and availability"];
+const CHECKLIST = ["Select assets", "Write caption", "Add hashtags", "Choose audio / cover", "Review", "Approve", "Schedule in Meta", "Confirm published"];
+function workflowOf(post) {
+  if (post.status === "posted") return "published";
+  if (WORKFLOW_LABELS[post.workflow]) return post.workflow;
+  if (post.approval === "needs-review") return "needs-review";
+  if (post.approval === "approved") return "approved";
+  return post.status === "draft" ? "drafting" : "idea";
+}
+function applyWorkflow(post, workflow) {
+  post.workflow = workflow;
+  post.status = workflow === "published" ? "posted" : ["approved", "ready-meta", "meta-scheduled"].includes(workflow) ? "planned" : "draft";
+  post.approval = workflow === "needs-review" ? "needs-review" : workflow === "approved" || workflow === "ready-meta" || workflow === "meta-scheduled" || workflow === "published" ? "approved" : "draft";
+}
+function checklistFor(post) {
+  if (Array.isArray(post.checklist) && post.checklist.length) return post.checklist;
+  return CHECKLIST.map(label => ({ label, done: false }));
+}
+function isOverdue(post) {
+  return Boolean(post.dueDate && post.dueDate < new Date().toISOString().slice(0, 10) && !["published", "archived"].includes(workflowOf(post)));
+}
 function setPlanner(data) {
   posts = Array.isArray(data?.posts) ? data.posts : [];
   team = Array.isArray(data?.team) ? data.team : [];
   activity = Array.isArray(data?.activity) ? data.activity : [];
+  presence = Array.isArray(data?.presence) ? data.presence : [];
   plannerVersion = Number(data?.version || 0);
   if (selected && !posts.find(post => post.id === selected)) selected = null;
 }
@@ -93,6 +121,9 @@ async function refreshSharedPlanner() {
     if (Number(latest?.version || 0) > plannerVersion) {
       setPlanner(latest);
       renderAll();
+    } else if (Array.isArray(latest?.presence)) {
+      presence = latest.presence;
+      renderTeam();
     }
   } catch {}
 }
@@ -142,6 +173,7 @@ async function importBackup(file) {
 
 function renderAll() {
   renderStats();
+  renderAttention();
   renderGrid();
   renderInspector();
   renderCalendar();
@@ -149,6 +181,17 @@ function renderAll() {
   renderApprovals();
   renderTeam();
   renderActivity();
+}
+function renderAttention() {
+  const items = future().filter(post => isOverdue(post) || workflowOf(post) === "needs-review" || workflowOf(post) === "ready-meta" || (post.assignee && post.assignee === currentUser.name)).sort((a, b) => {
+    const rank = post => isOverdue(post) ? 0 : workflowOf(post) === "needs-review" ? 1 : workflowOf(post) === "ready-meta" ? 2 : 3;
+    return rank(a) - rank(b) || (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
+  }).slice(0, 6);
+  $("#attentionList").innerHTML = items.length ? items.map(post => {
+    const reason = isOverdue(post) ? "Overdue" : workflowOf(post) === "needs-review" ? "Approval requested" : workflowOf(post) === "ready-meta" ? "Ready to hand off" : "Assigned to " + esc(post.assignee);
+    return '<button class="attention-card" data-open="' + post.id + '"><img src="' + post.image + '" alt=""><span><b>' + esc(post.notes || post.caption || "Untitled content") + '</b><small>' + reason + ' · ' + esc(post.dueDate || post.date || "No due date") + '</small></span><i>›</i></button>';
+  }).join("") : '<div class="empty">Nothing urgent right now. Your next tasks will appear here.</div>';
+  $$("#attentionList [data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open));
 }
 function renderStats() {
   $("#plannedCount").textContent = future().length;
@@ -162,6 +205,22 @@ function renderTeam() {
   $("#identityBtn").textContent = `${currentUser.name} · ${currentUser.role}`;
   $("#identityName").value = currentUser.name;
   $("#identityRole").value = currentUser.role;
+  const now = Date.now();
+  const active = presence.filter(person => now - Date.parse(person.lastSeenAt || "") < 45 * 1000);
+  $("#presenceList").innerHTML = active.length
+    ? active.map(person => `<span class="presence-person"><i></i>${esc(person.name)} <small>${esc(person.role || "Teammate")}</small></span>`).join("")
+    : `<span class="presence-empty">No one else is active right now</span>`;
+}
+async function heartbeat() {
+  try {
+    const data = await api("/api/planner/presence", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actor: currentUser })
+    });
+    presence = Array.isArray(data.presence) ? data.presence : presence;
+    renderTeam();
+  } catch {}
 }
 function renderActivity() {
   $("#activityList").innerHTML = activity.length
@@ -177,7 +236,7 @@ function renderGrid() {
     node.dataset.status = post.status;
     node.draggable = post.status !== "posted";
     node.querySelector("img").src = post.image;
-    node.querySelector(".tag").textContent = post.status === "posted" ? "LIVE" : (post.approval === "approved" ? "APPROVED" : post.status);
+    node.querySelector(".tag").textContent = post.status === "posted" ? "LIVE" : WORKFLOW_LABELS[workflowOf(post)];
     node.querySelector(".type-icon").textContent = post.type === "REEL" ? "▶" : post.type === "CAROUSEL" ? "▱" : "";
     if (selected === post.id) node.classList.add("selected");
     node.onclick = () => { selected = post.id; renderGrid(); renderInspector(); };
@@ -228,14 +287,29 @@ function renderInspector() {
   if (post.status === "posted") {
     host.innerHTML = `<div class="editor">
       <div class="preview-wrap"><img src="${post.image}"></div>
-      <div class="posted-lock">This post is live on Instagram and stays locked in the grid.<br><br><b>${post.timestamp ? new Date(post.timestamp).toLocaleDateString() : "Posted"}</b>${post.permalink ? ` · <a href="${post.permalink}" target="_blank">Open on Instagram</a>` : ""}<br>${esc(formatSchedule(post))}</div>
+      <div class="posted-lock">This post is live on Instagram and stays locked in the grid.<br><br><b>${post.timestamp ? new Date(post.timestamp).toLocaleDateString() : "Posted"}</b>${post.permalink ? ` · <a href="${esc(post.permalink)}" target="_blank" rel="noopener noreferrer">Open on Instagram</a>` : ""}<br>${esc(formatSchedule(post))}</div>
       <label class="field">Caption<textarea rows="8" readonly>${esc(post.caption || "")}</textarea></label>
     </div>`;
     return;
   }
   const comments = (post.comments || []).map(comment => `<div class="comment"><b>${esc(comment.author)}${comment.role ? ` · ${esc(comment.role)}` : ""}</b>${esc(comment.text)}</div>`).join("");
+  const workflowOptions = Object.entries(WORKFLOW_LABELS).map(([key, label]) => `<option value="${key}" ${workflowOf(post) === key ? "selected" : ""}>${label}</option>`).join("");
+  const pillarOptions = `<option value="">Choose a pillar</option>` + PILLARS.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${pillar}</option>`).join("");
+  const checklistHtml = checklistFor(post).map((item, index) => `<label class="check-item"><input type="checkbox" data-check="${index}" ${item.done ? "checked" : ""}><span>${esc(item.label)}</span></label>`).join("");
   host.innerHTML = `<div class="editor">
     <div class="preview-wrap"><img src="${post.image}"></div>
+    <div class="two">
+      <label class="field">Workflow<select id="eWorkflow">${workflowOptions}</select></label>
+      <label class="field">Assigned to<input id="eAssignee" value="${esc(post.assignee || "")}" placeholder="Loren or social planner"></label>
+    </div>
+    <div class="two">
+      <label class="field">Due date<input id="eDueDate" type="date" value="${post.dueDate || ""}"></label>
+      <label class="field">Priority<select id="ePriority"><option value="low" ${post.priority === "low" ? "selected" : ""}>Low</option><option value="normal" ${post.priority === "normal" ? "selected" : ""}>Normal</option><option value="high" ${post.priority === "high" ? "selected" : ""}>High</option></select></label>
+    </div>
+    <div class="two">
+      <label class="field">Content pillar<select id="ePillar">${pillarOptions}</select></label>
+      <label class="field">Client / session<input id="eClient" value="${esc(post.client || "")}" placeholder="Optional reference"></label>
+    </div>
     <div class="two">
       <label class="field">Format<select id="eType"><option ${post.type === "IMAGE" ? "selected" : ""}>IMAGE</option><option ${post.type === "REEL" ? "selected" : ""}>REEL</option><option ${post.type === "CAROUSEL" ? "selected" : ""}>CAROUSEL</option></select></label>
       <label class="field">Publish date<input id="eDate" type="date" value="${post.date || ""}"></label>
@@ -246,6 +320,15 @@ function renderInspector() {
     </div>
     <label class="field">Caption<textarea id="eCaption" rows="6" placeholder="Write or paste caption…">${esc(post.caption || "")}</textarea></label>
     <label class="field">Notes<textarea id="eNotes" rows="3" placeholder="Audio, hook, CTA, manager notes…">${esc(post.notes || "")}</textarea></label>
+    <div class="field">Content brief
+      <label class="field nested">Goal<input id="eGoal" value="${esc(post.goal || "")}" placeholder="What should this post accomplish?"></label>
+      <label class="field nested">Hook<input id="eHook" value="${esc(post.hook || "")}" placeholder="Opening line or visual hook"></label>
+      <div class="two"><label class="field nested">Call to action<input id="eCta" value="${esc(post.cta || "")}" placeholder="Book, comment, save…"></label><label class="field nested">Audio<input id="eAudio" value="${esc(post.audio || "")}" placeholder="Audio or sound"></label></div>
+      <label class="field nested">Hashtags<textarea id="eHashtags" rows="2" placeholder="#northwestarkansas #newbornphotographer">${esc(post.hashtags || "")}</textarea></label>
+      <label class="field nested">Tagging notes<input id="eTagNotes" value="${esc(post.tagNotes || "")}" placeholder="People, vendors, collaborators"></label>
+      <label class="field nested">Alt text<textarea id="eAltText" rows="2" placeholder="Describe the image for accessibility">${esc(post.altText || "")}</textarea></label>
+    </div>
+    <div class="field">Checklist<div class="checklist">${checklistHtml}</div></div>
     <div class="field">Approval
       <div class="approval-pills">
         <button data-ap="draft" class="${post.approval === "draft" ? "active" : ""}">Draft</button>
@@ -256,13 +339,13 @@ function renderInspector() {
     <div class="field">Comments<div class="comment-list">${comments || `<span style="text-transform:none;font-weight:400">No feedback yet.</span>`}</div>
       <div style="display:flex;gap:6px"><input id="commentText" placeholder="Add feedback as ${esc(currentUser.name)}…" style="flex:1"><button id="addComment" class="ghost">Add</button></div>
     </div>
+    <div class="handoff"><b>Meta Business Suite handoff</b><span>Use Meta for final scheduling and publishing.</span><div class="handoff-actions"><button id="copyCaption" class="ghost">Copy caption</button><button id="copyHashtags" class="ghost">Copy hashtags</button><a class="ghost button-link" href="https://business.facebook.com/latest/home" target="_blank" rel="noopener noreferrer">Open Meta</a></div><button id="markMeta" class="primary">Mark ready for Meta</button></div>
     <div class="posted-lock">Last updated${post.updatedBy ? ` by <b>${esc(post.updatedBy)}</b>` : ""}${post.updatedAt ? ` on ${new Date(post.updatedAt).toLocaleString()}` : ""}.</div>
     <div class="actions"><button id="saveEdit" class="primary">Save</button><button id="deleteEdit" class="danger">Delete</button></div>
   </div>`;
   $$("[data-ap]").forEach(button => {
     button.onclick = async () => {
-      post.approval = button.dataset.ap;
-      post.status = post.approval === "draft" ? "draft" : "planned";
+      applyWorkflow(post, button.dataset.ap === "draft" ? "drafting" : button.dataset.ap);
       post.updatedBy = currentUser.name;
       post.updatedAt = new Date().toISOString();
       renderAll();
@@ -271,12 +354,25 @@ function renderInspector() {
   });
   $("#saveEdit").onclick = async () => {
     post.type = $("#eType").value;
+    applyWorkflow(post, $("#eWorkflow").value);
+    post.assignee = $("#eAssignee").value.trim();
+    post.dueDate = $("#eDueDate").value;
+    post.priority = $("#ePriority").value;
+    post.pillar = $("#ePillar").value;
+    post.client = $("#eClient").value.trim();
     post.date = $("#eDate").value;
     post.time = $("#eTime").value;
     post.scheduleState = $("#eScheduleState").value;
     post.caption = $("#eCaption").value;
     post.notes = $("#eNotes").value;
-    post.status = post.approval === "draft" ? "draft" : "planned";
+    post.goal = $("#eGoal").value.trim();
+    post.hook = $("#eHook").value.trim();
+    post.cta = $("#eCta").value.trim();
+    post.audio = $("#eAudio").value.trim();
+    post.hashtags = $("#eHashtags").value.trim();
+    post.tagNotes = $("#eTagNotes").value.trim();
+    post.altText = $("#eAltText").value.trim();
+    post.checklist = checklistFor(post).map((item, index) => ({ ...item, done: $(`[data-check="${index}"]`).checked }));
     post.updatedBy = currentUser.name;
     post.updatedAt = new Date().toISOString();
     renderAll();
@@ -290,6 +386,21 @@ function renderInspector() {
     await persistPlanner("removed a post");
     notify("Post deleted");
   };
+  const copyText = async (value, label) => {
+    if (!value) return notify(`No ${label.toLowerCase()} to copy yet`);
+    await navigator.clipboard.writeText(value);
+    notify(`${label} copied`);
+  };
+  $("#copyCaption").onclick = () => copyText(post.caption, "Caption");
+  $("#copyHashtags").onclick = () => copyText(post.hashtags, "Hashtags");
+  $("#markMeta").onclick = async () => {
+    applyWorkflow(post, "ready-meta");
+    post.updatedBy = currentUser.name;
+    post.updatedAt = new Date().toISOString();
+    renderAll();
+    await persistPlanner("marked content ready for Meta Business Suite");
+    notify("Ready for Meta Business Suite");
+  };
   $("#addComment").onclick = async () => {
     const value = $("#commentText").value.trim();
     if (!value) return;
@@ -301,6 +412,13 @@ function renderInspector() {
     renderActivity();
     await persistPlanner("left feedback on a post");
   };
+  $$("[data-check]").forEach(input => input.onchange = async () => {
+    post.checklist = checklistFor(post).map((item, index) => ({ ...item, done: $(`[data-check="${index}"]`).checked }));
+    post.updatedBy = currentUser.name;
+    post.updatedAt = new Date().toISOString();
+    await persistPlanner("updated the content checklist");
+    notify("Checklist updated");
+  });
 }
 function renderCalendar() {
   const year = calCursor.getFullYear(), month = calCursor.getMonth();
@@ -313,21 +431,31 @@ function renderCalendar() {
     day.setDate(begin.getDate() + i);
     const iso = day.toISOString().slice(0, 10);
     const items = future().filter(post => post.date === iso);
-    html += `<div class="day ${day.getMonth() !== month ? "muted" : ""}"><div class="day-num">${day.getDate()}</div>${items.map(post => `<div class="cal-post" data-open="${post.id}"><img src="${post.image}"><span>${esc((post.caption || post.notes || post.type || "Post").slice(0, 28))}<small>${esc(post.time || scheduleLabel(post))}</small></span></div>`).join("")}</div>`;
+    html += `<div class="day ${day.getMonth() !== month ? "muted" : ""}" data-day="${iso}"><div class="day-num">${day.getDate()}</div>${items.map(post => `<div class="cal-post" draggable="true" data-open="${post.id}" data-drag-post="${post.id}"><img src="${post.image}"><span>${esc((post.caption || post.notes || post.type || "Post").slice(0, 28))}<small>${esc(post.time || scheduleLabel(post))}</small></span></div>`).join("")}</div>`;
   }
   $("#calendar").innerHTML = html;
   $$("[data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open));
+  $$("[data-drag-post]").forEach(node => node.ondragstart = event => { dragId = node.dataset.dragPost; event.stopPropagation(); });
+  $$(".day[data-day]").forEach(node => {
+    node.ondragover = event => { if (dragId) event.preventDefault(); };
+    node.ondrop = async event => { event.preventDefault(); const post = posts.find(item => item.id === dragId); if (!post) return; post.date = node.dataset.day; post.updatedBy = currentUser.name; post.updatedAt = new Date().toISOString(); dragId = null; renderAll(); await persistPlanner("moved content on the calendar"); notify("Publish date updated"); };
+  });
 }
 function renderLibrary() {
-  const items = future().filter(post => libraryFilter === "all" || post.status === libraryFilter || post.approval === libraryFilter);
+  const query = librarySearch.toLowerCase();
+  const items = future().filter(post => {
+    const matchesFilter = libraryFilter === "all" || post.status === libraryFilter || post.approval === libraryFilter || workflowOf(post) === libraryFilter;
+    const searchable = [post.caption, post.notes, post.pillar, post.client, post.assignee, post.goal, post.hook].join(" ").toLowerCase();
+    return matchesFilter && (!query || searchable.includes(query));
+  });
   $("#library").innerHTML = items.length
-    ? items.map(post => `<article class="library-card" data-open="${post.id}"><img src="${post.image}"><div class="library-info"><b>${esc(post.notes || post.caption || "Untitled content")}</b><span>${esc(`${post.type} · ${formatSchedule(post)} · ${post.approval}`)}</span></div></article>`).join("")
+    ? items.map(post => `<article class="library-card" data-open="${post.id}"><img src="${post.image}"><div class="library-info"><b>${esc(post.notes || post.caption || "Untitled content")}</b><span>${esc(`${post.type} · ${formatSchedule(post)} · ${WORKFLOW_LABELS[workflowOf(post)]}${post.pillar ? ` · ${post.pillar}` : ""}`)}</span></div></article>`).join("")
     : `<div class="empty">No content in this view yet.</div>`;
   $$("[data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open));
 }
 function renderApprovals() {
-  const columns = [["draft", "Draft"], ["needs-review", "Needs Review"], ["approved", "Approved"]];
-  $("#approvalBoard").innerHTML = columns.map(([key, label]) => `<section class="approval-col"><h4>${label}</h4>${future().filter(post => post.approval === key).map(post => `<article class="approval-card" data-open="${post.id}"><img src="${post.image}"><b>${esc(post.notes || post.caption || post.type)}</b><span>${esc(formatSchedule(post))}</span></article>`).join("") || `<div class="empty">Nothing here.</div>`}</section>`).join("");
+  const columns = [["drafting", "Drafting"], ["needs-review", "Needs Review"], ["approved", "Approved"], ["ready-meta", "Ready for Meta"], ["meta-scheduled", "Scheduled in Meta"]];
+  $("#approvalBoard").innerHTML = columns.map(([key, label]) => `<section class="approval-col"><h4>${label}</h4>${future().filter(post => workflowOf(post) === key).map(post => `<article class="approval-card" data-open="${post.id}"><img src="${post.image}"><b>${esc(post.notes || post.caption || post.type)}</b><span>${esc(formatSchedule(post))}</span></article>`).join("") || `<div class="empty">Nothing here.</div>`}</section>`).join("");
   $$("[data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open));
 }
 function openPost(id) {
@@ -394,6 +522,7 @@ $$(".chip").forEach(chip => chip.onclick = () => {
   $$(".chip").forEach(item => item.classList.toggle("active", item === chip));
   renderLibrary();
 });
+$("#librarySearch").oninput = event => { librarySearch = event.target.value.trim(); renderLibrary(); };
 
 async function checkInstagram() {
   try {
@@ -451,6 +580,7 @@ async function syncInstagram({silent = false} = {}) {
 // browser session or relying on browser storage.
 setInterval(refreshSharedPlanner, 10000);
 setInterval(checkInstagram, 30000);
+setInterval(heartbeat, 20000);
 window.addEventListener("focus", () => { refreshSharedPlanner(); checkInstagram(); });
 
 $("#syncBtn").onclick = syncInstagram;
@@ -499,6 +629,7 @@ if (query.get("meta") === "error") {
 async function init() {
   await loadPlanner();
   renderAll();
+  await heartbeat();
   await checkInstagram();
   if (igStatus.connected && !initialInstagramSyncDone) {
     initialInstagramSyncDone = true;

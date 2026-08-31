@@ -26,6 +26,7 @@
         <p class="eyebrow">SHARED WORKSPACE</p>
         <strong id="teamSummary">Setting up shared planner…</strong>
         <small id="teamDetail">Shared planner and Instagram connection for your whole team.</small>
+        <div id="presenceList" class="presence-list"></div>
         <button id="identityBtn" class="ghost light">Your name</button>
       </section>
       <div class="account-mini">
@@ -59,6 +60,10 @@
           <div><strong id="approvalCount">0</strong><span>Need approval</span></div>
         </div>
       </div>
+      <section class="attention-panel">
+        <div class="intro slim"><div><h3>Needs your attention</h3><p>Keep the next decision visible without digging through the calendar.</p></div></div>
+        <div id="attentionList" class="attention-list"></div>
+      </section>
       <div class="workspace">
         <section class="phone-card">
           <div class="profile-row">
@@ -85,7 +90,7 @@
     </section>
 
     <section id="view-library" class="view hidden">
-      <div class="intro"><div><h3>Content Library</h3><p>All drafts and future posts in one place.</p></div><div class="filters"><button class="chip active" data-filter="all">All</button><button class="chip" data-filter="draft">Drafts</button><button class="chip" data-filter="planned">Planned</button><button class="chip" data-filter="approved">Approved</button></div></div>
+      <div class="intro"><div><h3>Content Library</h3><p>All drafts and future posts in one place.</p></div><div class="library-tools"><input id="librarySearch" placeholder="Search content…"><div class="filters"><button class="chip active" data-filter="all">All</button><button class="chip" data-filter="draft">Drafts</button><button class="chip" data-filter="planned">Planned</button><button class="chip" data-filter="approved">Approved</button></div></div></div>
       <div id="library" class="library"></div>
     </section>
 

@@ -47,7 +47,7 @@ async function writeSession(value) {
 }
 async function seedEnvironmentSession() {
   const existing = await readSession();
-  if (process.env.INSTAGRAM_ACCESS_TOKEN && !existing.access_token) {
+  if (process.env.INSTAGRAM_ACCESS_TOKEN && !existing.access_token && !existing.disabled) {
     await writeSession({
       access_token: process.env.INSTAGRAM_ACCESS_TOKEN,
       source: "environment",
@@ -240,6 +240,16 @@ function normalizeComment(comment) {
 }
 
 function normalizePost(post) {
+  const workflowValues = ["idea", "drafting", "needs-assets", "needs-caption", "needs-review", "approved", "ready-meta", "meta-scheduled", "published", "archived"];
+  const workflow = workflowValues.includes(post?.workflow)
+    ? post.workflow
+    : post?.status === "posted"
+      ? "published"
+      : post?.approval === "needs-review"
+        ? "needs-review"
+        : post?.approval === "approved"
+          ? "approved"
+          : post?.status === "draft" ? "drafting" : "idea";
   return {
     id: String(post?.id || crypto.randomUUID()),
     metaId: post?.metaId ? String(post.metaId) : "",
@@ -250,6 +260,25 @@ function normalizePost(post) {
     date: String(post?.date || ""),
     time: String(post?.time || ""),
     scheduleState: ["draft", "ready", "scheduled"].includes(post?.scheduleState) ? post.scheduleState : "draft",
+    workflow,
+    assignee: String(post?.assignee || "").slice(0, 80),
+    dueDate: String(post?.dueDate || "").slice(0, 10),
+    priority: ["low", "normal", "high"].includes(post?.priority) ? post.priority : "normal",
+    pillar: String(post?.pillar || "").slice(0, 80),
+    goal: String(post?.goal || "").slice(0, 300),
+    audience: String(post?.audience || "").slice(0, 300),
+    hook: String(post?.hook || "").slice(0, 500),
+    cta: String(post?.cta || "").slice(0, 300),
+    hashtags: String(post?.hashtags || "").slice(0, 1000),
+    audio: String(post?.audio || "").slice(0, 300),
+    altText: String(post?.altText || "").slice(0, 500),
+    location: String(post?.location || "").slice(0, 120),
+    client: String(post?.client || "").slice(0, 120),
+    tagNotes: String(post?.tagNotes || "").slice(0, 500),
+    checklist: Array.isArray(post?.checklist) ? post.checklist.slice(0, 20).map(item => ({
+      label: String(item?.label || "").slice(0, 120),
+      done: Boolean(item?.done)
+    })).filter(item => item.label) : [],
     caption: String(post?.caption || ""),
     notes: String(post?.notes || ""),
     comments: Array.isArray(post?.comments) ? post.comments.map(normalizeComment) : [],
@@ -305,6 +334,25 @@ async function writePlanner(nextPlanner) {
   };
   return writeStored("planner-data", normalized);
 }
+async function readPresence() {
+  const stored = await readStored("planner-presence", {});
+  const cutoff = Date.now() - 1000 * 60 * 60;
+  return Object.values(stored && typeof stored === "object" ? stored : {}).filter(person => Date.parse(person.lastSeenAt || "") > cutoff);
+}
+async function writePresence(actor = {}) {
+  if (!actor?.name) return readPresence();
+  const stored = await readStored("planner-presence", {});
+  const current = stored && typeof stored === "object" ? stored : {};
+  const key = String(actor.name).trim().toLowerCase();
+  if (!key) return readPresence();
+  current[key] = { name: String(actor.name).slice(0, 80), role: String(actor.role || "Teammate").slice(0, 40), lastSeenAt: new Date().toISOString() };
+  const cutoff = Date.now() - 1000 * 60 * 60;
+  for (const [name, person] of Object.entries(current)) {
+    if (Date.parse(person.lastSeenAt || "") <= cutoff) delete current[name];
+  }
+  await writeStored("planner-presence", current);
+  return Object.values(current);
+}
 
 function mergeInstagramPosts(planner, media, actorName = "Instagram sync") {
   const byMeta = new Map(planner.posts.filter(post => post.metaId).map(post => [post.metaId, post]));
@@ -358,7 +406,13 @@ export async function handleRequest(req, res) {
     }
 
     if (url.pathname === "/api/planner" && req.method === "GET") {
-      return sendJson(res, 200, await readPlanner());
+      const planner = await readPlanner();
+      return sendJson(res, 200, { ...planner, presence: await readPresence() });
+    }
+
+    if (url.pathname === "/api/planner/presence" && req.method === "POST") {
+      const body = await readBody(req);
+      return sendJson(res, 200, { presence: await writePresence(body.actor) });
     }
 
     if (url.pathname === "/api/planner/bootstrap" && req.method === "POST") {
@@ -440,7 +494,7 @@ export async function handleRequest(req, res) {
     }
 
     if (url.pathname === "/api/instagram/disconnect" && req.method === "POST") {
-      await deleteStored("instagram-session");
+      await writeSession({ disabled: true, disconnected_at: new Date().toISOString() });
       return sendJson(res, 200, {ok:true});
     }
 
