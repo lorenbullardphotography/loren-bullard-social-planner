@@ -56,7 +56,8 @@ Once connected, press **Sync Instagram**. The app fetches published media and pl
 - The app secret and Instagram access token are never stored in browser localStorage.
 - The Instagram connection, planner data, and user accounts are shared server-side. Browser storage is only a convenience cache; it does not store planner posts or Instagram credentials.
 - To let you and your social media manager use it from separate computers, host this app on one reachable server and have both of you open that same URL. Running `localhost` on each computer creates two separate planners because each machine runs its own server/data folder.
-- On first launch, choose **Create account** to make the Loren account. Your social media manager can then create their own account from the same sign-in page. Both accounts see the same planner and Instagram connection when they use the same hosted URL.
+- When the account store is empty, the app creates Loren (Photographer) and Brooke (Social Media Manager) automatically. The initial password for both accounts is `admin`; change it before sharing the hosted URL publicly.
+- Both accounts see the same planner and Instagram connection when they use the same hosted URL.
 - Existing deployments may use `PLANNER_PASSWORD` for the first Loren sign-in; after that, named accounts are used.
 - For production hosting, use HTTPS and store `PLANNER_PASSWORD`, `INSTAGRAM_APP_SECRET`, and `INSTAGRAM_ACCESS_TOKEN` as private hosting environment variables.
 

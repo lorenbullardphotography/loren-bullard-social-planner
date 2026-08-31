@@ -37,6 +37,10 @@ const AUTH_SECRET = process.env.AUTH_SECRET || PLANNER_PASSWORD || "planner-deve
 const ACCOUNT_SESSION_DAYS = 14;
 
 const ROLE_VALUES = ["Photographer", "Social Media Manager", "Assistant", "Editor"];
+const DEFAULT_ACCOUNTS = [
+  { name: "Loren", role: "Photographer" },
+  { name: "Brooke", role: "Social Media Manager" }
+];
 function publicUser(user) {
   return user ? { id: user.id, name: user.name, role: user.role } : null;
 }
@@ -46,6 +50,17 @@ async function readUsers() {
 }
 async function writeUsers(users) {
   return writeStored("planner-users", users);
+}
+async function seedDefaultUsers() {
+  const users = DEFAULT_ACCOUNTS.map(account => ({
+    id: crypto.randomUUID(),
+    name: account.name,
+    role: account.role,
+    passwordHash: hashPassword("admin"),
+    createdAt: new Date().toISOString()
+  }));
+  await writeUsers(users);
+  return users;
 }
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   return `scrypt$${salt}$${crypto.scryptSync(String(password), salt, 64).toString("hex")}`;
@@ -459,7 +474,8 @@ export async function handleRequest(req, res) {
   try {
     await seedEnvironmentSession();
     const url = new URL(req.url, `http://${req.headers.host}`);
-    const users = await readUsers();
+    let users = await readUsers();
+    if (!users.length) users = await seedDefaultUsers();
     const account = userFromSession(req, users);
 
     if (url.pathname === "/auth/login" && req.method === "POST") {
@@ -505,10 +521,13 @@ export async function handleRequest(req, res) {
       const body = await readBody(req);
       const name = String(body.name || "").trim().slice(0, 80);
       const role = ROLE_VALUES.includes(body.role) ? body.role : account.role;
+      const password = String(body.password || "");
       if (name.length < 2) return sendJson(res, 400, {error: "Enter a display name."});
+      if (password && password.length < 8) return sendJson(res, 400, {error: "New passwords must have at least 8 characters."});
       if (users.some(item => item.id !== account.id && item.name.toLowerCase() === name.toLowerCase())) return sendJson(res, 409, {error: "That display name is already in use."});
       account.name = name;
       account.role = role;
+      if (password) account.passwordHash = hashPassword(password);
       await writeUsers(users);
       return sendJson(res, 200, {user: publicUser(account)});
     }

@@ -718,9 +718,11 @@ $("#logoutBtn").onclick = async () => {
 };
 $("#saveAccountSettings").onclick = async () => {
   try {
-    const data = await api("/api/auth/profile", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("#accountSettingsName").value.trim(), role: $("#accountSettingsRole").value }) });
+    const passwordField = $("#accountSettingsPassword");
+    const data = await api("/api/auth/profile", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("#accountSettingsName").value.trim(), role: $("#accountSettingsRole").value, password: passwordField.value }) });
     currentUser = data.user;
     saveUser();
+    passwordField.value = "";
     await loadPlanner();
     renderAll();
     notify("User settings saved");
