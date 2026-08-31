@@ -154,7 +154,7 @@ async function fetchJson(url, options={}) {
   return data;
 }
 async function getInstagramProfile(token) {
-  const fields = "user_id,username,name,profile_picture_url,followers_count,follows_count,media_count";
+  const fields = "user_id,username,account_type,media_count";
   const url = new URL(`https://graph.instagram.com/${API_VERSION}/me`);
   url.searchParams.set("fields", fields);
   url.searchParams.set("access_token", token);
@@ -399,7 +399,7 @@ export async function handleRequest(req, res) {
         return sendJson(res, 200, publicInstagramStatus(session, {profile}));
       } catch (e) {
         console.error("Instagram profile lookup failed:", e.message);
-        return sendJson(res, 200, publicInstagramStatus(session, {connected:false, error:e.message}));
+        return sendJson(res, 200, publicInstagramStatus(session, {connected:true, error:e.message}));
       }
     }
 
