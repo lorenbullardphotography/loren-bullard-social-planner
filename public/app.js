@@ -850,7 +850,7 @@ async function refreshCanvaPreview(post) {
   const button = $("#refreshCanva");
   if (button) { button.disabled = true; button.textContent = "Refreshing…"; }
   try {
-    const data = await api("/api/canva/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ canvaUrl: post.canvaUrl, designId: post.canvaDesignId }) });
+    const data = await api("/api/canva/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ canvaUrl: post.canvaUrl, designId: post.canvaDesignId || undefined }) });
     post.image = data.previewUrl;
     if (data.mediaType === "video") {
       post.assetKind = "video";
