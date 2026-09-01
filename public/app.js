@@ -410,6 +410,25 @@ function renderGrid() {
     node.querySelector(".location-icon").classList.toggle("hidden", !(post.location || post.locationTag || post.tags?.length));
     node.querySelector(".type-icon").textContent = post.type === "REEL" ? "▶" : post.type === "CAROUSEL" ? "▱" : "";
     if (selected === post.id) node.classList.add("selected");
+    const quickDelete = node.querySelector(".tile-delete");
+    quickDelete.addEventListener("pointerdown", event => event.stopPropagation());
+    quickDelete.addEventListener("click", async event => {
+      event.stopPropagation();
+      quickDelete.disabled = true;
+      quickDelete.setAttribute("aria-label", "Deleting asset");
+      const previousPosts = posts;
+      posts = posts.filter(item => item.id !== post.id);
+      if (selected === post.id) selected = null;
+      try {
+        await persistPlanner("removed a post");
+        renderAll();
+        notify("Post deleted from the shared planner");
+      } catch (error) {
+        posts = previousPosts;
+        renderAll();
+        notify(error.message || "The post could not be deleted");
+      }
+    });
     node.onclick = () => { selected = post.id; renderGrid(); renderInspector(); };
     node.addEventListener("dragstart", event => {
       if (post.status === "posted") return event.preventDefault();
