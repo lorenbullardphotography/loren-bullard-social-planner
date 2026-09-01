@@ -1,14 +1,14 @@
 const USER_KEY = "lb-content-planner-user-v1";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
-let selected = null, dragId = null, currentView = "grid", libraryFilter = "all", librarySearch = "";
+let selected = null, dragId = null, currentView = "grid", editorReturnView = "grid", libraryFilter = "all", librarySearch = "";
 let settings = { pillars: [], formats: ["IMAGE", "REEL", "CAROUSEL"], goals: [], syncPhotoCount: 12 };
 let calCursor = new Date(); calCursor.setDate(1);
 
 const demo = (text, bg, fg = "#fff") => `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000"><rect width="100%" height="100%" fill="${bg}"/><circle cx="500" cy="390" r="165" fill="rgba(255,255,255,.15)"/><text x="500" y="585" text-anchor="middle" font-family="Georgia" font-size="57" fill="${fg}">${text}</text></svg>`)}`;
 const seed = [
-  { id: crypto.randomUUID(), image: "/assets/family-films.jpg", status: "planned", approval: "needs-review", type: "REEL", date: "2026-09-08", time: "09:00", scheduleState: "ready", caption: "", notes: "Use emotional family hook.", comments: [] },
-  { id: crypto.randomUUID(), image: "/assets/brand-cover.jpg", status: "draft", approval: "draft", type: "IMAGE", date: "2026-09-11", time: "11:00", scheduleState: "draft", caption: "", notes: "Carousel idea: studio vs. in-home.", comments: [] },
-  { id: crypto.randomUUID(), image: "/assets/couple-mug.png", status: "planned", approval: "approved", type: "IMAGE", date: "2026-09-15", time: "08:30", scheduleState: "scheduled", caption: "", notes: "Sentimental motherhood caption.", comments: [] }
+  { id: crypto.randomUUID(), image: "/assets/family-films.jpg", assetSource: "uploaded", assetKind: "image", status: "planned", approval: "needs-review", type: "REEL", date: "2026-09-08", time: "09:00", scheduleState: "ready", caption: "", notes: "Use emotional family hook.", comments: [] },
+  { id: crypto.randomUUID(), image: "/assets/brand-cover.jpg", assetSource: "uploaded", assetKind: "image", status: "draft", approval: "draft", type: "IMAGE", date: "2026-09-11", time: "11:00", scheduleState: "draft", caption: "", notes: "Carousel idea: studio vs. in-home.", comments: [] },
+  { id: crypto.randomUUID(), image: "/assets/couple-mug.png", assetSource: "uploaded", assetKind: "image", status: "planned", approval: "approved", type: "IMAGE", date: "2026-09-15", time: "08:30", scheduleState: "scheduled", caption: "", notes: "Sentimental motherhood caption.", comments: [] }
 ];
 
 let posts = [];
@@ -56,6 +56,18 @@ function esc(s = "") { return s.replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "
 function safeCanvaUrl(value) {
   try { const url = new URL(value); return url.protocol === "https:" && /(^|\.)canva\.com$/i.test(url.hostname) ? url.toString() : ""; } catch { return ""; }
 }
+function assetKindOf(post) {
+  if (post.assetKind === "video") return "video";
+  if (post.assetKind === "image") return "image";
+  return /\.(mp4|mov|webm|m4v)(\?|$)/i.test(post.image || "") ? "video" : "image";
+}
+function assetSourceOf(post) { return post.assetSource === "canva" || post.canvaUrl ? "canva" : "uploaded"; }
+function assetTypeLabel(post) { return assetKindOf(post) === "video" ? "Video" : "Image"; }
+function assetMediaMarkup(post, className = "") {
+  return assetKindOf(post) === "video"
+    ? `<video class="${className}" src="${esc(post.image)}" muted playsinline preload="metadata"></video>`
+    : `<img class="${className}" src="${esc(post.image)}" alt="">`;
+}
 function scheduleLabel(post) {
   return post.scheduleState === "scheduled" ? "Scheduled" : post.scheduleState === "ready" ? "Ready" : "Draft";
 }
@@ -89,7 +101,7 @@ function isOverdue(post) {
   return Boolean(post.dueDate && post.dueDate < new Date().toISOString().slice(0, 10) && !["published", "archived"].includes(workflowOf(post)));
 }
 function setPlanner(data) {
-  posts = Array.isArray(data?.posts) ? data.posts : [];
+  posts = (Array.isArray(data?.posts) ? data.posts : []).map(post => ({ ...post, assetKind: assetKindOf(post), assetSource: assetSourceOf(post) }));
   team = Array.isArray(data?.team) ? data.team : [];
   activity = Array.isArray(data?.activity) ? data.activity : [];
   presence = Array.isArray(data?.presence) ? data.presence : [];
