@@ -237,10 +237,7 @@ function cropFrameRatio(post) {
   return post.cropRatio === "1:1" ? "1 / 1" : post.cropRatio === "1.91:1" ? "1.91 / 1" : post.cropRatio === "9:16" ? "9 / 16" : "4 / 5";
 }
 function locationSummary(post) {
-  const pin = post.locationTag;
-  const hasPin = pin && Number.isFinite(Number(pin.latitude)) && Number.isFinite(Number(pin.longitude));
-  const tags = Array.isArray(post.tags) && post.tags.length ? `<br><span class="location-tags">${post.tags.map(tag => `#${esc(tag)}`).join(" ")}</span>` : "";
-  return post.location || hasPin || tags ? `<div class="location-summary">${post.location ? `⌖ ${esc(post.location)}` : ""}${hasPin ? ` <a href="https://www.openstreetmap.org/?mlat=${pin.latitude}&mlon=${pin.longitude}#map=15/${pin.latitude}/${pin.longitude}" target="_blank" rel="noopener noreferrer">View map pin</a>` : ""}${tags}</div>` : "";
+  return post.location ? `<div class="location-summary">⌖ ${esc(post.location)}</div>` : "";
 }
 
 async function readExifGps(file) {
@@ -407,7 +404,7 @@ function renderGrid() {
     media.classList.add("crop-rendered");
     media.style.transform = cropTransform(post);
     node.querySelector(".tag").textContent = post.status === "posted" ? "LIVE" : WORKFLOW_LABELS[workflowOf(post)];
-    node.querySelector(".location-icon").classList.toggle("hidden", !(post.location || post.locationTag || post.tags?.length));
+    node.querySelector(".location-icon").classList.toggle("hidden", !post.location);
     node.querySelector(".type-icon").textContent = post.type === "REEL" ? "▶" : post.type === "CAROUSEL" ? "▱" : "";
     if (selected === post.id) node.classList.add("selected");
     const quickDelete = node.querySelector(".tile-delete");
@@ -491,11 +488,10 @@ function renderInspector(hostSelector = "#inspector") {
   const workflowOptions = Object.entries(WORKFLOW_LABELS).map(([key, label]) => `<option value="${key}" ${workflowOf(post) === key ? "selected" : ""}>${label}</option>`).join("");
   const pillarOptions = `<option value="">Choose a pillar</option>` + settings.pillars.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${esc(pillar)}</option>`).join("");
   const cropOptions = ["1:1", "4:5", "1.91:1", "9:16"].map(ratio => `<option value="${ratio}" ${post.cropRatio === ratio ? "selected" : ""}>${ratio} ${ratio === "9:16" ? "· Reel / Story" : "· Feed"}</option>`).join("");
-  const pin = post.locationTag || {};
   host.innerHTML = `<div class="editor editable-editor"><div class="editor-scroll">
     <div class="preview-wrap crop-preview" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post)}</div>
     <div class="asset-meta"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva added" : "Uploaded"}</span></div>
-    <div class="location-card"><div><b>Location & tags</b><small>Add an Instagram-style place, map pin, and searchable tags for this asset.</small></div><label class="field nested">Location name<input id="eLocation" maxlength="120" value="${esc(post.location || pin.name || "")}" placeholder="Crystal Bridges, Bentonville"></label><div class="two"><label class="field nested">Latitude<input id="eLatitude" type="number" step="any" min="-90" max="90" value="${pin.latitude ?? ""}" placeholder="36.3729"></label><label class="field nested">Longitude<input id="eLongitude" type="number" step="any" min="-180" max="180" value="${pin.longitude ?? ""}" placeholder="-94.2088"></label></div><button id="readLocationMetadata" class="ghost" type="button">⌖ Use photo metadata</button><small id="locationHelp" class="field-help">If GPS is available in the original photo, we’ll place the coordinates here.</small><label class="field nested">Generic tags<input id="eTags" value="${esc((post.tags || []).join(", "))}" placeholder="newborn, studio, northwest arkansas"></label><div id="locationMapLink"></div></div>
+    <div class="location-card"><div><b>Location tag</b><small>Add the place where this content was created.</small></div><label class="field nested">Location<input id="eLocation" maxlength="120" value="${esc(post.location || post.locationTag?.name || "")}" placeholder="Crystal Bridges, Bentonville"></label><button id="readLocationMetadata" class="ghost" type="button">⌖ Check photo metadata</button><small id="locationHelp" class="field-help">We’ll use the photo’s embedded location when available.</small></div>
     ${post.canvaUrl ? `<div class="canva-source"><b>Canva working draft</b><span>Preview refreshes from Canva when connected.</span><div class="handoff-actions"><a class="ghost button-link" href="${esc(post.canvaUrl)}" target="_blank" rel="noopener noreferrer">Open in Canva</a><button id="refreshCanva" class="ghost">Refresh preview</button></div></div>` : ""}
     <label class="field">Instagram crop<select id="eCropRatio">${cropOptions}</select><small class="field-help">The preview uses this frame; the original asset stays unchanged.</small></label>
     <label class="field">Zoom <input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="${post.cropZoom || 1}"><small class="field-help">Drag the preview to pan the crop.</small></label>
@@ -614,9 +610,7 @@ function renderInspector(hostSelector = "#inspector") {
     post.tagNotes = q("#eTagNotes").value.trim();
     post.altText = q("#eAltText").value.trim();
     post.location = q("#eLocation").value.trim();
-    const latitude = Number(q("#eLatitude").value), longitude = Number(q("#eLongitude").value);
-    post.locationTag = post.location || Number.isFinite(latitude) || Number.isFinite(longitude) ? { name: post.location, latitude: Number.isFinite(latitude) ? latitude : null, longitude: Number.isFinite(longitude) ? longitude : null, source: post.locationTag?.source || "manual" } : null;
-    post.tags = [...new Set(q("#eTags").value.split(",").map(tag => tag.trim().replace(/^#/, "")).filter(Boolean))].slice(0, 20);
+    post.locationTag = post.location ? { ...(post.locationTag || {}), name: post.location, source: post.locationTag?.source || "manual" } : null;
     post.updatedBy = currentUser.name;
     post.updatedAt = new Date().toISOString();
     try {
@@ -664,23 +658,15 @@ function renderInspector(hostSelector = "#inspector") {
     await persistPlanner("marked content ready for Meta Business Suite");
     notify("Ready for Meta Business Suite");
   };
-  const updateMapLink = () => {
-    const lat = Number(q("#eLatitude")?.value), lng = Number(q("#eLongitude")?.value), name = q("#eLocation")?.value.trim();
-    const link = q("#locationMapLink");
-    if (link && Number.isFinite(lat) && Number.isFinite(lng)) link.innerHTML = `<a class="map-link" href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=15/${lat}/${lng}" target="_blank" rel="noopener noreferrer">⌖ View pinned location on map${name ? ` · ${esc(name)}` : ""}</a>`;
-    else if (link) link.innerHTML = "<span class=field-help>Add latitude and longitude to create a map pin.</span>";
-  };
-  [q("#eLocation"), q("#eLatitude"), q("#eLongitude")].forEach(input => input?.addEventListener("input", updateMapLink));
   q("#readLocationMetadata").onclick = async () => {
     if (assetSourceOf(post) !== "uploaded" || assetKindOf(post) !== "image") return notify("GPS metadata is available for uploaded photos");
     const gps = await readExifGpsFromUrl(post.image);
-    if (!gps) return notify("No GPS metadata found in this photo");
-    q("#eLatitude").value = gps.latitude.toFixed(6); q("#eLongitude").value = gps.longitude.toFixed(6);
-    post.locationTag = { ...(post.locationTag || {}), latitude: gps.latitude, longitude: gps.longitude, source: "metadata" };
-    q("#locationHelp").textContent = "GPS coordinates found in photo metadata. Add a place name if you’d like one shown with the pin.";
-    updateMapLink(); notify("Photo location found");
+    if (!gps) return notify("No location metadata found in this photo");
+    q("#eLocation").value = "Photo location";
+    q("#locationHelp").textContent = "Location metadata found. Replace this with the place name you want displayed.";
+    post.locationTag = { ...(post.locationTag || {}), source: "metadata" };
+    notify("Photo location found");
   };
-  updateMapLink();
   q("#addComment").onclick = async () => {
     const value = q("#commentText").value.trim();
     if (!value) return;
@@ -735,11 +721,11 @@ function renderLibrary() {
   const query = librarySearch.toLowerCase();
   const items = future().filter(post => {
     const matchesFilter = libraryFilter === "all" || post.status === libraryFilter || post.approval === libraryFilter || workflowOf(post) === libraryFilter;
-    const searchable = [post.caption, post.notes, post.pillar, post.client, post.assignee, post.goal, post.hook, post.location, ...(post.tags || [])].join(" ").toLowerCase();
+    const searchable = [post.caption, post.notes, post.pillar, post.client, post.assignee, post.goal, post.hook, post.location].join(" ").toLowerCase();
     return matchesFilter && (!query || searchable.includes(query));
   });
   $("#library").innerHTML = items.length
-    ? items.map(post => `<article class="library-card" data-open-editor="${post.id}"><div class="library-media">${assetMediaMarkup(post)}</div><div class="library-badges"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva added" : "Uploaded"}</span></div><div class="library-info"><b>${esc(post.notes || post.caption || "Untitled content")}</b><span>${esc(`${post.type} · ${formatSchedule(post)} · ${WORKFLOW_LABELS[workflowOf(post)]}${post.pillar ? ` · ${post.pillar}` : ""}`)}</span>${post.location || post.tags?.length ? `<small class="library-location">⌖ ${esc(post.location || "Tagged asset")}${post.tags?.length ? ` · ${post.tags.map(tag => `#${esc(tag)}`).join(" ")}` : ""}</small>` : ""}</div></article>`).join("")
+    ? items.map(post => `<article class="library-card" data-open-editor="${post.id}"><div class="library-media">${assetMediaMarkup(post)}</div><div class="library-badges"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva added" : "Uploaded"}</span></div><div class="library-info"><b>${esc(post.notes || post.caption || "Untitled content")}</b><span>${esc(`${post.type} · ${formatSchedule(post)} · ${WORKFLOW_LABELS[workflowOf(post)]}${post.pillar ? ` · ${post.pillar}` : ""}`)}</span>${post.location ? `<small class="library-location">⌖ ${esc(post.location)}</small>` : ""}</div></article>`).join("")
     : `<div class="empty">No content in this view yet.</div>`;
   $$("[data-open-editor]").forEach(node => node.onclick = () => openPost(node.dataset.openEditor, true));
 }
@@ -816,7 +802,8 @@ $("#upload").onchange = async event => {
         scheduleState: "draft",
         caption: "",
         notes: "",
-        locationTag: photoGps ? { latitude: photoGps.latitude, longitude: photoGps.longitude, name: "", source: "metadata" } : null,
+        location: photoGps ? "Photo location" : "",
+        locationTag: photoGps ? { name: "Photo location", latitude: photoGps.latitude, longitude: photoGps.longitude, source: "metadata" } : null,
         tags: [],
         comments: [],
         updatedBy: currentUser.name,
