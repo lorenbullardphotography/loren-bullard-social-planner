@@ -425,6 +425,7 @@ function normalizePost(post) {
     canvaDesignId: String(post?.canvaDesignId || "").slice(0, 200),
     canvaDesignTypes: Array.isArray(post?.canvaDesignTypes) ? post.canvaDesignTypes.map(type => String(type).slice(0, 40)).slice(0, 8) : [],
     canvaDoctypeName: String(post?.canvaDoctypeName || "").slice(0, 120),
+    canvaFileTypes: Array.isArray(post?.canvaFileTypes) ? post.canvaFileTypes.map(type => String(type).slice(0, 20)).slice(0, 8) : [],
     canvaPageCount: Math.max(0, Math.min(500, Number(post?.canvaPageCount) || 0)),
     canvaPreviewUpdatedAt: String(post?.canvaPreviewUpdatedAt || ""),
     assetKind: post?.assetKind === "video" ? "video" : "image",
@@ -735,6 +736,15 @@ export async function handleRequest(req, res) {
       if (query) params.set("query", query.slice(0, 255));
       const data = await fetchJson(`https://api.canva.com/rest/v1/designs?${params}`, { headers: { Authorization: `Bearer ${token}` } });
       return sendJson(res, 200, { designs: (data.items || []).map(design => ({ id: design.id, title: design.title || "Untitled design", updatedAt: design.updated_at || null, thumbnail: design.thumbnail?.url || "", editUrl: design.urls?.edit_url || "", viewUrl: design.urls?.view_url || "", doctypeName: design.doctype_name || "", designTypes: Array.isArray(design.design_types) ? design.design_types : [], pageCount: design.page_count || 0 })), continuation: data.continuation || null });
+    }
+
+    if (url.pathname === "/api/canva/design-export-formats" && req.method === "GET") {
+      const token = await canvaAccessToken(account.id);
+      if (!token) return sendJson(res, 503, { error: "Connect Canva in Settings before checking design formats." });
+      const designId = String(url.searchParams.get("designId") || "").slice(0, 200);
+      if (!designId) return sendJson(res, 400, { error: "A Canva design ID is required." });
+      const data = await fetchJson(`https://api.canva.com/rest/v1/designs/${encodeURIComponent(designId)}/export-formats`, { headers: { Authorization: `Bearer ${token}` } });
+      return sendJson(res, 200, { formats: data.formats || {} });
     }
 
     if (url.pathname === "/api/instagram/media") {
