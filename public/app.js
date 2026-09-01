@@ -625,10 +625,7 @@ function renderInspector(hostSelector = "#inspector") {
       <label class="field">Workflow<select id="eWorkflow">${workflowOptions}</select></label>
       <label class="field">Assigned to<input id="eAssignee" value="${esc(post.assignee || "")}" placeholder="Loren or social planner"></label>
     </div>
-    <div class="two">
-      <label class="field">Due date<input id="eDueDate" type="date" value="${post.dueDate || ""}"></label>
-      <label class="field">Priority<select id="ePriority"><option value="low" ${post.priority === "low" ? "selected" : ""}>Low</option><option value="normal" ${post.priority === "normal" ? "selected" : ""}>Normal</option><option value="high" ${post.priority === "high" ? "selected" : ""}>High</option></select></label>
-    </div>
+    <label class="field">Priority<select id="ePriority"><option value="low" ${post.priority === "low" ? "selected" : ""}>Low</option><option value="normal" ${post.priority === "normal" ? "selected" : ""}>Normal</option><option value="high" ${post.priority === "high" ? "selected" : ""}>High</option></select></label>
     <div class="two">
       <label class="field">Content pillar<select id="ePillar">${pillarOptions}</select></label>
       <label class="field">Format<select id="eType">${settings.formats.map(format => `<option ${post.type === format ? "selected" : ""}>${esc(format)}</option>`).join("")}</select></label>
@@ -738,7 +735,6 @@ function renderInspector(hostSelector = "#inspector") {
     post.type = q("#eType").value;
     applyWorkflow(post, q("#eWorkflow").value);
     post.assignee = q("#eAssignee").value.trim();
-    post.dueDate = q("#eDueDate").value;
     post.priority = q("#ePriority").value;
     post.pillar = q("#ePillar").value;
     post.date = q("#eScheduleDate").value;
