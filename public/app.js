@@ -344,7 +344,7 @@ function renderInspector(hostSelector = "#inspector") {
   const workflowOptions = Object.entries(WORKFLOW_LABELS).map(([key, label]) => `<option value="${key}" ${workflowOf(post) === key ? "selected" : ""}>${label}</option>`).join("");
   const pillarOptions = `<option value="">Choose a pillar</option>` + settings.pillars.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${esc(pillar)}</option>`).join("");
   const cropOptions = ["1:1", "4:5", "1.91:1", "9:16"].map(ratio => `<option value="${ratio}" ${post.cropRatio === ratio ? "selected" : ""}>${ratio} ${ratio === "9:16" ? "· Reel / Story" : "· Feed"}</option>`).join("");
-  host.innerHTML = `<div class="editor">
+  host.innerHTML = `<div class="editor editable-editor"><div class="editor-scroll">
     <div class="preview-wrap crop-preview" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post)}</div>
     <label class="field">Instagram crop<select id="eCropRatio">${cropOptions}</select><small class="field-help">The preview uses this frame; the original asset stays unchanged.</small></label>
     <label class="field">Zoom <input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="${post.cropZoom || 1}"><small class="field-help">Drag the preview to pan the crop.</small></label>
@@ -383,6 +383,7 @@ function renderInspector(hostSelector = "#inspector") {
     </div>
     <div class="handoff"><b>Meta Business Suite handoff</b><span>Use Meta for final scheduling and publishing.</span><div class="handoff-actions"><button id="copyCaption" class="ghost">Copy caption</button><button id="copyHashtags" class="ghost">Copy hashtags</button><a class="ghost button-link" href="https://business.facebook.com/latest/home" target="_blank" rel="noopener noreferrer">Open Meta</a></div><button id="markMeta" class="primary">Mark ready for Meta</button></div>
     <div class="posted-lock">Last updated${post.updatedBy ? ` by <b>${esc(post.updatedBy)}</b>` : ""}${post.updatedAt ? ` on ${new Date(post.updatedAt).toLocaleString()}` : ""}.</div>
+    </div>
     <div class="actions"><button id="saveEdit" class="primary">Save</button><button id="deleteEdit" class="danger">Delete</button></div>
   </div>`;
   $$("[data-ap]").forEach(button => {
@@ -397,8 +398,9 @@ function renderInspector(hostSelector = "#inspector") {
   const cropPreview = host.querySelector(".crop-preview");
   const cropMedia = host.querySelector(".crop-media");
   const applyCrop = () => {
+    if (!cropMedia) return;
     cropPreview.style.aspectRatio = cropFrameRatio(post);
-    const zoom = post.cropZoom || 1;
+    const zoom = Number(post.cropZoom) || 1;
     const maxX = cropPreview.clientWidth * (zoom - 1) / 2;
     const maxY = cropPreview.clientHeight * (zoom - 1) / 2;
     const tx = ((post.cropX || 50) - 50) / 50 * maxX;
@@ -406,7 +408,10 @@ function renderInspector(hostSelector = "#inspector") {
     cropMedia.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + zoom + ")";
   };
   $("#eCropRatio").onchange = () => { post.cropRatio = $("#eCropRatio").value; applyCrop(); };
-  $("#eCropZoom").oninput = () => { post.cropZoom = Number($("#eCropZoom").value); applyCrop(); };
+  $("#eCropZoom").oninput = () => {
+    post.cropZoom = Number($("#eCropZoom").value);
+    applyCrop();
+  };
   let dragStart = null;
   cropPreview.ondragstart = event => event.preventDefault();
   cropPreview.onpointerdown = event => {
@@ -426,6 +431,7 @@ function renderInspector(hostSelector = "#inspector") {
   };
   cropPreview.onpointerup = () => { dragStart = null; };
   cropPreview.onpointercancel = () => { dragStart = null; };
+  applyCrop();
   $("#saveEdit").onclick = async () => {
     post.type = $("#eType").value;
     post.cropRatio = $("#eCropRatio").value;
