@@ -235,7 +235,7 @@ async function refreshStorageUsage() {
   try {
     const usage = await api("/api/storage/usage");
     const remaining = Math.max(0, usage.limitBytes - usage.usedBytes);
-    host.innerHTML = '<div class="storage-meter"><span style="width:' + usage.usedPercent + '%"></span></div><strong>' + formatBytes(remaining) + ' remaining</strong><small>' + formatBytes(usage.usedBytes) + ' used of ' + formatBytes(usage.limitBytes) + (usage.configured ? "" : " · Connect Blob to enable cloud storage") + '</small>';
+    host.innerHTML = '<div class="storage-meter"><span style="width:' + usage.usedPercent + '%"></span></div><strong>' + formatBytes(remaining) + ' remaining</strong><small>' + formatBytes(usage.usedBytes) + ' used of ' + formatBytes(usage.limitBytes) + (usage.configured ? " · Blob connected" : " · Blob not connected") + '</small><small>Planner data: ' + usage.plannerStorage + '</small>';
   } catch (error) {
     host.textContent = "Storage usage unavailable";
   } finally {

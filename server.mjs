@@ -662,6 +662,9 @@ export async function handleRequest(req, res) {
       const ext = mime === "video/quicktime" ? "mov" : (mime.split("/")[1] || "bin").replace(/[^a-z0-9]/g, "");
       const filename = `${crypto.randomUUID()}.${ext}`;
       const blob = await blobClient();
+      if (process.env.VERCEL && !blob) {
+        return sendJson(res, 503, { error: "Vercel Blob is not connected to this production environment. Add BLOB_READ_WRITE_TOKEN under Production environment variables, then redeploy." });
+      }
       if (blob) {
         const usage = await blobUsage();
         if (usage.usedBytes + bytes.length > usage.limitBytes) {
@@ -684,6 +687,7 @@ export async function handleRequest(req, res) {
       const usage = await blobUsage();
       return sendJson(res, 200, {
         ...usage,
+        plannerStorage: storageMode(),
         usedPercent: usage.limitBytes ? Math.min(100, Math.round(usage.usedBytes / usage.limitBytes * 100)) : 0
       });
     }
