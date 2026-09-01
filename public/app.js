@@ -761,10 +761,11 @@ function switchView(name) {
   $$(".view").forEach(view => view.classList.add("hidden"));
   $(`#view-${name}`).classList.remove("hidden");
   $$(".nav").forEach(nav => nav.classList.toggle("active", nav.dataset.view === name));
-  $("#pageTitle").textContent = { grid: "Grid Planner", calendar: "Calendar", library: "Content Library", approvals: "Approvals", editor: "Edit post", settings: "Settings" }[name];
+  $("#pageTitle").textContent = { grid: "Grid Planner", calendar: "Calendar", library: "Content Library", approvals: "Approvals", activity: "Team Activity", editor: "Edit post", settings: "Settings" }[name];
   if (name !== "grid") $("#inspector").innerHTML = "";
   if (name !== "editor") $("#postEditor").innerHTML = "";
   if (name === "settings") renderPlannerSettings();
+  if (name === "activity") renderActivity();
   if (name === "grid") renderInspector();
   if (name === "editor") renderInspector("#postEditor");
 }
