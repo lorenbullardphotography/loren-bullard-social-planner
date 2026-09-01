@@ -613,16 +613,12 @@ function renderInspector(hostSelector = "#inspector") {
   const comments = (post.comments || []).map(comment => `<div class="comment"><b>${esc(comment.author)}${comment.role ? ` · ${esc(comment.role)}` : ""}</b>${esc(comment.text)}</div>`).join("");
   const workflowOptions = Object.entries(WORKFLOW_LABELS).map(([key, label]) => `<option value="${key}" ${workflowOf(post) === key ? "selected" : ""}>${label}</option>`).join("");
   const pillarOptions = `<option value="">Choose a pillar</option>` + settings.pillars.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${esc(pillar)}</option>`).join("");
-  const cropPresets = [
-    ["1:1", "Square"], ["4:5", "Portrait"], ["1.91:1", "Landscape"], ["9:16", "Story"]
-  ].map(([ratio, label]) => `<button type="button" class="crop-ratio" data-crop-ratio="${ratio}" aria-pressed="${post.cropRatio === ratio}">${label}</button>`).join("");
   host.innerHTML = `<div class="editor editable-editor"><div class="editor-mobile-heading"><div><span class="eyebrow">EDITING SELECTED POST</span><b>${esc(post.caption || post.notes || assetTypeLabel(post))}</b></div><span>Swipe through fields below</span></div><div class="editor-scroll">
-    <div class="preview-wrap${cropLocked ? "" : " crop-preview"}" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post, cropLocked)}${cropLocked ? "" : '<div class="crop-grid" aria-hidden="true"></div><span class="crop-hint">Drag to reposition</span><label class="crop-zoom-overlay"><span>Zoom</span><input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="' + Math.max(1, Math.min(3, Number(post.cropZoom) || 1)) + '" aria-label="Crop zoom"><output id="cropOverlayZoom">100%</output></label>'}</div>
+    <div class="preview-wrap${cropLocked ? "" : " crop-preview"}" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post, cropLocked)}${cropLocked ? "" : '<div class="crop-grid" aria-hidden="true"></div><span class="crop-hint">Drag to reposition</span><div class="crop-zoom-overlay"><span>Zoom</span><input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="' + Math.max(1, Math.min(3, Number(post.cropZoom) || 1)) + '" aria-label="Crop zoom"><output id="cropOverlayZoom">100%</output><button id="resetCrop" class="crop-overlay-reset" type="button" aria-label="Reset crop" title="Reset crop">↺</button></div>'}</div>
     <div class="asset-meta"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva added" : "Uploaded"}</span>${hasReelCover(post) ? '<span class="asset-badge cover-badge">Cover attached</span>' : ""}</div>
     ${post.type === "REEL" || assetKindOf(post) === "video" ? `<div class="cover-card"><div><b>Reel cover photo</b><small>${post.coverImage ? "This image appears on the grid instead of the video frame." : "Add an image to choose the frame shown on the grid."}</small></div>${post.coverImage ? `<img class="cover-thumb" src="${esc(post.coverImage)}" alt="Reel cover photo">` : ""}<div class="handoff-actions"><label class="ghost button-link cover-upload-label">${post.coverImage ? "Replace cover" : "Upload cover photo"}<input id="coverInput" type="file" accept="image/*" hidden></label>${post.coverImage ? '<button id="removeCover" class="ghost" type="button">Remove cover</button>' : ""}</div><small id="coverHelp" class="field-help"></small></div>` : ""}
     <div class="location-card"><div><b>Location tag</b><small>Add the place where this content was created.</small></div><label class="field nested">Location<input id="eLocation" maxlength="120" value="${esc(post.location || post.locationTag?.name || "")}" placeholder="Crystal Bridges, Bentonville"></label><button id="readLocationMetadata" class="ghost" type="button">⌖ Check photo metadata</button><small id="locationHelp" class="field-help">We’ll use the photo’s embedded location when available.</small></div>
     ${post.canvaUrl ? `<div class="canva-source"><b>Canva working draft</b><span>Preview refreshes from Canva when connected.</span><div class="handoff-actions"><a class="ghost button-link" href="${esc(post.canvaUrl)}" target="_blank" rel="noopener noreferrer">Open in Canva</a><button id="refreshCanva" class="ghost">Refresh preview</button></div></div>` : ""}
-    ${cropLocked ? "" : `<section class="crop-tools" aria-label="Crop controls"><div class="crop-tools-head"><div><b>Crop &amp; framing</b><small>Drag the image to reposition.</small></div><button id="resetCrop" class="crop-reset" type="button">↺ Reset</button></div><div class="crop-ratios" role="group" aria-label="Crop aspect ratio">${cropPresets}</div><div class="zoom-controls" role="group" aria-label="Zoom"><button id="zoomOut" class="zoom-button" type="button" aria-label="Zoom out">−</button><output id="cropZoomValue" aria-live="polite">100%</output><button id="zoomIn" class="zoom-button" type="button" aria-label="Zoom in">+</button></div></section>`}
     <div class="two">
       <label class="field">Workflow<select id="eWorkflow">${workflowOptions}</select></label>
       <label class="field">Assigned to<input id="eAssignee" value="${esc(post.assignee || "")}" placeholder="Loren or social planner"></label>
@@ -683,19 +679,9 @@ function renderInspector(hostSelector = "#inspector") {
     const tx = (x - 50) / 50 * maxX;
     const ty = (y - 50) / 50 * maxY;
     cropMedia.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${zoom})`;
-    if (q("#cropZoomValue")) q("#cropZoomValue").textContent = `${Math.round(zoom * 100)}%`;
     if (q("#cropOverlayZoom")) q("#cropOverlayZoom").textContent = `${Math.round(zoom * 100)}%`;
     if (q("#eCropZoom")) q("#eCropZoom").value = zoom;
-    qq("[data-crop-ratio]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.cropRatio === post.cropRatio)));
   };
-  qq("[data-crop-ratio]").forEach(button => button.onclick = () => { post.cropRatio = button.dataset.cropRatio; applyCrop(); });
-  const changeZoom = amount => {
-    const currentZoom = Math.max(1, Math.min(3, Number(post.cropZoom) || 1));
-    post.cropZoom = Math.max(1, Math.min(3, Math.round((currentZoom + amount) * 100) / 100));
-    applyCrop();
-  };
-  if (q("#zoomOut")) q("#zoomOut").onclick = () => changeZoom(-0.1);
-  if (q("#zoomIn")) q("#zoomIn").onclick = () => changeZoom(0.1);
   if (q("#eCropZoom")) {
     q("#eCropZoom").oninput = event => {
       post.cropZoom = Number(event.currentTarget.value);
@@ -709,6 +695,7 @@ function renderInspector(hostSelector = "#inspector") {
     post.cropY = 50;
     applyCrop();
   };
+  if (q("#resetCrop")) q("#resetCrop").onpointerdown = event => event.stopPropagation();
   let dragStart = null;
   if (cropPreview) cropPreview.ondragstart = event => event.preventDefault();
   if (cropPreview) cropPreview.onpointerdown = event => {
