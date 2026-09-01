@@ -8,6 +8,7 @@
     "dev": "node server.mjs"
   },
   "dependencies": {
+    "@vercel/blob": "^2.0.0",
     "postgres": "^3.4.7"
   },
   "engines": {

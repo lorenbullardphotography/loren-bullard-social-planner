@@ -34,6 +34,7 @@ const REDIRECT_URI = process.env.INSTAGRAM_REDIRECT_URI || `http://localhost:${P
 const API_VERSION = process.env.META_API_VERSION || "v25.0";
 const PLANNER_PASSWORD = process.env.PLANNER_PASSWORD || "";
 const AUTH_SECRET = process.env.AUTH_SECRET || PLANNER_PASSWORD || "planner-development-secret";
+const ASSET_STORAGE_LIMIT_MB = Math.max(50, Number(process.env.ASSET_STORAGE_LIMIT_MB) || 500);
 const ACCOUNT_SESSION_DAYS = 14;
 
 const ROLE_VALUES = ["Photographer", "Social Media Manager", "Assistant", "Editor"];
@@ -284,6 +285,31 @@ async function refreshLongLivedToken(session) {
   };
   await writeSession(next);
   return next;
+}
+async function blobClient() {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
+  return import("@vercel/blob");
+}
+async function blobUsage() {
+  const client = await blobClient();
+  if (!client) return { configured: false, usedBytes: 0, limitBytes: ASSET_STORAGE_LIMIT_MB * 1024 * 1024 };
+  let cursor;
+  let usedBytes = 0;
+  do {
+    const page = await client.list({ prefix: "planner/", ...(cursor ? { cursor } : {}) });
+    usedBytes += (page.blobs || []).reduce((total, blob) => total + Number(blob.size || 0), 0);
+    cursor = page.hasMore ? page.cursor : null;
+  } while (cursor);
+  return { configured: true, usedBytes, limitBytes: ASSET_STORAGE_LIMIT_MB * 1024 * 1024 };
+}
+async function deleteBlobUrl(url) {
+  if (!url || !url.includes(".blob.vercel-storage.com")) return;
+  try {
+    const client = await blobClient();
+    if (client) await client.del(url);
+  } catch (error) {
+    console.error("Blob cleanup failed:", error.message);
+  }
 }
 
 function publicInstagramStatus(session, extra = {}) {
@@ -572,7 +598,10 @@ export async function handleRequest(req, res) {
       if (Number.isFinite(Number(body.version)) && Number(body.version) !== planner.version) {
         return sendJson(res, 409, { error: "This planner changed in another browser. Refresh to review the latest version before saving.", planner });
       }
+      const previousUrls = new Set(planner.posts.map(post => post.image).filter(Boolean));
       planner.posts = Array.isArray(body.posts) ? body.posts.map(post => normalizePost({ ...post, updatedBy: body?.actor?.name || post.updatedBy })) : planner.posts;
+      const nextUrls = new Set(planner.posts.map(post => post.image).filter(Boolean));
+      await Promise.all([...previousUrls].filter(url => !nextUrls.has(url)).map(deleteBlobUrl));
       planner.settings = normalizeSettings(body.settings || planner.settings);
       upsertTeamMember(planner, body.actor);
       addActivity(planner, body.reason ? `${body?.actor?.name || "Team"} ${body.reason}` : "");
@@ -632,6 +661,15 @@ export async function handleRequest(req, res) {
       if (bytes.length > 30 * 1024 * 1024) return sendJson(res, 413, { error: "Assets must be 30 MB or smaller." });
       const ext = mime === "video/quicktime" ? "mov" : (mime.split("/")[1] || "bin").replace(/[^a-z0-9]/g, "");
       const filename = `${crypto.randomUUID()}.${ext}`;
+      const blob = await blobClient();
+      if (blob) {
+        const usage = await blobUsage();
+        if (usage.usedBytes + bytes.length > usage.limitBytes) {
+          return sendJson(res, 413, { error: `Storage limit reached. ${Math.max(0, usage.limitBytes - usage.usedBytes)} bytes remain.` });
+        }
+        const saved = await blob.put(`planner/${filename}`, bytes, { access: "public", contentType: mime, addRandomSuffix: false });
+        return sendJson(res, 201, { url: saved.url, kind: mime.startsWith("video/") ? "video" : "image", storage: "blob" });
+      }
       try {
         fs.mkdirSync(uploadsDir, { recursive: true });
         fs.writeFileSync(path.join(uploadsDir, filename), bytes);
@@ -640,6 +678,14 @@ export async function handleRequest(req, res) {
         if (!["EROFS", "EACCES", "ENOENT"].includes(error.code)) throw error;
         return sendJson(res, 201, { url: body.data, kind: mime.startsWith("video/") ? "video" : "image", storage: "planner" });
       }
+    }
+
+    if (url.pathname === "/api/storage/usage" && req.method === "GET") {
+      const usage = await blobUsage();
+      return sendJson(res, 200, {
+        ...usage,
+        usedPercent: usage.limitBytes ? Math.min(100, Math.round(usage.usedBytes / usage.limitBytes * 100)) : 0
+      });
     }
 
     if (url.pathname === "/api/instagram/refresh" && req.method === "POST") {

@@ -220,6 +220,27 @@ function renderPlannerSettings() {
   $("#settingsDisconnect").classList.toggle("hidden", !connected);
   $("#accountSettingsName").value = currentUser.name;
   $("#accountSettingsRole").value = currentUser.role;
+  refreshStorageUsage();
+}
+function formatBytes(bytes) {
+  if (!bytes) return "0 MB";
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return (bytes / Math.pow(1024, index)).toFixed(index ? 1 : 0) + " " + units[index];
+}
+async function refreshStorageUsage() {
+  const host = $("#storageUsage");
+  if (!host || refreshStorageUsage.running) return;
+  refreshStorageUsage.running = true;
+  try {
+    const usage = await api("/api/storage/usage");
+    const remaining = Math.max(0, usage.limitBytes - usage.usedBytes);
+    host.innerHTML = '<div class="storage-meter"><span style="width:' + usage.usedPercent + '%"></span></div><strong>' + formatBytes(remaining) + ' remaining</strong><small>' + formatBytes(usage.usedBytes) + ' used of ' + formatBytes(usage.limitBytes) + (usage.configured ? "" : " · Connect Blob to enable cloud storage") + '</small>';
+  } catch (error) {
+    host.textContent = "Storage usage unavailable";
+  } finally {
+    refreshStorageUsage.running = false;
+  }
 }
 function renderAttention() {
   const items = future().filter(post => isOverdue(post) || workflowOf(post) === "needs-review" || workflowOf(post) === "ready-meta" || (post.assignee && post.assignee === currentUser.name)).sort((a, b) => {
