@@ -557,7 +557,7 @@ async function refreshCanvaPreview(post) {
   const button = $("#refreshCanva");
   if (button) { button.disabled = true; button.textContent = "Refreshing…"; }
   try {
-    const data = await api("/api/canva/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ canvaUrl: post.canvaUrl }) });
+    const data = await api("/api/canva/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ canvaUrl: post.canvaUrl, designId: post.canvaDesignId }) });
     post.image = data.previewUrl;
     post.canvaPreviewUpdatedAt = new Date().toISOString();
     post.updatedBy = currentUser.name;
@@ -695,22 +695,29 @@ $("#upload").onchange = async event => {
     event.target.value = "";
   }
 };
-$("#addCanvaBtn").onclick = async () => {
-  const raw = window.prompt("Paste the Canva design link for this working draft:");
-  if (!raw) return;
-  const canvaUrl = safeCanvaUrl(raw.trim());
-  if (!canvaUrl || !/\/design\//i.test(canvaUrl)) return notify("Please paste a Canva design link");
-  const id = crypto.randomUUID();
-  const post = { id, image: "/assets/brand-cover.jpg", canvaUrl, assetKind: "image", cropRatio: "4:5", status: "draft", approval: "draft", type: "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: "Canva working draft", comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
-  posts.unshift(post); selected = id; renderAll();
+async function loadCanvaDesigns(query = "") {
+  const host = $("#canvaDesignList");
+  host.innerHTML = '<div class="empty">Loading Canva designs…</div>';
   try {
-    await persistPlanner("added a Canva working draft");
-    const canvaStatus = await api("/api/canva/status");
-    if (canvaStatus.connected) await refreshCanvaPreview(post);
-    else notify("Canva draft added — open the link to review it");
-  }
-  catch (error) { posts = posts.filter(item => item.id !== id); renderAll(); notify(error.message || "Canva draft could not be added"); }
+    const data = await api(`/api/canva/designs${query ? `?query=${encodeURIComponent(query)}` : ""}`);
+    host.innerHTML = data.designs?.length ? data.designs.map(design => `<button class="canva-design" data-canva-id="${esc(design.id)}"><img src="${esc(design.thumbnail)}" alt=""><span><b>${esc(design.title)}</b><small>${design.updatedAt ? new Date(design.updatedAt * 1000).toLocaleDateString() : "Canva design"}</small></span></button>`).join("") : '<div class="empty">No Canva designs found.</div>';
+    $$("[data-canva-id]").forEach(button => button.onclick = () => addCanvaDesign(data.designs.find(design => design.id === button.dataset.canvaId)));
+  } catch (error) { host.innerHTML = `<div class="empty">${esc(error.message || "Canva designs could not be loaded")}</div>`; }
+}
+function addCanvaDesign(design) {
+  if (!design) return;
+  const id = crypto.randomUUID();
+  const post = { id, image: design.thumbnail || "/assets/brand-cover.jpg", canvaUrl: design.editUrl || design.viewUrl, canvaDesignId: design.id, assetKind: "image", cropRatio: "4:5", status: "draft", approval: "draft", type: "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: design.title, comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
+  posts.unshift(post); selected = id; $("#canvaModal").classList.add("hidden"); renderAll();
+  persistPlanner("added a Canva working draft").then(() => notify("Canva draft added")).catch(error => { posts = posts.filter(item => item.id !== id); renderAll(); notify(error.message || "Canva draft could not be added"); });
+}
+$("#addCanvaBtn").onclick = async () => {
+  $("#canvaModal").classList.remove("hidden");
+  $("#canvaSearch").value = "";
+  await loadCanvaDesigns();
 };
+$("#closeCanva").onclick = () => $("#canvaModal").classList.add("hidden");
+$("#canvaSearch").oninput = event => { clearTimeout(loadCanvaDesigns.timer); loadCanvaDesigns.timer = setTimeout(() => loadCanvaDesigns(event.target.value.trim()), 300); };
 $("#exportBtn").onclick = exportBackup;
 $("#importInput").onchange = async event => {
   const [file] = event.target.files;
@@ -732,8 +739,6 @@ async function checkInstagram() {
   try {
     igStatus = await api("/api/instagram/status");
     const connected = igStatus.connected;
-    $("#connectionDot").classList.toggle("on", connected);
-    $("#sideStatus").textContent = connected ? `Connected as @${igStatus.profile?.username || "Instagram"}` : (igStatus.configured ? "Ready to connect" : "Meta setup needed");
     $("#liveBadge").classList.toggle("offline", !connected);
     $("#liveBadge").textContent = connected ? "Instagram connected" : "Not connected";
     if (connected) {
@@ -745,7 +750,6 @@ async function checkInstagram() {
     }
     renderSettings();
   } catch (error) {
-    $("#sideStatus").textContent = "Local server issue";
     renderSettings(error.message);
   }
 }

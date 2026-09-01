@@ -217,7 +217,7 @@ function isValidOAuthState(state) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 function canvaDesignId(value) {
-  const match = String(value || "").match(/\/design\/([A-Za-z0-9_-]+)/);
+  const match = String(value || "").match(/\/(?:design|api\/design)\/([A-Za-z0-9_-]+)/);
   return match ? match[1] : "";
 }
 async function exportCanvaPreview(designId, token) {
@@ -421,6 +421,7 @@ function normalizePost(post) {
     metaId: post?.metaId ? String(post.metaId) : "",
     image: String(post?.image || ""),
     canvaUrl: String(post?.canvaUrl || "").slice(0, 2000),
+    canvaDesignId: String(post?.canvaDesignId || "").slice(0, 200),
     canvaPreviewUpdatedAt: String(post?.canvaPreviewUpdatedAt || ""),
     assetKind: post?.assetKind === "video" ? "video" : "image",
     cropRatio: ["1:1", "4:5", "1.91:1", "9:16"].includes(post?.cropRatio) ? post.cropRatio : "4:5",
@@ -705,7 +706,7 @@ export async function handleRequest(req, res) {
 
     if (url.pathname === "/api/canva/preview" && req.method === "POST") {
       const body = await readBody(req);
-      const designId = canvaDesignId(body.canvaUrl);
+      const designId = String(body.designId || canvaDesignId(body.canvaUrl) || "").slice(0, 200);
       if (!designId) return sendJson(res, 400, { error: "Paste a Canva design link (the link should contain /design/...)." });
       const token = await canvaAccessToken(account.id);
       if (!token) return sendJson(res, 503, { error: "Connect Canva in Settings before refreshing previews." });
@@ -713,6 +714,16 @@ export async function handleRequest(req, res) {
       const session = await readCanvaSession(account.id);
       await writeCanvaSession(account.id, { ...session, last_synced_at: new Date().toISOString() });
       return sendJson(res, 200, { previewUrl });
+    }
+
+    if (url.pathname === "/api/canva/designs" && req.method === "GET") {
+      const token = await canvaAccessToken(account.id);
+      if (!token) return sendJson(res, 503, { error: "Connect Canva in Settings before browsing designs." });
+      const params = new URLSearchParams({ limit: "50", sort_by: "modified_descending", ownership: "any" });
+      const query = url.searchParams.get("query");
+      if (query) params.set("query", query.slice(0, 255));
+      const data = await fetchJson(`https://api.canva.com/rest/v1/designs?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+      return sendJson(res, 200, { designs: (data.items || []).map(design => ({ id: design.id, title: design.title || "Untitled design", updatedAt: design.updated_at || null, thumbnail: design.thumbnail?.url || "", editUrl: design.urls?.edit_url || "", viewUrl: design.urls?.view_url || "" })), continuation: data.continuation || null });
     }
 
     if (url.pathname === "/api/instagram/media") {
@@ -809,13 +820,13 @@ export async function handleRequest(req, res) {
     }
 
     if (url.pathname === "/auth/canva") {
-      if (!CANVA_CLIENT_ID) return redirect(res, "/?canva=not-configured");
+      if (!CANVA_CLIENT_ID || !CANVA_CLIENT_SECRET) return redirect(res, "/?canva=not-configured");
       const { state, challenge } = await createCanvaOAuthState(account.id);
       const auth = new URL("https://www.canva.com/api/oauth/authorize");
       auth.searchParams.set("client_id", CANVA_CLIENT_ID);
       auth.searchParams.set("redirect_uri", CANVA_REDIRECT_URI);
       auth.searchParams.set("response_type", "code");
-      auth.searchParams.set("scope", "design:content:read");
+      auth.searchParams.set("scope", "design:content:read design:meta:read");
       auth.searchParams.set("code_challenge", challenge);
       auth.searchParams.set("code_challenge_method", "s256");
       auth.searchParams.set("state", state);

@@ -92,7 +92,7 @@ For automatic image previews, create a Canva Connect integration in the Canva De
 - `CANVA_CLIENT_SECRET`
 - `CANVA_REDIRECT_URI` (for example, `https://your-planner-domain.com/auth/canva/callback`)
 
-The Canva integration must allow the `design:content:read` scope. Then open Planner settings and choose **Connect Canva**. The planner can generate a fresh JPG preview from a linked design; the original Canva file remains the working source.
+The Canva integration must allow `design:content:read` and `design:meta:read`. Then open Planner settings and choose **Connect Canva**. The planner can browse designs and generate a fresh JPG preview; the original Canva file remains the working source.
 
 Each signed-in planner user authorizes Canva separately. The planner stores each user's access and refresh tokens server-side under that user's account, refreshes access tokens when needed, and uses the signed-in user’s Canva connection for preview exports.
 

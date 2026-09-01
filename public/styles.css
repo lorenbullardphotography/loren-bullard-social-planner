@@ -59,8 +59,8 @@ main{min-width:0}.top{height:86px;padding:19px 32px;background:rgba(255,253,250,
 :root{--bg:#eef2f2;--panel:#fffefa;--ink:#343438;--muted:#777d7d;--line:#dce4e4;--brand:#b2c4ce;--brand2:#788ca5;--green:#82988e;--amber:#b6a08a;--violet:#8d84a3;--shadow:0 18px 46px rgba(63,76,82,.09)}
 body{font-family:Poppins,Arial,sans-serif;background:radial-gradient(circle at 90% 0%,#f8f5f2 0,transparent 30%),var(--bg);color:var(--ink)}
 .side{background:#343437;padding:28px 18px 22px;border-right:1px solid rgba(255,255,255,.08)}
-.brand{padding:0 5px 32px;align-items:center}.brand .monogram{width:48px;height:48px;border-radius:50%;background:#d7e1e4;overflow:hidden;padding:5px}.brand .monogram img{width:100%;height:100%;object-fit:contain}.brand h1{font-family:Chiffon,Georgia,serif;font-size:24px;font-weight:400;letter-spacing:.01em}.brand p{font-family:Poppins,sans-serif;color:#c0c9ca;letter-spacing:.03em}
-.nav{font-size:11px;letter-spacing:.01em;color:#c7d0d0;border-radius:12px;padding:12px 13px}.nav span{color:#b2c4ce;font-size:15px}.nav.active,.nav:hover{background:#4b4b50;color:#fff;box-shadow:inset 3px 0 var(--brand)}
+.brand{padding:0 5px 32px;align-items:center}.brand .monogram{width:52px;height:52px;flex:0 0 52px;border-radius:50%;background:#6f8490;border:1px solid rgba(239,247,248,.65);overflow:hidden;padding:4px;box-shadow:0 0 0 4px rgba(215,225,228,.12),0 5px 16px rgba(0,0,0,.2)}.brand .monogram img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 1px 1px rgba(35,45,50,.25))}.brand h1{font-family:Newsreader,Georgia,serif;font-size:24px;line-height:.88;font-weight:500;letter-spacing:.01em;max-width:104px}.brand p{font-family:Poppins,sans-serif;color:#c9d1d2;letter-spacing:.02em;font-size:9px;margin-top:6px}
+.nav{font-size:11.5px;line-height:1.2;letter-spacing:0;color:#d0d7d7;font-weight:600;border-radius:12px;padding:12px 13px}.nav span{color:#c3d4db;font-size:15px;line-height:1}.nav.active,.nav:hover{background:#4b4b50;color:#fff;box-shadow:inset 3px 0 var(--brand)}
 .team-card{border-color:#5d6264;background:rgba(255,255,255,.035)}.team-card .eyebrow{color:#b2c4ce}.account-mini small,.team-card small{color:#b6bebe}.ghost.light{border-color:#62686a;color:#d5dcdd}.status-dot.on{background:#b2d0ba}
 .top{height:96px;padding:18px 38px;background:rgba(255,254,250,.86);border-color:var(--line)}.top h2{font-family:Chiffon,Georgia,serif;font-size:32px;font-weight:400;letter-spacing:.01em}.top-tagline{font-family:Newsreader,Georgia,serif;font-style:italic;color:#8b9292;font-size:12px;margin:3px 0 0}.eyebrow{color:#788ca5;font-size:9px}
 .primary{background:#788ca5;border-color:#788ca5}.ghost{background:#fffefa}.primary,.ghost,.danger,.chip,.month-nav button{border-radius:999px}.top-actions{gap:7px}
@@ -70,3 +70,12 @@ body{font-family:Poppins,Arial,sans-serif;background:radial-gradient(circle at 9
 .inspector-empty b,.settings-card h4,.approval-col>h4{font-family:Chiffon,Georgia,serif;font-weight:400}.inspector-empty b{font-size:24px}.field input,.field textarea,.field select{background:#fbfcfb;border-color:#d4dede}.approval-pills button.active{background:#d7e1e4;border-color:#b2c4ce}.chip.active{background:#788ca5}.cal-head{background:#e3ebed;color:#69777c}.cal-post{background:#edf1ef}.attention-card i{color:#788ca5}
 @media(max-width:1050px){.top{padding-left:24px;padding-right:24px}.view{padding-left:24px;padding-right:24px}}
 @media(max-width:700px){.view{padding-left:14px;padding-right:14px}.brand-banner{align-items:flex-start;flex-direction:column}.brand-banner-note{font-size:13px}.brand-script{font-size:32px}.top-tagline{display:none}}
+.canva-picker { max-width: 720px; }
+.canva-picker > input { width: 100%; margin: 12px 0; }
+.canva-design-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-height: 58vh; overflow: auto; }
+.canva-design { display: flex; gap: 10px; align-items: center; text-align: left; border: 1px solid var(--line, #ddd); background: #fff; border-radius: 12px; padding: 8px; cursor: pointer; }
+.canva-design:hover { border-color: var(--ink, #333); }
+.canva-design img { width: 72px; height: 58px; object-fit: cover; border-radius: 7px; background: #f1eee8; }
+.canva-design span { min-width: 0; display: grid; gap: 4px; }
+.canva-design b, .canva-design small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 680px) { .canva-design-list { grid-template-columns: 1fr; } }

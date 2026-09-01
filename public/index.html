@@ -26,14 +26,10 @@
       <section class="team-card">
         <p class="eyebrow">SHARED WORKSPACE</p>
         <strong id="teamSummary">Setting up shared planner…</strong>
-        <small id="teamDetail">Shared planner and Instagram connection for your whole team.</small>
+        <small id="teamDetail">A shared home for your team’s planning, review, and approvals.</small>
         <div id="presenceList" class="presence-list"></div>
         <button id="identityBtn" class="ghost light">Your name</button>
       </section>
-      <div class="account-mini">
-        <span id="connectionDot" class="status-dot"></span>
-        <div><strong>@lorenbullardphotography</strong><small id="sideStatus">Checking Instagram…</small></div>
-      </div>
       <button id="settingsBtn" class="ghost light">Planner settings</button>
     </div>
   </aside>
@@ -153,6 +149,16 @@
       <button id="logoutBtn" class="danger">Sign out</button>
     </div>
     <p class="fine">Your account is shared across browsers. Comments and activity updates use this name so the shared planner stays clear for everyone.</p>
+  </div>
+</div>
+
+<div id="canvaModal" class="modal-backdrop hidden">
+  <div class="modal canva-picker">
+    <button id="closeCanva" class="modal-x">×</button>
+    <p class="eyebrow">CANVA LIBRARY</p>
+    <h3>Choose a working design</h3>
+    <input id="canvaSearch" placeholder="Search Canva designs…" autocomplete="off">
+    <div id="canvaDesignList" class="canva-design-list"><div class="empty">Loading Canva designs…</div></div>
   </div>
 </div>
 
