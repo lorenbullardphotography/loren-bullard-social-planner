@@ -396,7 +396,10 @@ function renderGrid() {
     const node = $("#tileTpl").content.firstElementChild.cloneNode(true);
     node.dataset.id = post.id;
     node.dataset.status = post.status;
-    node.draggable = post.status !== "posted";
+    // Use the pointer interaction below for consistent mouse, trackpad, and
+    // touch behavior. Native HTML drag events are inconsistent in responsive
+    // Chrome and unavailable on many mobile browsers.
+    node.draggable = false;
     if (!hasReelCover(post) && (post.assetKind === "video" || post.type === "REEL" && /\.((mp4)|(mov)|(webm))($|\?)/i.test(post.image))) {
       const video = document.createElement("video");
       video.src = post.image;
@@ -407,6 +410,8 @@ function renderGrid() {
       video.className = "tile-media";
       node.querySelector("img").replaceWith(video);
     } else node.querySelector("img").src = gridImageOf(post);
+    const tileMedia = node.querySelector("img, video");
+    if (tileMedia) tileMedia.draggable = false;
     const media = node.querySelector(".tile-media") || node.querySelector("img");
     media.classList.add("crop-rendered");
     media.style.transform = cropTransform(post);
@@ -474,21 +479,27 @@ function renderGrid() {
     // long-press starts a touch reorder while a normal tap still opens edit.
     if (post.status !== "posted") {
       node.addEventListener("pointerdown", event => {
-        if (!event.isPrimary || event.pointerType === "mouse" || event.button !== 0) return;
+        if (!event.isPrimary || event.button !== 0) return;
         touchDrag = { id: post.id, node, x: event.clientX, y: event.clientY, moved: false, timer: null };
+        const delay = event.pointerType === "mouse" ? 100 : 220;
         touchDrag.timer = setTimeout(() => {
           if (!touchDrag || touchDrag.node !== node) return;
           touchDrag.active = true;
           node.classList.add("dragging");
           node.setPointerCapture(event.pointerId);
           event.preventDefault();
-        }, 220);
+        }, delay);
       });
       node.addEventListener("pointermove", event => {
         if (!touchDrag || touchDrag.node !== node) return;
         const distance = Math.hypot(event.clientX - touchDrag.x, event.clientY - touchDrag.y);
         if (!touchDrag.active) {
-          if (distance > 10) clearTimeout(touchDrag.timer);
+          if (event.pointerType === "mouse" && distance > 6) {
+            clearTimeout(touchDrag.timer);
+            touchDrag.active = true;
+            node.classList.add("dragging");
+            node.setPointerCapture(event.pointerId);
+          } else if (distance > 10) clearTimeout(touchDrag.timer);
           return;
         }
         touchDrag.moved = true;
