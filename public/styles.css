@@ -73,6 +73,8 @@ body{font-family:Poppins,Arial,sans-serif;background:radial-gradient(circle at 9
 @media(max-width:1050px){.top{padding-left:24px;padding-right:24px}.view{padding-left:24px;padding-right:24px}}
 @media(max-width:700px){.view{padding-left:14px;padding-right:14px}.brand-banner{align-items:flex-start;flex-direction:column}.brand-banner-logo img{width:min(390px,82vw);max-height:56px}.brand-banner-note{font-size:13px}.top-tagline{display:none}}
 @media (hover: none) { .tile-delete { opacity: .9; transform: scale(1); } }
+.editor-scroll .handoff-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.editor-scroll .handoff-actions>*{width:100%;min-width:0;min-height:42px;flex:none;border-radius:10px;font-size:10px;line-height:1.2;white-space:normal;overflow-wrap:anywhere}
 .canva-picker { max-width: 720px; }
 .canva-picker > input { width: 100%; margin: 12px 0; }
 .canva-design-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-height: 58vh; overflow: auto; }
