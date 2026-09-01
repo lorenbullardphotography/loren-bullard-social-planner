@@ -224,7 +224,7 @@ async function exportCanvaFile(designId, token, formatType) {
   const job = await fetchJson("https://api.canva.com/rest/v1/exports", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ design_id: designId, format: { type: formatType, ...(formatType === "jpg" ? { quality: 90 } : {}) } })
+    body: JSON.stringify({ design_id: designId, format: { type: formatType, ...(formatType === "jpg" ? { quality: 90 } : {}), ...(formatType === "mp4" ? { quality: "vertical_1080p" } : {}) } })
   });
   let result = job;
   for (let attempt = 0; attempt < 12 && result.status !== "success"; attempt++) {
@@ -292,7 +292,7 @@ async function fetchJson(url, options={}) {
   try { data = JSON.parse(text); } catch { data = {raw:text}; }
   if (!response.ok || data?.error) {
     const service = url.includes("api.canva.com") ? "Canva" : "Instagram";
-    const message = data?.error?.message || data?.error_description || `${service} request failed (${response.status})`;
+    const message = data?.error?.message || data?.message || data?.error_description || `${service} request failed (${response.status})`;
     const err = new Error(message);
     err.details = data;
     throw err;
