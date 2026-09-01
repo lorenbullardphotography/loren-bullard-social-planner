@@ -437,6 +437,11 @@ function renderGrid() {
       }
     });
     node.onclick = () => { selected = post.id; renderGrid(); renderInspector(); };
+    node.ondblclick = event => {
+      event.preventDefault();
+      if (Date.now() < suppressTileClickUntil) return;
+      openPost(post.id, true);
+    };
     node.addEventListener("dragstart", event => {
       if (post.status === "posted") return event.preventDefault();
       dragId = post.id;
