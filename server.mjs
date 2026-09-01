@@ -726,10 +726,17 @@ export async function handleRequest(req, res) {
       if (!designId) return sendJson(res, 400, { error: "Paste a Canva design link (the link should contain /design/...)." });
       const token = await canvaAccessToken(account.id);
       if (!token) return sendJson(res, 503, { error: "Connect Canva in Settings before refreshing previews." });
-      const previewUrl = await exportCanvaPreview(designId, token);
+      let previewUrl;
+      let mediaType = "image";
+      try {
+        previewUrl = await exportCanvaPreview(designId, token);
+      } catch (error) {
+        previewUrl = await exportCanvaFile(designId, token, "mp4");
+        mediaType = "video";
+      }
       const session = await readCanvaSession(account.id);
       await writeCanvaSession(account.id, { ...session, last_synced_at: new Date().toISOString() });
-      return sendJson(res, 200, { previewUrl });
+      return sendJson(res, 200, { previewUrl, mediaType });
     }
 
     if (url.pathname === "/api/canva/video" && req.method === "POST") {

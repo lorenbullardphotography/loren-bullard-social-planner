@@ -856,6 +856,11 @@ async function refreshCanvaPreview(post) {
   try {
     const data = await api("/api/canva/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ canvaUrl: post.canvaUrl, designId: post.canvaDesignId }) });
     post.image = data.previewUrl;
+    if (data.mediaType === "video") {
+      post.assetKind = "video";
+      post.type = "REEL";
+      post.canvaAssetType = "video";
+    }
     post.canvaPreviewUpdatedAt = new Date().toISOString();
     post.updatedBy = currentUser.name;
     post.updatedAt = new Date().toISOString();
@@ -1060,14 +1065,17 @@ async function loadCanvaDesigns(query = "") {
 async function addCanvaDesign(design) {
   if (!design) return;
   const id = crypto.randomUUID();
-  const isCanvaVideo = (design.designTypes || []).some(type => /video|reel|movie/i.test(String(type))) || /\bvideo\b/i.test(design.doctypeName || "");
+  let isCanvaVideo = (design.designTypes || []).some(type => /video|reel|movie/i.test(String(type))) || /\bvideo\b/i.test(design.doctypeName || "");
   let mediaUrl = design.thumbnail || "/assets/brand-cover.jpg";
-  if (isCanvaVideo) {
+  if (isCanvaVideo || design.id) {
     try {
       const data = await api("/api/canva/video", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ designId: design.id }) });
-      mediaUrl = data.videoUrl || mediaUrl;
+      if (data.videoUrl) {
+        mediaUrl = data.videoUrl;
+        isCanvaVideo = true;
+      }
     } catch (error) {
-      return notify(error.message || "Canva video could not be imported");
+      if (isCanvaVideo) return notify(error.message || "Canva video could not be imported");
     }
   }
   const post = { id, image: mediaUrl, assetSource: "canva", canvaUrl: design.editUrl || design.viewUrl, canvaDesignId: design.id, canvaDoctypeName: design.doctypeName || "", canvaDesignTypes: design.designTypes || [], canvaAssetType: isCanvaVideo ? "video" : "image", canvaPageCount: design.pageCount || 0, assetKind: isCanvaVideo ? "video" : "image", cropRatio: "4:5", status: "draft", approval: "draft", type: isCanvaVideo ? "REEL" : "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: design.title, comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
