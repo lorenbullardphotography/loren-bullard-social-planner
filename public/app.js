@@ -1,6 +1,6 @@
 const USER_KEY = "lb-content-planner-user-v1";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
-let selected = null, dragId = null, currentView = "grid", editorReturnView = "grid", libraryFilter = "all", librarySearch = "";
+let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "grid", editorReturnView = "grid", libraryFilter = "all", librarySearch = "";
 let settings = { pillars: [], formats: ["IMAGE", "REEL", "CAROUSEL"], goals: [], syncPhotoCount: 12 };
 let calCursor = new Date(); calCursor.setDate(1);
 
@@ -436,7 +436,15 @@ function renderGrid() {
         notify(error.message || "The post could not be deleted");
       }
     });
-    node.onclick = () => { selected = post.id; renderGrid(); renderInspector(); };
+    node.onclick = () => {
+      if (Date.now() < suppressTileClickUntil) return;
+      selected = post.id;
+      renderGrid();
+      renderInspector();
+      if (window.matchMedia("(max-width: 700px)").matches) {
+        requestAnimationFrame(() => $("#inspector").scrollIntoView({ behavior: "smooth", block: "start" }));
+      }
+    };
     node.ondblclick = event => {
       event.preventDefault();
       if (Date.now() < suppressTileClickUntil) return;
@@ -462,6 +470,49 @@ function renderGrid() {
       event.preventDefault();
       await reorder(dragId, post.id);
     });
+    // Native drag-and-drop is unavailable on most touch browsers. A short
+    // long-press starts a touch reorder while a normal tap still opens edit.
+    if (post.status !== "posted") {
+      node.addEventListener("pointerdown", event => {
+        if (!event.isPrimary || event.pointerType === "mouse" || event.button !== 0) return;
+        touchDrag = { id: post.id, node, x: event.clientX, y: event.clientY, moved: false, timer: null };
+        touchDrag.timer = setTimeout(() => {
+          if (!touchDrag || touchDrag.node !== node) return;
+          touchDrag.active = true;
+          node.classList.add("dragging");
+          node.setPointerCapture(event.pointerId);
+          event.preventDefault();
+        }, 220);
+      });
+      node.addEventListener("pointermove", event => {
+        if (!touchDrag || touchDrag.node !== node) return;
+        const distance = Math.hypot(event.clientX - touchDrag.x, event.clientY - touchDrag.y);
+        if (!touchDrag.active) {
+          if (distance > 10) clearTimeout(touchDrag.timer);
+          return;
+        }
+        touchDrag.moved = true;
+        event.preventDefault();
+        $$(".tile").forEach(tile => tile.classList.remove("target"));
+        const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".tile");
+        if (target && target !== node && target.dataset.status !== "posted") target.classList.add("target");
+      });
+      const finishTouchDrag = async event => {
+        if (!touchDrag || touchDrag.node !== node) return;
+        clearTimeout(touchDrag.timer);
+        const state = touchDrag;
+        touchDrag = null;
+        node.classList.remove("dragging");
+        $$(".tile").forEach(tile => tile.classList.remove("target"));
+        if (!state.active) return;
+        suppressTileClickUntil = Date.now() + 450;
+        event.preventDefault();
+        const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".tile");
+        if (target && target.dataset.status !== "posted") await reorder(state.id, target.dataset.id);
+      };
+      node.addEventListener("pointerup", finishTouchDrag);
+      node.addEventListener("pointercancel", finishTouchDrag);
+    }
     grid.appendChild(node);
   }
   $("#gridEmpty").classList.toggle("hidden", ordered().length > 0);
@@ -499,15 +550,16 @@ function renderInspector(hostSelector = "#inspector") {
   const comments = (post.comments || []).map(comment => `<div class="comment"><b>${esc(comment.author)}${comment.role ? ` · ${esc(comment.role)}` : ""}</b>${esc(comment.text)}</div>`).join("");
   const workflowOptions = Object.entries(WORKFLOW_LABELS).map(([key, label]) => `<option value="${key}" ${workflowOf(post) === key ? "selected" : ""}>${label}</option>`).join("");
   const pillarOptions = `<option value="">Choose a pillar</option>` + settings.pillars.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${esc(pillar)}</option>`).join("");
-  const cropOptions = ["1:1", "4:5", "1.91:1", "9:16"].map(ratio => `<option value="${ratio}" ${post.cropRatio === ratio ? "selected" : ""}>${ratio} ${ratio === "9:16" ? "· Reel / Story" : "· Feed"}</option>`).join("");
-  host.innerHTML = `<div class="editor editable-editor"><div class="editor-scroll">
-    <div class="preview-wrap crop-preview" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post)}</div>
+  const cropPresets = [
+    ["1:1", "Square"], ["4:5", "Portrait"], ["1.91:1", "Landscape"], ["9:16", "Story"]
+  ].map(([ratio, label]) => `<button type="button" class="crop-ratio" data-crop-ratio="${ratio}" aria-pressed="${post.cropRatio === ratio}">${label}</button>`).join("");
+  host.innerHTML = `<div class="editor editable-editor"><div class="editor-mobile-heading"><div><span class="eyebrow">EDITING SELECTED POST</span><b>${esc(post.caption || post.notes || assetTypeLabel(post))}</b></div><span>Swipe through fields below</span></div><div class="editor-scroll">
+    <div class="preview-wrap crop-preview" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post)}<div class="crop-grid" aria-hidden="true"></div><span class="crop-hint">Drag to reposition</span></div>
     <div class="asset-meta"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva added" : "Uploaded"}</span>${hasReelCover(post) ? '<span class="asset-badge cover-badge">Cover attached</span>' : ""}</div>
     ${post.type === "REEL" || assetKindOf(post) === "video" ? `<div class="cover-card"><div><b>Reel cover photo</b><small>${post.coverImage ? "This image appears on the grid instead of the video frame." : "Add an image to choose the frame shown on the grid."}</small></div>${post.coverImage ? `<img class="cover-thumb" src="${esc(post.coverImage)}" alt="Reel cover photo">` : ""}<div class="handoff-actions"><label class="ghost button-link cover-upload-label">${post.coverImage ? "Replace cover" : "Upload cover photo"}<input id="coverInput" type="file" accept="image/*" hidden></label>${post.coverImage ? '<button id="removeCover" class="ghost" type="button">Remove cover</button>' : ""}</div><small id="coverHelp" class="field-help"></small></div>` : ""}
     <div class="location-card"><div><b>Location tag</b><small>Add the place where this content was created.</small></div><label class="field nested">Location<input id="eLocation" maxlength="120" value="${esc(post.location || post.locationTag?.name || "")}" placeholder="Crystal Bridges, Bentonville"></label><button id="readLocationMetadata" class="ghost" type="button">⌖ Check photo metadata</button><small id="locationHelp" class="field-help">We’ll use the photo’s embedded location when available.</small></div>
     ${post.canvaUrl ? `<div class="canva-source"><b>Canva working draft</b><span>Preview refreshes from Canva when connected.</span><div class="handoff-actions"><a class="ghost button-link" href="${esc(post.canvaUrl)}" target="_blank" rel="noopener noreferrer">Open in Canva</a><button id="refreshCanva" class="ghost">Refresh preview</button></div></div>` : ""}
-    <label class="field">Instagram crop<select id="eCropRatio">${cropOptions}</select><small class="field-help">The preview uses this frame; the original asset stays unchanged.</small></label>
-    <label class="field">Zoom <input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="${post.cropZoom || 1}"><small class="field-help">Drag the preview to pan the crop.</small></label>
+    <section class="crop-tools" aria-label="Crop controls"><div class="crop-tools-head"><div><b>Crop &amp; framing</b><small>Drag the image to reposition.</small></div><button id="resetCrop" class="crop-reset" type="button">↺ Reset</button></div><div class="crop-ratios" role="group" aria-label="Crop aspect ratio">${cropPresets}</div><div class="zoom-controls" role="group" aria-label="Zoom"><button id="zoomOut" class="zoom-button" type="button" aria-label="Zoom out">−</button><output id="cropZoomValue" aria-live="polite">100%</output><button id="zoomIn" class="zoom-button" type="button" aria-label="Zoom in">+</button></div></section>
     <div class="two">
       <label class="field">Workflow<select id="eWorkflow">${workflowOptions}</select></label>
       <label class="field">Assigned to<input id="eAssignee" value="${esc(post.assignee || "")}" placeholder="Loren or social planner"></label>
@@ -568,10 +620,21 @@ function renderInspector(hostSelector = "#inspector") {
     const tx = (x - 50) / 50 * maxX;
     const ty = (y - 50) / 50 * maxY;
     cropMedia.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${zoom})`;
+    q("#cropZoomValue").textContent = `${Math.round(zoom * 100)}%`;
+    qq("[data-crop-ratio]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.cropRatio === post.cropRatio)));
   };
-  q("#eCropRatio").onchange = () => { post.cropRatio = q("#eCropRatio").value; applyCrop(); };
-  q("#eCropZoom").oninput = () => {
-    post.cropZoom = Number(q("#eCropZoom").value);
+  qq("[data-crop-ratio]").forEach(button => button.onclick = () => { post.cropRatio = button.dataset.cropRatio; applyCrop(); });
+  const changeZoom = amount => {
+    const currentZoom = Math.max(1, Math.min(3, Number(post.cropZoom) || 1));
+    post.cropZoom = Math.max(1, Math.min(3, Math.round((currentZoom + amount) * 100) / 100));
+    applyCrop();
+  };
+  q("#zoomOut").onclick = () => changeZoom(-0.1);
+  q("#zoomIn").onclick = () => changeZoom(0.1);
+  q("#resetCrop").onclick = () => {
+    post.cropZoom = 1;
+    post.cropX = 50;
+    post.cropY = 50;
     applyCrop();
   };
   let dragStart = null;
@@ -580,6 +643,7 @@ function renderInspector(hostSelector = "#inspector") {
     if (!event.isPrimary || event.button !== 0) return;
     event.preventDefault();
     dragStart = { x: event.clientX, y: event.clientY, cropX: cropCoordinate(post.cropX), cropY: cropCoordinate(post.cropY) };
+    cropPreview.classList.add("is-adjusting");
     cropPreview.setPointerCapture(event.pointerId);
   };
   cropPreview.onpointermove = event => {
@@ -594,11 +658,12 @@ function renderInspector(hostSelector = "#inspector") {
   };
   const stopPan = event => {
     dragStart = null;
+    cropPreview.classList.remove("is-adjusting");
     if (event?.pointerId != null && cropPreview.hasPointerCapture(event.pointerId)) cropPreview.releasePointerCapture(event.pointerId);
   };
   cropPreview.onpointerup = stopPan;
   cropPreview.onpointercancel = stopPan;
-  cropPreview.onlostpointercapture = () => { dragStart = null; };
+  cropPreview.onlostpointercapture = () => { dragStart = null; cropPreview.classList.remove("is-adjusting"); };
   applyCrop();
   q("#saveEdit").onclick = async () => {
     const previousPost = { ...post };
@@ -606,7 +671,6 @@ function renderInspector(hostSelector = "#inspector") {
     saveButton.disabled = true;
     saveButton.textContent = "Saving…";
     post.type = q("#eType").value;
-    post.cropRatio = q("#eCropRatio").value;
     applyWorkflow(post, q("#eWorkflow").value);
     post.assignee = q("#eAssignee").value.trim();
     post.dueDate = q("#eDueDate").value;
@@ -749,8 +813,50 @@ function renderCalendar() {
     html += `<div class="day ${day.getMonth() !== month ? "muted" : ""}" data-day="${iso}"><div class="day-num">${day.getDate()}</div>${items.map(post => `<div class="cal-post" draggable="true" data-open="${post.id}" data-drag-post="${post.id}"><img src="${post.image}"><span>${esc((post.caption || post.notes || post.type || "Post").slice(0, 28))}<small>${esc(post.time || scheduleLabel(post))}</small></span></div>`).join("")}</div>`;
   }
   $("#calendar").innerHTML = html;
-  $$("[data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open));
+  $$("[data-open]").forEach(node => node.onclick = () => {
+    if (Date.now() < suppressCalendarClickUntil) return;
+    openPost(node.dataset.open);
+  });
   $$("[data-drag-post]").forEach(node => node.ondragstart = event => { dragId = node.dataset.dragPost; event.stopPropagation(); });
+  $$("[data-drag-post]").forEach(node => {
+    node.addEventListener("pointerdown", event => {
+      if (!event.isPrimary || event.pointerType === "mouse" || event.button !== 0) return;
+      calendarTouch = { id: node.dataset.dragPost, node, timer: setTimeout(() => {
+        if (!calendarTouch || calendarTouch.node !== node) return;
+        calendarTouch.active = true;
+        node.classList.add("dragging");
+        node.setPointerCapture(event.pointerId);
+      }, 220) };
+    });
+    node.addEventListener("pointermove", event => {
+      if (!calendarTouch || calendarTouch.node !== node || !calendarTouch.active) return;
+      event.preventDefault();
+      $$(".day").forEach(day => day.classList.remove("target"));
+      document.elementFromPoint(event.clientX, event.clientY)?.closest(".day")?.classList.add("target");
+    });
+    const finishCalendarTouch = async event => {
+      if (!calendarTouch || calendarTouch.node !== node) return;
+      clearTimeout(calendarTouch.timer);
+      const state = calendarTouch;
+      calendarTouch = null;
+      node.classList.remove("dragging");
+      $$(".day").forEach(day => day.classList.remove("target"));
+      if (!state.active) return;
+      suppressCalendarClickUntil = Date.now() + 450;
+      event.preventDefault();
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".day");
+      const post = posts.find(item => item.id === state.id);
+      if (!post || !target) return;
+      post.date = target.dataset.day;
+      post.updatedBy = currentUser.name;
+      post.updatedAt = new Date().toISOString();
+      renderAll();
+      await persistPlanner("moved content on the calendar");
+      notify("Publish date updated");
+    };
+    node.addEventListener("pointerup", finishCalendarTouch);
+    node.addEventListener("pointercancel", finishCalendarTouch);
+  });
   $$(".day[data-day]").forEach(node => {
     node.ondragover = event => { if (dragId) event.preventDefault(); };
     node.ondrop = async event => { event.preventDefault(); const post = posts.find(item => item.id === dragId); if (!post) return; post.date = node.dataset.day; post.updatedBy = currentUser.name; post.updatedAt = new Date().toISOString(); dragId = null; renderAll(); await persistPlanner("moved content on the calendar"); notify("Publish date updated"); };
