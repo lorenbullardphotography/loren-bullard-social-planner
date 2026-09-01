@@ -63,6 +63,8 @@ function assetKindOf(post) {
 }
 function assetSourceOf(post) { return post.assetSource === "canva" || post.canvaUrl ? "canva" : "uploaded"; }
 function assetTypeLabel(post) { return assetKindOf(post) === "video" ? "Video" : "Image"; }
+function hasReelCover(post) { return post.type === "REEL" && Boolean(post.coverImage); }
+function gridImageOf(post) { return hasReelCover(post) ? post.coverImage : post.image; }
 function assetMediaMarkup(post, className = "") {
   return assetKindOf(post) === "video"
     ? `<video class="${className}" src="${esc(post.image)}" muted playsinline preload="metadata"></video>`
@@ -390,7 +392,7 @@ function renderGrid() {
     node.dataset.id = post.id;
     node.dataset.status = post.status;
     node.draggable = post.status !== "posted";
-    if (post.assetKind === "video" || post.type === "REEL" && /\.((mp4)|(mov)|(webm))($|\?)/i.test(post.image)) {
+    if (!hasReelCover(post) && (post.assetKind === "video" || post.type === "REEL" && /\.((mp4)|(mov)|(webm))($|\?)/i.test(post.image))) {
       const video = document.createElement("video");
       video.src = post.image;
       video.muted = true;
@@ -399,7 +401,7 @@ function renderGrid() {
       video.playsInline = true;
       video.className = "tile-media";
       node.querySelector("img").replaceWith(video);
-    } else node.querySelector("img").src = post.image;
+    } else node.querySelector("img").src = gridImageOf(post);
     const media = node.querySelector(".tile-media") || node.querySelector("img");
     media.classList.add("crop-rendered");
     media.style.transform = cropTransform(post);
@@ -490,7 +492,8 @@ function renderInspector(hostSelector = "#inspector") {
   const cropOptions = ["1:1", "4:5", "1.91:1", "9:16"].map(ratio => `<option value="${ratio}" ${post.cropRatio === ratio ? "selected" : ""}>${ratio} ${ratio === "9:16" ? "· Reel / Story" : "· Feed"}</option>`).join("");
   host.innerHTML = `<div class="editor editable-editor"><div class="editor-scroll">
     <div class="preview-wrap crop-preview" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post)}</div>
-    <div class="asset-meta"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva added" : "Uploaded"}</span></div>
+    <div class="asset-meta"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva added" : "Uploaded"}</span>${hasReelCover(post) ? '<span class="asset-badge cover-badge">Cover attached</span>' : ""}</div>
+    ${post.type === "REEL" || assetKindOf(post) === "video" ? `<div class="cover-card"><div><b>Reel cover photo</b><small>${post.coverImage ? "This image appears on the grid instead of the video frame." : "Add an image to choose the frame shown on the grid."}</small></div>${post.coverImage ? `<img class="cover-thumb" src="${esc(post.coverImage)}" alt="Reel cover photo">` : ""}<div class="handoff-actions"><label class="ghost button-link cover-upload-label">${post.coverImage ? "Replace cover" : "Upload cover photo"}<input id="coverInput" type="file" accept="image/*" hidden></label>${post.coverImage ? '<button id="removeCover" class="ghost" type="button">Remove cover</button>' : ""}</div><small id="coverHelp" class="field-help"></small></div>` : ""}
     <div class="location-card"><div><b>Location tag</b><small>Add the place where this content was created.</small></div><label class="field nested">Location<input id="eLocation" maxlength="120" value="${esc(post.location || post.locationTag?.name || "")}" placeholder="Crystal Bridges, Bentonville"></label><button id="readLocationMetadata" class="ghost" type="button">⌖ Check photo metadata</button><small id="locationHelp" class="field-help">We’ll use the photo’s embedded location when available.</small></div>
     ${post.canvaUrl ? `<div class="canva-source"><b>Canva working draft</b><span>Preview refreshes from Canva when connected.</span><div class="handoff-actions"><a class="ghost button-link" href="${esc(post.canvaUrl)}" target="_blank" rel="noopener noreferrer">Open in Canva</a><button id="refreshCanva" class="ghost">Refresh preview</button></div></div>` : ""}
     <label class="field">Instagram crop<select id="eCropRatio">${cropOptions}</select><small class="field-help">The preview uses this frame; the original asset stays unchanged.</small></label>
@@ -650,6 +653,32 @@ function renderInspector(hostSelector = "#inspector") {
   q("#copyCaption").onclick = () => copyText(post.caption, "Caption");
   q("#copyHashtags").onclick = () => copyText(post.hashtags, "Hashtags");
   if (q("#refreshCanva")) q("#refreshCanva").onclick = () => refreshCanvaPreview(post);
+  if (q("#coverInput")) q("#coverInput").onchange = async event => {
+    const [file] = event.target.files;
+    if (!file) return;
+    if (!file.type.startsWith("image/")) return notify("Choose an image for the reel cover");
+    if (file.size > 30 * 1024 * 1024) return notify("Cover photos must be 30 MB or smaller");
+    const help = q("#coverHelp");
+    if (help) help.textContent = "Uploading cover photo…";
+    try {
+      const uploaded = await api("/api/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, data: await readFile(file) }) });
+      post.coverImage = uploaded.url;
+      post.updatedBy = currentUser.name;
+      post.updatedAt = new Date().toISOString();
+      await persistPlanner("added a reel cover photo");
+      renderAll();
+      notify("Reel cover photo attached");
+    } catch (error) { if (help) help.textContent = "Cover upload failed"; notify(error.message || "Cover photo upload failed"); }
+    finally { event.target.value = ""; }
+  };
+  if (q("#removeCover")) q("#removeCover").onclick = async () => {
+    const previousCover = post.coverImage;
+    post.coverImage = "";
+    post.updatedBy = currentUser.name;
+    post.updatedAt = new Date().toISOString();
+    try { await persistPlanner("removed a reel cover photo"); renderAll(); notify("Reel cover removed"); }
+    catch (error) { post.coverImage = previousCover; renderAll(); notify(error.message || "Reel cover could not be removed"); }
+  };
   q("#markMeta").onclick = async () => {
     applyWorkflow(post, "ready-meta");
     post.updatedBy = currentUser.name;

@@ -420,6 +420,7 @@ function normalizePost(post) {
     id: String(post?.id || crypto.randomUUID()),
     metaId: post?.metaId ? String(post.metaId) : "",
     image: String(post?.image || ""),
+    coverImage: String(post?.coverImage || ""),
     canvaUrl: String(post?.canvaUrl || "").slice(0, 2000),
     canvaDesignId: String(post?.canvaDesignId || "").slice(0, 200),
     canvaPreviewUpdatedAt: String(post?.canvaPreviewUpdatedAt || ""),
