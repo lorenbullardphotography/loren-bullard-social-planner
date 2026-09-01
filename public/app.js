@@ -411,9 +411,12 @@ function renderGrid() {
     node.querySelector(".type-icon").textContent = post.type === "REEL" ? "▶" : post.type === "CAROUSEL" ? "▱" : "";
     if (selected === post.id) node.classList.add("selected");
     const quickDelete = node.querySelector(".tile-delete");
+    const isInstagramPost = Boolean(post.metaId || post.status === "posted");
+    quickDelete.classList.toggle("hidden", isInstagramPost);
     quickDelete.addEventListener("pointerdown", event => event.stopPropagation());
     quickDelete.addEventListener("click", async event => {
       event.stopPropagation();
+      if (isInstagramPost) return;
       quickDelete.disabled = true;
       quickDelete.setAttribute("aria-label", "Deleting asset");
       const previousPosts = posts;
@@ -627,6 +630,7 @@ function renderInspector(hostSelector = "#inspector") {
     }
   };
   q("#deleteEdit").onclick = async () => {
+    if (post.metaId) return notify("Instagram posts stay in the grid");
     const previousPosts = posts;
     const deleteButton = q("#deleteEdit");
     deleteButton.disabled = true;
