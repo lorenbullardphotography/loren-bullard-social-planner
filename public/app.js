@@ -64,9 +64,10 @@ function assetKindOf(post) {
 function assetSourceOf(post) { return post.assetSource === "canva" || post.canvaUrl ? "canva" : "uploaded"; }
 function assetTypeLabel(post) {
   if (assetKindOf(post) === "video") return "Video";
+  if (post.canvaDoctypeName) return post.canvaDoctypeName;
   const labels = { doc: "Canva Doc", email: "Canva Email", presentation: "Canva Presentation", sheet: "Canva Sheet", whiteboard: "Canva Whiteboard", custom: "Canva Design", unknown: "Canva Design" };
   const type = (post.canvaDesignTypes || []).map(value => labels[value] || value).filter(Boolean)[0];
-  return type || "Image";
+  return type || (assetSourceOf(post) === "canva" ? "Canva Design" : "Image");
 }
 function hasReelCover(post) { return post.type === "REEL" && Boolean(post.coverImage); }
 function gridImageOf(post) { return hasReelCover(post) ? post.coverImage : post.image; }
@@ -615,7 +616,7 @@ function renderInspector(hostSelector = "#inspector") {
   const pillarOptions = `<option value="">Choose a pillar</option>` + settings.pillars.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${esc(pillar)}</option>`).join("");
   host.innerHTML = `<div class="editor editable-editor"><div class="editor-mobile-heading"><div><span class="eyebrow">EDITING SELECTED POST</span><b>${esc(post.caption || post.notes || assetTypeLabel(post))}</b></div><span>Swipe through fields below</span></div><div class="editor-scroll">
     <div class="preview-wrap${cropLocked ? "" : " crop-preview"}" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post, cropLocked)}${cropLocked ? "" : '<div class="crop-grid" aria-hidden="true"></div><span class="crop-hint">Drag to reposition</span><div class="crop-zoom-overlay"><span>Zoom</span><input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="' + Math.max(1, Math.min(3, Number(post.cropZoom) || 1)) + '" aria-label="Crop zoom"><output id="cropOverlayZoom">100%</output><button id="resetCrop" class="crop-overlay-reset" type="button" aria-label="Reset crop" title="Reset crop">↺</button></div>'}</div>
-    <div class="asset-meta"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva added" : "Uploaded"}</span>${hasReelCover(post) ? '<span class="asset-badge cover-badge">Cover attached</span>' : ""}</div>
+    <div class="asset-meta"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva" : "Uploaded"}</span>${hasReelCover(post) ? '<span class="asset-badge cover-badge">Cover attached</span>' : ""}</div>
     ${post.type === "REEL" || assetKindOf(post) === "video" ? `<div class="cover-card"><div><b>Reel cover photo</b><small>${post.coverImage ? "This image appears on the grid instead of the video frame." : "Add an image to choose the frame shown on the grid."}</small></div>${post.coverImage ? `<img class="cover-thumb" src="${esc(post.coverImage)}" alt="Reel cover photo">` : ""}<div class="handoff-actions"><label class="ghost button-link cover-upload-label">${post.coverImage ? "Replace cover" : "Upload cover photo"}<input id="coverInput" type="file" accept="image/*" hidden></label>${post.coverImage ? '<button id="removeCover" class="ghost" type="button">Remove cover</button>' : ""}</div><small id="coverHelp" class="field-help"></small></div>` : ""}
     <div class="location-card"><div><b>Location tag</b><small>Add the place where this content was created.</small></div><label class="field nested">Location<input id="eLocation" maxlength="120" value="${esc(post.location || post.locationTag?.name || "")}" placeholder="Crystal Bridges, Bentonville"></label><button id="readLocationMetadata" class="ghost" type="button">⌖ Check photo metadata</button><small id="locationHelp" class="field-help">We’ll use the photo’s embedded location when available.</small></div>
     ${post.canvaUrl ? `<div class="canva-source"><b>Canva working draft</b><span>Preview refreshes from Canva when connected.</span><div class="handoff-actions"><a class="ghost button-link" href="${esc(post.canvaUrl)}" target="_blank" rel="noopener noreferrer">Open in Canva</a><button id="refreshCanva" class="ghost">Refresh preview</button></div></div>` : ""}
@@ -932,7 +933,7 @@ function renderLibrary() {
     return matchesFilter && (!query || searchable.includes(query));
   });
   $("#library").innerHTML = items.length
-    ? items.map(post => `<article class="library-card" data-open-editor="${post.id}"><div class="library-media">${assetMediaMarkup(post)}</div><div class="library-badges"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva added" : "Uploaded"}</span></div><div class="library-info"><b>${esc(post.notes || post.caption || "Untitled content")}</b><span>${esc(`${post.type} · ${formatSchedule(post)} · ${WORKFLOW_LABELS[workflowOf(post)]}${post.pillar ? ` · ${post.pillar}` : ""}`)}</span>${post.location ? `<small class="library-location">⌖ ${esc(post.location)}</small>` : ""}</div></article>`).join("")
+    ? items.map(post => `<article class="library-card" data-open-editor="${post.id}"><div class="library-media">${assetMediaMarkup(post)}</div><div class="library-badges"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva" : "Uploaded"}</span></div><div class="library-info"><b>${esc(post.notes || post.caption || "Untitled content")}</b><span>${esc(`${post.type} · ${formatSchedule(post)} · ${WORKFLOW_LABELS[workflowOf(post)]}${post.pillar ? ` · ${post.pillar}` : ""}`)}</span>${post.location ? `<small class="library-location">⌖ ${esc(post.location)}</small>` : ""}</div></article>`).join("")
     : `<div class="empty">No content in this view yet.</div>`;
   $$("[data-open-editor]").forEach(node => node.onclick = () => openPost(node.dataset.openEditor, true));
 }
@@ -1047,14 +1048,14 @@ async function loadCanvaDesigns(query = "") {
   host.innerHTML = '<div class="empty">Loading Canva designs…</div>';
   try {
     const data = await api(`/api/canva/designs${query ? `?query=${encodeURIComponent(query)}` : ""}`);
-    host.innerHTML = data.designs?.length ? data.designs.map(design => `<button class="canva-design" data-canva-id="${esc(design.id)}"><img src="${esc(design.thumbnail)}" alt=""><span><b>${esc(design.title)}</b><small>${esc((design.designTypes || []).map(type => type.replaceAll("_", " ")).join(" · ") || "Canva design")}${design.pageCount > 1 ? ` · ${design.pageCount} pages` : ""}</small><em>Updated ${design.updatedAt ? new Date(design.updatedAt * 1000).toLocaleDateString() : "recently"}</em></span></button>`).join("") : '<div class="empty">No Canva designs found.</div>';
+    host.innerHTML = data.designs?.length ? data.designs.map(design => `<button class="canva-design" data-canva-id="${esc(design.id)}"><img src="${esc(design.thumbnail)}" alt=""><span><b>${esc(design.title)}</b><small>${esc(design.doctypeName || (design.designTypes || []).map(type => type.replaceAll("_", " ")).join(" · ") || "Canva design")}${design.pageCount > 1 ? ` · ${design.pageCount} pages` : ""}</small><em>Updated ${design.updatedAt ? new Date(design.updatedAt * 1000).toLocaleDateString() : "recently"}</em></span></button>`).join("") : '<div class="empty">No Canva designs found.</div>';
     $$("[data-canva-id]").forEach(button => button.onclick = () => addCanvaDesign(data.designs.find(design => design.id === button.dataset.canvaId)));
   } catch (error) { host.innerHTML = `<div class="empty">${esc(error.message || "Canva designs could not be loaded")}</div>`; }
 }
 function addCanvaDesign(design) {
   if (!design) return;
   const id = crypto.randomUUID();
-  const post = { id, image: design.thumbnail || "/assets/brand-cover.jpg", assetSource: "canva", canvaUrl: design.editUrl || design.viewUrl, canvaDesignId: design.id, canvaDesignTypes: design.designTypes || [], canvaPageCount: design.pageCount || 0, assetKind: "image", cropRatio: "4:5", status: "draft", approval: "draft", type: "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: design.title, comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
+  const post = { id, image: design.thumbnail || "/assets/brand-cover.jpg", assetSource: "canva", canvaUrl: design.editUrl || design.viewUrl, canvaDesignId: design.id, canvaDoctypeName: design.doctypeName || "", canvaDesignTypes: design.designTypes || [], canvaPageCount: design.pageCount || 0, assetKind: "image", cropRatio: "4:5", status: "draft", approval: "draft", type: "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: design.title, comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
   posts.unshift(post); selected = id; $("#canvaModal").classList.add("hidden"); renderAll();
   persistPlanner("added a Canva working draft").then(() => notify("Canva draft added")).catch(error => { posts = posts.filter(item => item.id !== id); renderAll(); notify(error.message || "Canva draft could not be added"); });
 }
