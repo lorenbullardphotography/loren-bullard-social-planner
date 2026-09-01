@@ -441,14 +441,16 @@ function renderInspector(hostSelector = "#inspector") {
   const cropPreview = host.querySelector(".crop-preview");
   const cropMedia = host.querySelector(".crop-media");
   const applyCrop = () => {
-    if (!cropMedia) return;
+    if (!cropPreview || !cropMedia) return;
     cropPreview.style.aspectRatio = cropFrameRatio(post);
-    const zoom = Number(post.cropZoom) || 1;
-    const maxX = cropPreview.clientWidth * (zoom - 1) / 2;
-    const maxY = cropPreview.clientHeight * (zoom - 1) / 2;
-    const tx = ((post.cropX || 50) - 50) / 50 * maxX;
-    const ty = ((post.cropY || 50) - 50) / 50 * maxY;
-    cropMedia.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + zoom + ")";
+    const zoom = Math.max(1, Math.min(3, Number(post.cropZoom) || 1));
+    const maxX = Math.max(0, cropPreview.getBoundingClientRect().width * (zoom - 1) / 2);
+    const maxY = Math.max(0, cropPreview.getBoundingClientRect().height * (zoom - 1) / 2);
+    const x = Math.max(0, Math.min(100, Number(post.cropX) || 50));
+    const y = Math.max(0, Math.min(100, Number(post.cropY) || 50));
+    const tx = (x - 50) / 50 * maxX;
+    const ty = (y - 50) / 50 * maxY;
+    cropMedia.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${zoom})`;
   };
   $("#eCropRatio").onchange = () => { post.cropRatio = $("#eCropRatio").value; applyCrop(); };
   $("#eCropZoom").oninput = () => {
@@ -458,22 +460,28 @@ function renderInspector(hostSelector = "#inspector") {
   let dragStart = null;
   cropPreview.ondragstart = event => event.preventDefault();
   cropPreview.onpointerdown = event => {
+    if (!event.isPrimary || event.button !== 0) return;
     event.preventDefault();
     dragStart = { x: event.clientX, y: event.clientY, cropX: post.cropX || 50, cropY: post.cropY || 50 };
     cropPreview.setPointerCapture(event.pointerId);
   };
   cropPreview.onpointermove = event => {
     if (!dragStart) return;
-    const zoom = post.cropZoom || 1;
-    const maxX = cropPreview.clientWidth * (zoom - 1) / 2;
-    const maxY = cropPreview.clientHeight * (zoom - 1) / 2;
+    const zoom = Math.max(1, Math.min(3, Number(post.cropZoom) || 1));
+    const maxX = Math.max(0, cropPreview.getBoundingClientRect().width * (zoom - 1) / 2);
+    const maxY = Math.max(0, cropPreview.getBoundingClientRect().height * (zoom - 1) / 2);
     post.cropX = maxX ? Math.max(0, Math.min(100, dragStart.cropX + (event.clientX - dragStart.x) / maxX * 50)) : 50;
     post.cropY = maxY ? Math.max(0, Math.min(100, dragStart.cropY + (event.clientY - dragStart.y) / maxY * 50)) : 50;
     event.preventDefault();
     applyCrop();
   };
-  cropPreview.onpointerup = () => { dragStart = null; };
-  cropPreview.onpointercancel = () => { dragStart = null; };
+  const stopPan = event => {
+    dragStart = null;
+    if (event?.pointerId != null && cropPreview.hasPointerCapture(event.pointerId)) cropPreview.releasePointerCapture(event.pointerId);
+  };
+  cropPreview.onpointerup = stopPan;
+  cropPreview.onpointercancel = stopPan;
+  cropPreview.onlostpointercapture = () => { dragStart = null; };
   applyCrop();
   $("#saveEdit").onclick = async () => {
     post.type = $("#eType").value;
