@@ -633,7 +633,10 @@ function renderInspector(hostSelector = "#inspector") {
       <label class="field">Content pillar<select id="ePillar">${pillarOptions}</select></label>
       <label class="field">Format<select id="eType">${settings.formats.map(format => `<option ${post.type === format ? "selected" : ""}>${esc(format)}</option>`).join("")}</select></label>
     </div>
-    <label class="field">Scheduling<select id="eScheduleState"><option value="draft" ${post.scheduleState === "draft" ? "selected" : ""}>Not ready</option><option value="ready" ${post.scheduleState === "ready" ? "selected" : ""}>Ready to schedule</option><option value="scheduled" ${post.scheduleState === "scheduled" ? "selected" : ""}>Scheduled</option></select></label>
+    <div class="two">
+      <label class="field">Schedule post date<input id="eScheduleDate" type="date" value="${post.date || ""}"><small class="field-help">This date places the asset on the calendar.</small></label>
+      <label class="field">Scheduling<select id="eScheduleState"><option value="draft" ${post.scheduleState === "draft" ? "selected" : ""}>Not ready</option><option value="ready" ${post.scheduleState === "ready" ? "selected" : ""}>Ready to schedule</option><option value="scheduled" ${post.scheduleState === "scheduled" ? "selected" : ""}>Scheduled</option></select></label>
+    </div>
     <label class="field">Caption<textarea id="eCaption" rows="6" placeholder="Write or paste caption…">${esc(post.caption || "")}</textarea></label>
     <label class="field">Notes<textarea id="eNotes" rows="3" placeholder="Audio, hook, CTA, manager notes…">${esc(post.notes || "")}</textarea></label>
     <div class="field">Content brief
@@ -738,6 +741,7 @@ function renderInspector(hostSelector = "#inspector") {
     post.dueDate = q("#eDueDate").value;
     post.priority = q("#ePriority").value;
     post.pillar = q("#ePillar").value;
+    post.date = q("#eScheduleDate").value;
     post.scheduleState = q("#eScheduleState").value;
     post.caption = q("#eCaption").value;
     post.notes = q("#eNotes").value;
