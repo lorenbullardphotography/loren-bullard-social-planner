@@ -80,6 +80,7 @@ body{font-family:Poppins,Arial,sans-serif;background:radial-gradient(circle at 9
 .canva-design img { width: 72px; height: 58px; object-fit: cover; border-radius: 7px; background: #f1eee8; }
 .canva-design span { min-width: 0; display: grid; gap: 4px; }
 .canva-design b, .canva-design small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.canva-design em { font-size: 9px; color: var(--muted); font-style: normal; }
 .canva-source { display: grid; gap: 5px; padding: 11px 12px; border: 1px solid #d9e1e2; border-radius: 12px; background: #f7faf9; }
 .canva-source b { font-family: Newsreader, Georgia, serif; font-size: 17px; font-weight: 600; color: var(--ink); }
 .canva-source span { font-size: 10px; line-height: 1.4; color: var(--muted); }
