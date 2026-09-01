@@ -570,13 +570,14 @@ $("#upload").onchange = async event => {
   $("#upload").disabled = true;
   addAssetLabel.classList.add("disabled");
   let firstId = null;
+  const uploadedPosts = [];
   try {
     for (const [index, file] of validFiles.entries()) {
       uploadStatus.textContent = "Uploading " + (index + 1) + " of " + validFiles.length + "…";
       const uploaded = await api("/api/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, data: await readFile(file) }) });
       const id = crypto.randomUUID();
       firstId ||= id;
-      posts.unshift({
+      const uploadedPost = {
         id,
         image: uploaded.url,
         assetKind: uploaded.kind,
@@ -592,11 +593,21 @@ $("#upload").onchange = async event => {
         comments: [],
         updatedBy: currentUser.name,
         updatedAt: new Date().toISOString()
-      });
+      };
+      uploadedPosts.push(uploadedPost);
+      posts.unshift(uploadedPost);
     }
     selected = firstId;
     renderAll();
-    await persistPlanner("uploaded new content");
+    try {
+      await persistPlanner("uploaded new content");
+    } catch (error) {
+      if (error.status !== 409 || !error.planner) throw error;
+      const uploadedIds = new Set(uploadedPosts.map(post => post.id));
+      setPlanner(error.planner);
+      posts = [...uploadedPosts, ...posts.filter(post => !uploadedIds.has(post.id))];
+      await persistPlanner("uploaded new content after a shared planner refresh");
+    }
     switchView("editor");
     notify(validFiles.length === 1 ? "Asset uploaded — finish editing the post" : validFiles.length + " assets uploaded — editing the first post");
   } catch (error) {
