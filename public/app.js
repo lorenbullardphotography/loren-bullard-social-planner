@@ -53,6 +53,9 @@ function visiblePosted() {
 }
 function ordered() { return [...future(), ...visiblePosted()]; }
 function esc(s = "") { return s.replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m])); }
+function safeCanvaUrl(value) {
+  try { const url = new URL(value); return url.protocol === "https:" && /(^|\.)canva\.com$/i.test(url.hostname) ? url.toString() : ""; } catch { return ""; }
+}
 function scheduleLabel(post) {
   return post.scheduleState === "scheduled" ? "Scheduled" : post.scheduleState === "ready" ? "Ready" : "Draft";
 }
@@ -221,6 +224,24 @@ function renderPlannerSettings() {
   $("#accountSettingsName").value = currentUser.name;
   $("#accountSettingsRole").value = currentUser.role;
   refreshStorageUsage();
+  refreshCanvaStatus();
+}
+async function refreshCanvaStatus() {
+  const host = $("#canvaConnection");
+  const link = $("#canvaConnectLink");
+  if (!host || !link) return;
+  try {
+    const status = await api("/api/canva/status");
+    if (!status.configured) {
+      host.innerHTML = "<b>Not configured</b><br><small>Add Canva Connect credentials to the planner server first.</small>";
+      link.classList.add("hidden");
+    } else if (status.connected) {
+      host.innerHTML = "<b>Connected ✓</b><br><small>Automatic preview refresh is available for Canva drafts.</small>";
+      link.textContent = "Reconnect Canva";
+    } else {
+      host.innerHTML = "<b>Not connected</b><br><small>Connect the shared Canva account used by your team.</small>";
+    }
+  } catch { host.textContent = "Canva connection status unavailable"; }
 }
 function formatBytes(bytes) {
   if (!bytes) return "0 MB";
@@ -367,6 +388,7 @@ function renderInspector(hostSelector = "#inspector") {
   const cropOptions = ["1:1", "4:5", "1.91:1", "9:16"].map(ratio => `<option value="${ratio}" ${post.cropRatio === ratio ? "selected" : ""}>${ratio} ${ratio === "9:16" ? "· Reel / Story" : "· Feed"}</option>`).join("");
   host.innerHTML = `<div class="editor editable-editor"><div class="editor-scroll">
     <div class="preview-wrap crop-preview" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post)}</div>
+    ${post.canvaUrl ? `<div class="canva-source"><b>Canva working draft</b><span>Preview refreshes from Canva when connected.</span><div class="handoff-actions"><a class="ghost button-link" href="${esc(post.canvaUrl)}" target="_blank" rel="noopener noreferrer">Open in Canva</a><button id="refreshCanva" class="ghost">Refresh preview</button></div></div>` : ""}
     <label class="field">Instagram crop<select id="eCropRatio">${cropOptions}</select><small class="field-help">The preview uses this frame; the original asset stays unchanged.</small></label>
     <label class="field">Zoom <input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="${post.cropZoom || 1}"><small class="field-help">Drag the preview to pan the crop.</small></label>
     <div class="two">
@@ -502,6 +524,7 @@ function renderInspector(hostSelector = "#inspector") {
   };
   $("#copyCaption").onclick = () => copyText(post.caption, "Caption");
   $("#copyHashtags").onclick = () => copyText(post.hashtags, "Hashtags");
+  if ($("#refreshCanva")) $("#refreshCanva").onclick = () => refreshCanvaPreview(post);
   $("#markMeta").onclick = async () => {
     applyWorkflow(post, "ready-meta");
     post.updatedBy = currentUser.name;
@@ -521,6 +544,23 @@ function renderInspector(hostSelector = "#inspector") {
     renderActivity();
     await persistPlanner("left feedback on a post");
   };
+}
+async function refreshCanvaPreview(post) {
+  const button = $("#refreshCanva");
+  if (button) { button.disabled = true; button.textContent = "Refreshing…"; }
+  try {
+    const data = await api("/api/canva/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ canvaUrl: post.canvaUrl }) });
+    post.image = data.previewUrl;
+    post.canvaPreviewUpdatedAt = new Date().toISOString();
+    post.updatedBy = currentUser.name;
+    post.updatedAt = new Date().toISOString();
+    renderAll();
+    await persistPlanner("refreshed a Canva preview");
+    notify("Canva preview refreshed");
+  } catch (error) { notify(error.message || "Canva preview could not be refreshed"); }
+  finally {
+    if (button) { button.disabled = false; button.textContent = "Refresh preview"; }
+  }
 }
 function renderCalendar() {
   const year = calCursor.getFullYear(), month = calCursor.getMonth();
@@ -646,6 +686,22 @@ $("#upload").onchange = async event => {
     addAssetLabel.classList.remove("disabled");
     event.target.value = "";
   }
+};
+$("#addCanvaBtn").onclick = async () => {
+  const raw = window.prompt("Paste the Canva design link for this working draft:");
+  if (!raw) return;
+  const canvaUrl = safeCanvaUrl(raw.trim());
+  if (!canvaUrl || !/\/design\//i.test(canvaUrl)) return notify("Please paste a Canva design link");
+  const id = crypto.randomUUID();
+  const post = { id, image: "/assets/brand-cover.jpg", canvaUrl, assetKind: "image", cropRatio: "4:5", status: "draft", approval: "draft", type: "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: "Canva working draft", comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
+  posts.unshift(post); selected = id; renderAll();
+  try {
+    await persistPlanner("added a Canva working draft");
+    const canvaStatus = await api("/api/canva/status");
+    if (canvaStatus.connected) await refreshCanvaPreview(post);
+    else notify("Canva draft added — open the link to review it");
+  }
+  catch (error) { posts = posts.filter(item => item.id !== id); renderAll(); notify(error.message || "Canva draft could not be added"); }
 };
 $("#exportBtn").onclick = exportBackup;
 $("#importInput").onchange = async event => {

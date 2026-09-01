@@ -23,6 +23,7 @@ A Planoly/Planable-style local content planner customized for **@lorenbullardpho
 - Portable JSON backup export/import
 - Optimistic concurrency protection so simultaneous edits do not silently overwrite each other
 - Upload guardrails for large images
+- Canva working-draft links, with optional server-side preview refresh
 
 ## Start the app
 
@@ -81,6 +82,20 @@ Set the Meta callback URL to:
 
 The local JSON files remain available as a development fallback when `DATABASE_URL` is absent.
 
+## Connect Canva working drafts
+
+The planner supports adding a Canva design link without exporting or uploading a file. Click **Add Canva draft**, paste the design link, and use **Open in Canva** from the post editor. The link is shared with the whole planner team.
+
+For automatic image previews, create a Canva Connect integration in the Canva Developer Portal and add these private environment variables to the server:
+
+- `CANVA_CLIENT_ID`
+- `CANVA_CLIENT_SECRET`
+- `CANVA_REDIRECT_URI` (for example, `https://your-planner-domain.com/auth/canva/callback`)
+
+The Canva integration must allow the `design:content:read` scope. Then open Planner settings and choose **Connect Canva**. The planner can generate a fresh JPG preview from a linked design; the original Canva file remains the working source.
+
+Each signed-in planner user authorizes Canva separately. The planner stores each user's access and refresh tokens server-side under that user's account, refreshes access tokens when needed, and uses the signed-in user’s Canva connection for preview exports.
+
 ## Publish the planner at your domain
 
 The included `render.yaml` is retained as an alternative for a traditional Node host with persistent storage. It is not needed for Vercel.
@@ -96,7 +111,7 @@ Do not use GitHub Pages for this app: it cannot run the server, protect the page
 - Scheduled Reel publishing
 - Instagram insights
 - Notifications when a post needs approval
-- Canva asset links / import
+- Automatic Canva asset preview refresh (implemented; requires Canva Connect credentials)
 
 ## Current product boundaries
 

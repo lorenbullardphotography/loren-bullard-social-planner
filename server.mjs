@@ -31,6 +31,9 @@ const PORT = Number(process.env.PORT || 8787);
 const APP_ID = process.env.INSTAGRAM_APP_ID || "";
 const APP_SECRET = process.env.INSTAGRAM_APP_SECRET || "";
 const REDIRECT_URI = process.env.INSTAGRAM_REDIRECT_URI || `http://localhost:${PORT}/auth/instagram/callback`;
+const CANVA_CLIENT_ID = process.env.CANVA_CLIENT_ID || "";
+const CANVA_CLIENT_SECRET = process.env.CANVA_CLIENT_SECRET || "";
+const CANVA_REDIRECT_URI = process.env.CANVA_REDIRECT_URI || `http://localhost:${PORT}/auth/canva/callback`;
 const API_VERSION = process.env.META_API_VERSION || "v25.0";
 const PLANNER_PASSWORD = process.env.PLANNER_PASSWORD || "";
 const AUTH_SECRET = process.env.AUTH_SECRET || PLANNER_PASSWORD || "planner-development-secret";
@@ -110,6 +113,8 @@ async function readSession() {
 async function writeSession(value) {
   return writeStored("instagram-session", value);
 }
+async function readCanvaSession(userId) { return readStored(`canva-session-${userId}`, {}); }
+async function writeCanvaSession(userId, value) { return writeStored(`canva-session-${userId}`, value); }
 async function seedEnvironmentSession() {
   const existing = await readSession();
   if (process.env.INSTAGRAM_ACCESS_TOKEN && !existing.access_token && !existing.disabled) {
@@ -182,6 +187,26 @@ function createOAuthState() {
   const signature = crypto.createHmac("sha256", AUTH_SECRET).update(payload).digest("hex");
   return `${payload}.${signature}`;
 }
+async function createCanvaOAuthState(userId) {
+  const verifier = crypto.randomBytes(32).toString("base64url");
+  const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
+  const nonce = crypto.randomBytes(24).toString("base64url");
+  const payload = `${Date.now()}.${nonce}`;
+  const signature = crypto.createHmac("sha256", AUTH_SECRET).update(payload).digest("hex");
+  await writeStored(`canva-oauth-state-${nonce}`, { userId, verifier, createdAt: Date.now() });
+  return { state: `${payload}.${signature}`, challenge };
+}
+async function parseCanvaOAuthState(state) {
+  const [issued, nonce, signature] = String(state || "").split(".");
+  if (!issued || !nonce || !signature || Date.now() - Number(issued) > 1000 * 60 * 10) return null;
+  const payload = `${issued}.${nonce}`;
+  const expected = crypto.createHmac("sha256", AUTH_SECRET).update(payload).digest("hex");
+  const a = Buffer.from(signature), b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  const record = await readStored(`canva-oauth-state-${nonce}`, null);
+  await deleteStored(`canva-oauth-state-${nonce}`);
+  return record && Date.now() - Number(record.createdAt || 0) <= 1000 * 60 * 10 ? record : null;
+}
 function isValidOAuthState(state) {
   const [issued, nonce, signature] = String(state || "").split(".");
   if (!issued || !nonce || !signature || Date.now() - Number(issued) > 1000 * 60 * 10) return false;
@@ -190,6 +215,54 @@ function isValidOAuthState(state) {
   const a = Buffer.from(signature);
   const b = Buffer.from(expected);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function canvaDesignId(value) {
+  const match = String(value || "").match(/\/design\/([A-Za-z0-9_-]+)/);
+  return match ? match[1] : "";
+}
+async function exportCanvaPreview(designId, token) {
+  const job = await fetchJson("https://api.canva.com/rest/v1/exports", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ design_id: designId, format: { type: "jpg", quality: 90 } })
+  });
+  let result = job;
+  for (let attempt = 0; attempt < 12 && result.status !== "success"; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    result = await fetchJson(`https://api.canva.com/rest/v1/exports/${job.job?.id || job.id}`, { headers: { Authorization: `Bearer ${token}` } });
+  }
+  const url = result.urls?.[0] || result.result?.urls?.[0];
+  if (!url) throw new Error("Canva did not return a preview yet.");
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Canva preview download failed (${response.status})`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const filename = `${crypto.randomUUID()}.jpg`;
+  const blob = await blobClient();
+  if (blob) {
+    const saved = await blob.put(`planner/${filename}`, bytes, { access: "public", contentType: "image/jpeg", addRandomSuffix: false });
+    return saved.url;
+  }
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  fs.writeFileSync(path.join(uploadsDir, filename), bytes);
+  return `/uploads/${filename}`;
+}
+async function canvaTokenRequest(form) {
+  const auth = Buffer.from(`${CANVA_CLIENT_ID}:${CANVA_CLIENT_SECRET}`).toString("base64");
+  return fetchJson("https://api.canva.com/rest/v1/oauth/token", {
+    method: "POST",
+    headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
+    body: form
+  });
+}
+async function canvaAccessToken(userId) {
+  const session = await readCanvaSession(userId);
+  if (!session.access_token) return null;
+  if (session.expires_in && session.token_received_at && Date.now() < Number(session.token_received_at) + Number(session.expires_in) * 1000 - 60_000) return session.access_token;
+  if (!session.refresh_token) return session.access_token;
+  const form = new URLSearchParams({ grant_type: "refresh_token", refresh_token: session.refresh_token });
+  const refreshed = await canvaTokenRequest(form);
+  await writeCanvaSession(userId, { ...session, ...refreshed, token_received_at: Date.now(), refreshed_at: new Date().toISOString() });
+  return refreshed.access_token;
 }
 function contentType(file) {
   const ext = path.extname(file).toLowerCase();
@@ -347,6 +420,8 @@ function normalizePost(post) {
     id: String(post?.id || crypto.randomUUID()),
     metaId: post?.metaId ? String(post.metaId) : "",
     image: String(post?.image || ""),
+    canvaUrl: String(post?.canvaUrl || "").slice(0, 2000),
+    canvaPreviewUpdatedAt: String(post?.canvaPreviewUpdatedAt || ""),
     assetKind: post?.assetKind === "video" ? "video" : "image",
     cropRatio: ["1:1", "4:5", "1.91:1", "9:16"].includes(post?.cropRatio) ? post.cropRatio : "4:5",
     cropZoom: Math.min(3, Math.max(1, Number(post?.cropZoom) || 1)),
@@ -623,6 +698,23 @@ export async function handleRequest(req, res) {
       }
     }
 
+    if (url.pathname === "/api/canva/status" && req.method === "GET") {
+      const session = await readCanvaSession(account.id);
+      return sendJson(res, 200, { configured: Boolean(CANVA_CLIENT_ID && CANVA_CLIENT_SECRET), connected: Boolean(session.access_token), last_synced_at: session.last_synced_at || null });
+    }
+
+    if (url.pathname === "/api/canva/preview" && req.method === "POST") {
+      const body = await readBody(req);
+      const designId = canvaDesignId(body.canvaUrl);
+      if (!designId) return sendJson(res, 400, { error: "Paste a Canva design link (the link should contain /design/...)." });
+      const token = await canvaAccessToken(account.id);
+      if (!token) return sendJson(res, 503, { error: "Connect Canva in Settings before refreshing previews." });
+      const previewUrl = await exportCanvaPreview(designId, token);
+      const session = await readCanvaSession(account.id);
+      await writeCanvaSession(account.id, { ...session, last_synced_at: new Date().toISOString() });
+      return sendJson(res, 200, { previewUrl });
+    }
+
     if (url.pathname === "/api/instagram/media") {
       const session = await readSession();
       if (!session.access_token) return sendJson(res, 401, {error:"Instagram is not connected yet."});
@@ -714,6 +806,36 @@ export async function handleRequest(req, res) {
       auth.searchParams.set("scope", "instagram_business_basic");
       auth.searchParams.set("state", state);
       return redirect(res, auth.toString());
+    }
+
+    if (url.pathname === "/auth/canva") {
+      if (!CANVA_CLIENT_ID) return redirect(res, "/?canva=not-configured");
+      const { state, challenge } = await createCanvaOAuthState(account.id);
+      const auth = new URL("https://www.canva.com/api/oauth/authorize");
+      auth.searchParams.set("client_id", CANVA_CLIENT_ID);
+      auth.searchParams.set("redirect_uri", CANVA_REDIRECT_URI);
+      auth.searchParams.set("response_type", "code");
+      auth.searchParams.set("scope", "design:content:read");
+      auth.searchParams.set("code_challenge", challenge);
+      auth.searchParams.set("code_challenge_method", "s256");
+      auth.searchParams.set("state", state);
+      return redirect(res, auth.toString());
+    }
+
+    if (url.pathname === "/auth/canva/callback") {
+      const code = url.searchParams.get("code");
+      const oauthState = await parseCanvaOAuthState(url.searchParams.get("state"));
+      const error = url.searchParams.get("error_description") || url.searchParams.get("error");
+      if (error) return redirect(res, `/?canva=error&message=${encodeURIComponent(error)}`);
+      if (!code || !oauthState || !account || oauthState.userId !== account.id) return redirect(res, "/?canva=error&message=Canva%20authorization%20expired");
+      try {
+        const form = new URLSearchParams({ code_verifier: oauthState.verifier, grant_type: "authorization_code", redirect_uri: CANVA_REDIRECT_URI, code });
+        const session = await canvaTokenRequest(form);
+        await writeCanvaSession(account.id, { ...session, token_received_at: Date.now(), stored_at: new Date().toISOString(), source: "oauth" });
+        return redirect(res, "/?canva=connected");
+      } catch (e) {
+        return redirect(res, `/?canva=error&message=${encodeURIComponent(`Canva connection failed: ${e.message}`)}`);
+      }
     }
 
     if (url.pathname === "/auth/instagram/callback") {
