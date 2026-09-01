@@ -199,9 +199,17 @@ function renderAll() {
   renderPlannerSettings();
 }
 function assetPreview(post) {
+  const ratio = post.cropRatio || (post.assetKind === "video" ? "9:16" : "4:5");
+  const ratioValue = ratio === "1:1" ? "1 / 1" : ratio === "4:5" ? "4 / 5" : ratio === "1.91:1" ? "1.91 / 1" : "9 / 16";
+  const zoom = Math.max(1, Number(post.cropZoom) || 1);
+  const x = Number(post.cropX) || 50;
+  const y = Number(post.cropY) || 50;
   return post.assetKind === "video"
-    ? '<video src="' + esc(post.image) + '" controls muted playsinline></video>'
-    : '<img src="' + esc(post.image) + '" alt="">';
+    ? '<video class="crop-media" style="aspect-ratio:' + ratioValue + ';transform:translate(' + ((50 - x) * (zoom - 1) * 2) + '%,' + ((50 - y) * (zoom - 1) * 2) + '%) scale(' + zoom + ')" src="' + esc(post.image) + '" controls muted playsinline></video>'
+    : '<img class="crop-media" style="aspect-ratio:' + ratioValue + ';transform:translate(' + ((50 - x) * (zoom - 1) * 2) + '%,' + ((50 - y) * (zoom - 1) * 2) + '%) scale(' + zoom + ')" src="' + esc(post.image) + '" alt="">';
+}
+function cropFrameRatio(post) {
+  return post.cropRatio === "1:1" ? "1 / 1" : post.cropRatio === "1.91:1" ? "1.91 / 1" : post.cropRatio === "9:16" ? "9 / 16" : "4 / 5";
 }
 function renderPlannerSettings() {
   const pillars = $("#settingsPillars");
@@ -341,8 +349,11 @@ function renderInspector(hostSelector = "#inspector") {
   const workflowOptions = Object.entries(WORKFLOW_LABELS).map(([key, label]) => `<option value="${key}" ${workflowOf(post) === key ? "selected" : ""}>${label}</option>`).join("");
   const pillarOptions = `<option value="">Choose a pillar</option>` + settings.pillars.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${esc(pillar)}</option>`).join("");
   const checklistHtml = checklistFor(post).map((item, index) => `<label class="check-item"><input type="checkbox" data-check="${index}" ${item.done ? "checked" : ""}><span>${esc(item.label)}</span></label>`).join("");
+  const cropOptions = ["1:1", "4:5", "1.91:1", "9:16"].map(ratio => `<option value="${ratio}" ${post.cropRatio === ratio ? "selected" : ""}>${ratio} ${ratio === "9:16" ? "· Reel / Story" : "· Feed"}</option>`).join("");
   host.innerHTML = `<div class="editor">
-    <div class="preview-wrap">${assetPreview(post)}</div>
+    <div class="preview-wrap crop-preview" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post)}</div>
+    <label class="field">Instagram crop<select id="eCropRatio">${cropOptions}</select><small class="field-help">The preview uses this frame; the original asset stays unchanged.</small></label>
+    <label class="field">Zoom <input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="${post.cropZoom || 1}"><small class="field-help">Drag the preview to pan the crop.</small></label>
     <div class="two">
       <label class="field">Workflow<select id="eWorkflow">${workflowOptions}</select></label>
       <label class="field">Assigned to<input id="eAssignee" value="${esc(post.assignee || "")}" placeholder="Loren or social planner"></label>
@@ -397,8 +408,30 @@ function renderInspector(hostSelector = "#inspector") {
       await persistPlanner(`updated approval for ${post.type.toLowerCase()} content`);
     };
   });
+  const cropPreview = host.querySelector(".crop-preview");
+  const cropMedia = host.querySelector(".crop-media");
+  const applyCrop = () => {
+    cropPreview.style.aspectRatio = cropFrameRatio(post);
+    const zoom = post.cropZoom || 1;
+    cropMedia.style.transform = "translate(" + ((50 - (post.cropX || 50)) * (zoom - 1) * 2) + "%," + ((50 - (post.cropY || 50)) * (zoom - 1) * 2) + "%) scale(" + zoom + ")";
+  };
+  $("#eCropRatio").onchange = () => { post.cropRatio = $("#eCropRatio").value; applyCrop(); };
+  $("#eCropZoom").oninput = () => { post.cropZoom = Number($("#eCropZoom").value); applyCrop(); };
+  let dragStart = null;
+  cropPreview.onpointerdown = event => {
+    dragStart = { x: event.clientX, y: event.clientY, cropX: post.cropX || 50, cropY: post.cropY || 50 };
+    cropPreview.setPointerCapture(event.pointerId);
+  };
+  cropPreview.onpointermove = event => {
+    if (!dragStart) return;
+    post.cropX = Math.max(0, Math.min(100, dragStart.cropX - (event.clientX - dragStart.x) / cropPreview.clientWidth * 100));
+    post.cropY = Math.max(0, Math.min(100, dragStart.cropY - (event.clientY - dragStart.y) / cropPreview.clientHeight * 100));
+    applyCrop();
+  };
+  cropPreview.onpointerup = () => { dragStart = null; };
   $("#saveEdit").onclick = async () => {
     post.type = $("#eType").value;
+    post.cropRatio = $("#eCropRatio").value;
     applyWorkflow(post, $("#eWorkflow").value);
     post.assignee = $("#eAssignee").value.trim();
     post.dueDate = $("#eDueDate").value;
@@ -561,6 +594,7 @@ $("#upload").onchange = async event => {
         id,
         image: uploaded.url,
         assetKind: uploaded.kind,
+        cropRatio: uploaded.kind === "video" ? "9:16" : "4:5",
         status: "draft",
         approval: "draft",
         type: uploaded.kind === "video" ? "REEL" : "IMAGE",
