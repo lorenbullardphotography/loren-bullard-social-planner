@@ -217,8 +217,8 @@ function isValidOAuthState(state) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 function canvaDesignId(value) {
-  const match = String(value || "").match(/\/(?:design|api\/design)\/([A-Za-z0-9_-]+)/);
-  return match ? match[1] : "";
+  const match = String(value || "").match(/\/(?:design|api\/design)\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
 }
 async function exportCanvaFile(designId, token, formatType) {
   const job = await fetchJson("https://api.canva.com/rest/v1/exports", {
@@ -291,7 +291,8 @@ async function fetchJson(url, options={}) {
   let data;
   try { data = JSON.parse(text); } catch { data = {raw:text}; }
   if (!response.ok || data?.error) {
-    const message = data?.error?.message || data?.error_description || `Instagram request failed (${response.status})`;
+    const service = url.includes("api.canva.com") ? "Canva" : "Instagram";
+    const message = data?.error?.message || data?.error_description || `${service} request failed (${response.status})`;
     const err = new Error(message);
     err.details = data;
     throw err;
