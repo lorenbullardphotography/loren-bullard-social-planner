@@ -220,11 +220,11 @@ function canvaDesignId(value) {
   const match = String(value || "").match(/\/(?:design|api\/design)\/([A-Za-z0-9_-]+)/);
   return match ? match[1] : "";
 }
-async function exportCanvaPreview(designId, token) {
+async function exportCanvaFile(designId, token, formatType) {
   const job = await fetchJson("https://api.canva.com/rest/v1/exports", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ design_id: designId, format: { type: "jpg", quality: 90 } })
+    body: JSON.stringify({ design_id: designId, format: { type: formatType, ...(formatType === "jpg" ? { quality: 90 } : {}) } })
   });
   let result = job;
   for (let attempt = 0; attempt < 12 && result.status !== "success"; attempt++) {
@@ -232,19 +232,23 @@ async function exportCanvaPreview(designId, token) {
     result = await fetchJson(`https://api.canva.com/rest/v1/exports/${job.job?.id || job.id}`, { headers: { Authorization: `Bearer ${token}` } });
   }
   const url = result.urls?.[0] || result.result?.urls?.[0];
-  if (!url) throw new Error("Canva did not return a preview yet.");
+  if (!url) throw new Error(`Canva did not return a ${formatType} export yet.`);
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`Canva preview download failed (${response.status})`);
+  if (!response.ok) throw new Error(`Canva ${formatType} download failed (${response.status})`);
   const bytes = Buffer.from(await response.arrayBuffer());
-  const filename = `${crypto.randomUUID()}.jpg`;
+  const contentType = formatType === "mp4" ? "video/mp4" : "image/jpeg";
+  const filename = `${crypto.randomUUID()}.${formatType}`;
   const blob = await blobClient();
   if (blob) {
-    const saved = await blob.put(`planner/${filename}`, bytes, { access: "public", contentType: "image/jpeg", addRandomSuffix: false });
+    const saved = await blob.put(`planner/${filename}`, bytes, { access: "public", contentType, addRandomSuffix: false });
     return saved.url;
   }
   fs.mkdirSync(uploadsDir, { recursive: true });
   fs.writeFileSync(path.join(uploadsDir, filename), bytes);
   return `/uploads/${filename}`;
+}
+async function exportCanvaPreview(designId, token) {
+  return exportCanvaFile(designId, token, "jpg");
 }
 async function canvaTokenRequest(form) {
   const auth = Buffer.from(`${CANVA_CLIENT_ID}:${CANVA_CLIENT_SECRET}`).toString("base64");
@@ -726,6 +730,16 @@ export async function handleRequest(req, res) {
       const session = await readCanvaSession(account.id);
       await writeCanvaSession(account.id, { ...session, last_synced_at: new Date().toISOString() });
       return sendJson(res, 200, { previewUrl });
+    }
+
+    if (url.pathname === "/api/canva/video" && req.method === "POST") {
+      const body = await readBody(req);
+      const designId = String(body.designId || "").slice(0, 200);
+      if (!designId) return sendJson(res, 400, { error: "A Canva design ID is required." });
+      const token = await canvaAccessToken(account.id);
+      if (!token) return sendJson(res, 503, { error: "Connect Canva in Settings before importing videos." });
+      const videoUrl = await exportCanvaFile(designId, token, "mp4");
+      return sendJson(res, 200, { videoUrl });
     }
 
     if (url.pathname === "/api/canva/designs" && req.method === "GET") {

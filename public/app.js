@@ -1061,7 +1061,16 @@ async function addCanvaDesign(design) {
   if (!design) return;
   const id = crypto.randomUUID();
   const isCanvaVideo = (design.designTypes || []).some(type => /video|reel|movie/i.test(String(type))) || /\bvideo\b/i.test(design.doctypeName || "");
-  const post = { id, image: design.thumbnail || "/assets/brand-cover.jpg", assetSource: "canva", canvaUrl: design.editUrl || design.viewUrl, canvaDesignId: design.id, canvaDoctypeName: design.doctypeName || "", canvaDesignTypes: design.designTypes || [], canvaAssetType: isCanvaVideo ? "video" : "image", canvaPageCount: design.pageCount || 0, assetKind: "image", cropRatio: "4:5", status: "draft", approval: "draft", type: isCanvaVideo ? "REEL" : "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: design.title, comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
+  let mediaUrl = design.thumbnail || "/assets/brand-cover.jpg";
+  if (isCanvaVideo) {
+    try {
+      const data = await api("/api/canva/video", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ designId: design.id }) });
+      mediaUrl = data.videoUrl || mediaUrl;
+    } catch (error) {
+      return notify(error.message || "Canva video could not be imported");
+    }
+  }
+  const post = { id, image: mediaUrl, assetSource: "canva", canvaUrl: design.editUrl || design.viewUrl, canvaDesignId: design.id, canvaDoctypeName: design.doctypeName || "", canvaDesignTypes: design.designTypes || [], canvaAssetType: isCanvaVideo ? "video" : "image", canvaPageCount: design.pageCount || 0, assetKind: isCanvaVideo ? "video" : "image", cropRatio: "4:5", status: "draft", approval: "draft", type: isCanvaVideo ? "REEL" : "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: design.title, comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
   posts.unshift(post); selected = id; $("#canvaModal").classList.add("hidden"); renderAll();
   persistPlanner("added a Canva working draft").then(() => notify("Canva draft added")).catch(error => { posts = posts.filter(item => item.id !== id); renderAll(); notify(error.message || "Canva draft could not be added"); });
 }
