@@ -64,7 +64,7 @@ function assetKindOf(post) {
 function assetSourceOf(post) { return post.assetSource === "canva" || post.canvaUrl ? "canva" : "uploaded"; }
 function assetTypeLabel(post) {
   if (assetKindOf(post) === "video") return "Video";
-  if (post.canvaFileTypes?.length) return post.canvaFileTypes.join(" · ");
+  if (assetSourceOf(post) === "canva") return post.canvaAssetType === "video" ? "Video" : "Image";
   if (post.canvaDoctypeName) return post.canvaDoctypeName;
   const labels = { doc: "Canva Doc", email: "Canva Email", presentation: "Canva Presentation", sheet: "Canva Sheet", whiteboard: "Canva Whiteboard", custom: "Canva Design", unknown: "Canva Design" };
   const type = (post.canvaDesignTypes || []).map(value => labels[value] || value).filter(Boolean)[0];
@@ -1056,15 +1056,8 @@ async function loadCanvaDesigns(query = "") {
 async function addCanvaDesign(design) {
   if (!design) return;
   const id = crypto.randomUUID();
-  let canvaFileTypes = [];
-  try {
-    const formatData = await api(`/api/canva/design-export-formats?designId=${encodeURIComponent(design.id)}`);
-    const formatLabels = { jpg: "JPG", png: "PNG", gif: "GIF", mp4: "MP4", pdf: "PDF", pptx: "PPTX", svg: "SVG", csv: "CSV", html_bundle: "HTML", html_standalone: "HTML" };
-    canvaFileTypes = Object.keys(formatData.formats || {}).map(format => formatLabels[format] || format.toUpperCase()).filter((value, index, values) => values.indexOf(value) === index);
-  } catch (error) {
-    if ((design.designTypes || []).some(type => String(type).toLowerCase() === "video")) canvaFileTypes = ["MP4"];
-  }
-  const post = { id, image: design.thumbnail || "/assets/brand-cover.jpg", assetSource: "canva", canvaUrl: design.editUrl || design.viewUrl, canvaDesignId: design.id, canvaDoctypeName: design.doctypeName || "", canvaDesignTypes: design.designTypes || [], canvaFileTypes, canvaPageCount: design.pageCount || 0, assetKind: "image", cropRatio: "4:5", status: "draft", approval: "draft", type: "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: design.title, comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
+  const isCanvaVideo = (design.designTypes || []).some(type => String(type).toLowerCase() === "video") || /\bvideo\b/i.test(design.doctypeName || "");
+  const post = { id, image: design.thumbnail || "/assets/brand-cover.jpg", assetSource: "canva", canvaUrl: design.editUrl || design.viewUrl, canvaDesignId: design.id, canvaDoctypeName: design.doctypeName || "", canvaDesignTypes: design.designTypes || [], canvaAssetType: isCanvaVideo ? "video" : "image", canvaPageCount: design.pageCount || 0, assetKind: "image", cropRatio: "4:5", status: "draft", approval: "draft", type: "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: design.title, comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
   posts.unshift(post); selected = id; $("#canvaModal").classList.add("hidden"); renderAll();
   persistPlanner("added a Canva working draft").then(() => notify("Canva draft added")).catch(error => { posts = posts.filter(item => item.id !== id); renderAll(); notify(error.message || "Canva draft could not be added"); });
 }
