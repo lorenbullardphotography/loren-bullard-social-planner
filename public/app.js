@@ -791,7 +791,6 @@ setInterval(checkInstagram, 30000);
 setInterval(heartbeat, 20000);
 window.addEventListener("focus", () => { refreshSharedPlanner(); checkInstagram(); });
 
-$("#syncBtn").onclick = syncInstagram;
 $("#modalSync").onclick = syncInstagram;
 $("#settingsBtn").onclick = () => { $("#settingsModal").classList.remove("hidden"); renderSettings(); };
 $("#settingsBtn").onclick = () => switchView("settings");
