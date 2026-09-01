@@ -70,7 +70,6 @@ const WORKFLOW_LABELS = {
   "meta-scheduled": "Scheduled in Meta", published: "Published", archived: "Archived"
 };
 const DEFAULT_PILLARS = ["Newborn education", "Family sessions", "Motherhood", "Behind the scenes", "Client stories", "Photographer education", "Personal connection", "Offers and availability"];
-const CHECKLIST = ["Select assets", "Write caption", "Add hashtags", "Choose audio / cover", "Review", "Approve", "Schedule in Meta", "Confirm published"];
 function workflowOf(post) {
   if (post.status === "posted") return "published";
   if (WORKFLOW_LABELS[post.workflow]) return post.workflow;
@@ -82,10 +81,6 @@ function applyWorkflow(post, workflow) {
   post.workflow = workflow;
   post.status = workflow === "published" ? "posted" : ["approved", "ready-meta", "meta-scheduled"].includes(workflow) ? "planned" : "draft";
   post.approval = workflow === "needs-review" ? "needs-review" : workflow === "approved" || workflow === "ready-meta" || workflow === "meta-scheduled" || workflow === "published" ? "approved" : "draft";
-}
-function checklistFor(post) {
-  if (Array.isArray(post.checklist) && post.checklist.length) return post.checklist;
-  return CHECKLIST.map(label => ({ label, done: false }));
 }
 function isOverdue(post) {
   return Boolean(post.dueDate && post.dueDate < new Date().toISOString().slice(0, 10) && !["published", "archived"].includes(workflowOf(post)));
@@ -334,7 +329,7 @@ function renderInspector(hostSelector = "#inspector") {
   const host = $(hostSelector);
   const post = posts.find(item => item.id === selected);
   if (!post) {
-    host.innerHTML = `<div class="inspector-empty"><b>Select a post</b>Click a tile to edit its caption, date, notes, approval, or scheduling.</div>`;
+    host.innerHTML = `<div class="inspector-empty"><b>Select a post</b>Click a tile to edit its caption, notes, workflow, or approval.</div>`;
     return;
   }
   if (post.status === "posted") {
@@ -348,7 +343,6 @@ function renderInspector(hostSelector = "#inspector") {
   const comments = (post.comments || []).map(comment => `<div class="comment"><b>${esc(comment.author)}${comment.role ? ` · ${esc(comment.role)}` : ""}</b>${esc(comment.text)}</div>`).join("");
   const workflowOptions = Object.entries(WORKFLOW_LABELS).map(([key, label]) => `<option value="${key}" ${workflowOf(post) === key ? "selected" : ""}>${label}</option>`).join("");
   const pillarOptions = `<option value="">Choose a pillar</option>` + settings.pillars.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${esc(pillar)}</option>`).join("");
-  const checklistHtml = checklistFor(post).map((item, index) => `<label class="check-item"><input type="checkbox" data-check="${index}" ${item.done ? "checked" : ""}><span>${esc(item.label)}</span></label>`).join("");
   const cropOptions = ["1:1", "4:5", "1.91:1", "9:16"].map(ratio => `<option value="${ratio}" ${post.cropRatio === ratio ? "selected" : ""}>${ratio} ${ratio === "9:16" ? "· Reel / Story" : "· Feed"}</option>`).join("");
   host.innerHTML = `<div class="editor">
     <div class="preview-wrap crop-preview" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post)}</div>
@@ -364,16 +358,9 @@ function renderInspector(hostSelector = "#inspector") {
     </div>
     <div class="two">
       <label class="field">Content pillar<select id="ePillar">${pillarOptions}</select></label>
-      <label class="field">Client / session<input id="eClient" value="${esc(post.client || "")}" placeholder="Optional reference"></label>
-    </div>
-    <div class="two">
       <label class="field">Format<select id="eType">${settings.formats.map(format => `<option ${post.type === format ? "selected" : ""}>${esc(format)}</option>`).join("")}</select></label>
-      <label class="field">Publish date<input id="eDate" type="date" value="${post.date || ""}"></label>
     </div>
-    <div class="two">
-      <label class="field">Publish time<input id="eTime" type="time" value="${post.time || ""}"></label>
-      <label class="field">Scheduling<select id="eScheduleState"><option value="draft" ${post.scheduleState === "draft" ? "selected" : ""}>Not ready</option><option value="ready" ${post.scheduleState === "ready" ? "selected" : ""}>Ready to schedule</option><option value="scheduled" ${post.scheduleState === "scheduled" ? "selected" : ""}>Scheduled</option></select></label>
-    </div>
+    <label class="field">Scheduling<select id="eScheduleState"><option value="draft" ${post.scheduleState === "draft" ? "selected" : ""}>Not ready</option><option value="ready" ${post.scheduleState === "ready" ? "selected" : ""}>Ready to schedule</option><option value="scheduled" ${post.scheduleState === "scheduled" ? "selected" : ""}>Scheduled</option></select></label>
     <label class="field">Caption<textarea id="eCaption" rows="6" placeholder="Write or paste caption…">${esc(post.caption || "")}</textarea></label>
     <label class="field">Notes<textarea id="eNotes" rows="3" placeholder="Audio, hook, CTA, manager notes…">${esc(post.notes || "")}</textarea></label>
     <div class="field">Content brief
@@ -384,7 +371,6 @@ function renderInspector(hostSelector = "#inspector") {
       <label class="field nested">Tagging notes<input id="eTagNotes" value="${esc(post.tagNotes || "")}" placeholder="People, vendors, collaborators"></label>
       <label class="field nested">Alt text<textarea id="eAltText" rows="2" placeholder="Describe the image for accessibility">${esc(post.altText || "")}</textarea></label>
     </div>
-    <div class="field">Checklist<div class="checklist">${checklistHtml}</div></div>
     <div class="field">Approval
       <div class="approval-pills">
         <button data-ap="draft" class="${post.approval === "draft" ? "active" : ""}">Draft</button>
@@ -448,9 +434,6 @@ function renderInspector(hostSelector = "#inspector") {
     post.dueDate = $("#eDueDate").value;
     post.priority = $("#ePriority").value;
     post.pillar = $("#ePillar").value;
-    post.client = $("#eClient").value.trim();
-    post.date = $("#eDate").value;
-    post.time = $("#eTime").value;
     post.scheduleState = $("#eScheduleState").value;
     post.caption = $("#eCaption").value;
     post.notes = $("#eNotes").value;
@@ -461,7 +444,6 @@ function renderInspector(hostSelector = "#inspector") {
     post.hashtags = $("#eHashtags").value.trim();
     post.tagNotes = $("#eTagNotes").value.trim();
     post.altText = $("#eAltText").value.trim();
-    post.checklist = checklistFor(post).map((item, index) => ({ ...item, done: $(`[data-check="${index}"]`).checked }));
     post.updatedBy = currentUser.name;
     post.updatedAt = new Date().toISOString();
     renderAll();
@@ -512,13 +494,6 @@ function renderInspector(hostSelector = "#inspector") {
     renderActivity();
     await persistPlanner("left feedback on a post");
   };
-  $$("[data-check]").forEach(input => input.onchange = async () => {
-    post.checklist = checklistFor(post).map((item, index) => ({ ...item, done: $(`[data-check="${index}"]`).checked }));
-    post.updatedBy = currentUser.name;
-    post.updatedAt = new Date().toISOString();
-    await persistPlanner("updated the content checklist");
-    notify("Checklist updated");
-  });
 }
 function renderCalendar() {
   const year = calCursor.getFullYear(), month = calCursor.getMonth();
