@@ -199,8 +199,13 @@ function renderAll() {
   renderStats();
   renderAttention();
   renderGrid();
-  renderInspector();
+  // Only render the editor that is currently visible. Rendering both produced
+  // duplicate control IDs, so document-wide selectors could bind to the hidden
+  // grid inspector instead of the standalone asset editor.
+  if (currentView === "grid") renderInspector();
+  else $("#inspector").innerHTML = "";
   if (currentView === "editor") renderInspector("#postEditor");
+  else $("#postEditor").innerHTML = "";
   renderCalendar();
   renderLibrary();
   renderApprovals();
@@ -212,11 +217,21 @@ function assetPreview(post) {
   const ratio = post.cropRatio || (post.assetKind === "video" ? "9:16" : "4:5");
   const ratioValue = ratio === "1:1" ? "1 / 1" : ratio === "4:5" ? "4 / 5" : ratio === "1.91:1" ? "1.91 / 1" : "9 / 16";
   const zoom = Math.max(1, Number(post.cropZoom) || 1);
-  const x = Number(post.cropX) || 50;
-  const y = Number(post.cropY) || 50;
+  const x = cropCoordinate(post.cropX);
+  const y = cropCoordinate(post.cropY);
   return post.assetKind === "video"
     ? '<video class="crop-media" style="aspect-ratio:' + ratioValue + ';transform:translate(' + ((x - 50) * (zoom - 1)) + '%,' + ((y - 50) * (zoom - 1)) + '%) scale(' + zoom + ')" src="' + esc(post.image) + '" controls muted playsinline></video>'
     : '<img class="crop-media" style="aspect-ratio:' + ratioValue + ';transform:translate(' + ((x - 50) * (zoom - 1)) + '%,' + ((y - 50) * (zoom - 1)) + '%) scale(' + zoom + ')" src="' + esc(post.image) + '" alt="">';
+}
+function cropCoordinate(value) {
+  const coordinate = Number(value);
+  return Number.isFinite(coordinate) ? Math.max(0, Math.min(100, coordinate)) : 50;
+}
+function cropTransform(post) {
+  const zoom = Math.max(1, Math.min(3, Number(post.cropZoom) || 1));
+  const x = cropCoordinate(post.cropX);
+  const y = cropCoordinate(post.cropY);
+  return `translate(${(x - 50) * (zoom - 1)}%, ${(y - 50) * (zoom - 1)}%) scale(${zoom})`;
 }
 function cropFrameRatio(post) {
   return post.cropRatio === "1:1" ? "1 / 1" : post.cropRatio === "1.91:1" ? "1.91 / 1" : post.cropRatio === "9:16" ? "9 / 16" : "4 / 5";
@@ -338,6 +353,9 @@ function renderGrid() {
       video.className = "tile-media";
       node.querySelector("img").replaceWith(video);
     } else node.querySelector("img").src = post.image;
+    const media = node.querySelector(".tile-media") || node.querySelector("img");
+    media.classList.add("crop-rendered");
+    media.style.transform = cropTransform(post);
     node.querySelector(".tag").textContent = post.status === "posted" ? "LIVE" : WORKFLOW_LABELS[workflowOf(post)];
     node.querySelector(".type-icon").textContent = post.type === "REEL" ? "▶" : post.type === "CAROUSEL" ? "▱" : "";
     if (selected === post.id) node.classList.add("selected");
@@ -381,6 +399,8 @@ async function reorder(a, b) {
 }
 function renderInspector(hostSelector = "#inspector") {
   const host = $(hostSelector);
+  const q = selector => host.querySelector(selector);
+  const qq = selector => [...host.querySelectorAll(selector)];
   const post = posts.find(item => item.id === selected);
   if (!post) {
     host.innerHTML = `<div class="inspector-empty"><b>Select a post</b>Click a tile to edit its caption, notes, workflow, or approval.</div>`;
@@ -442,7 +462,7 @@ function renderInspector(hostSelector = "#inspector") {
     </div>
     <div class="actions"><button id="saveEdit" class="primary">Save</button><button id="deleteEdit" class="danger">Delete</button></div>
   </div>`;
-  $$("[data-ap]").forEach(button => {
+  qq("[data-ap]").forEach(button => {
     button.onclick = async () => {
       applyWorkflow(post, button.dataset.ap === "draft" ? "drafting" : button.dataset.ap);
       post.updatedBy = currentUser.name;
@@ -451,23 +471,23 @@ function renderInspector(hostSelector = "#inspector") {
       await persistPlanner(`updated approval for ${post.type.toLowerCase()} content`);
     };
   });
-  const cropPreview = host.querySelector(".crop-preview");
-  const cropMedia = host.querySelector(".crop-media");
+  const cropPreview = q(".crop-preview");
+  const cropMedia = q(".crop-media");
   const applyCrop = () => {
     if (!cropPreview || !cropMedia) return;
     cropPreview.style.aspectRatio = cropFrameRatio(post);
     const zoom = Math.max(1, Math.min(3, Number(post.cropZoom) || 1));
     const maxX = Math.max(0, cropPreview.getBoundingClientRect().width * (zoom - 1) / 2);
     const maxY = Math.max(0, cropPreview.getBoundingClientRect().height * (zoom - 1) / 2);
-    const x = Math.max(0, Math.min(100, Number(post.cropX) || 50));
-    const y = Math.max(0, Math.min(100, Number(post.cropY) || 50));
+    const x = cropCoordinate(post.cropX);
+    const y = cropCoordinate(post.cropY);
     const tx = (x - 50) / 50 * maxX;
     const ty = (y - 50) / 50 * maxY;
     cropMedia.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${zoom})`;
   };
-  $("#eCropRatio").onchange = () => { post.cropRatio = $("#eCropRatio").value; applyCrop(); };
-  $("#eCropZoom").oninput = () => {
-    post.cropZoom = Number($("#eCropZoom").value);
+  q("#eCropRatio").onchange = () => { post.cropRatio = q("#eCropRatio").value; applyCrop(); };
+  q("#eCropZoom").oninput = () => {
+    post.cropZoom = Number(q("#eCropZoom").value);
     applyCrop();
   };
   let dragStart = null;
@@ -475,7 +495,7 @@ function renderInspector(hostSelector = "#inspector") {
   cropPreview.onpointerdown = event => {
     if (!event.isPrimary || event.button !== 0) return;
     event.preventDefault();
-    dragStart = { x: event.clientX, y: event.clientY, cropX: post.cropX || 50, cropY: post.cropY || 50 };
+    dragStart = { x: event.clientX, y: event.clientY, cropX: cropCoordinate(post.cropX), cropY: cropCoordinate(post.cropY) };
     cropPreview.setPointerCapture(event.pointerId);
   };
   cropPreview.onpointermove = event => {
@@ -496,33 +516,43 @@ function renderInspector(hostSelector = "#inspector") {
   cropPreview.onpointercancel = stopPan;
   cropPreview.onlostpointercapture = () => { dragStart = null; };
   applyCrop();
-  $("#saveEdit").onclick = async () => {
-    post.type = $("#eType").value;
-    post.cropRatio = $("#eCropRatio").value;
-    applyWorkflow(post, $("#eWorkflow").value);
-    post.assignee = $("#eAssignee").value.trim();
-    post.dueDate = $("#eDueDate").value;
-    post.priority = $("#ePriority").value;
-    post.pillar = $("#ePillar").value;
-    post.scheduleState = $("#eScheduleState").value;
-    post.caption = $("#eCaption").value;
-    post.notes = $("#eNotes").value;
-    post.goal = $("#eGoal").value.trim();
-    post.hook = $("#eHook").value.trim();
-    post.cta = $("#eCta").value.trim();
-    post.audio = $("#eAudio").value.trim();
-    post.hashtags = $("#eHashtags").value.trim();
-    post.tagNotes = $("#eTagNotes").value.trim();
-    post.altText = $("#eAltText").value.trim();
+  q("#saveEdit").onclick = async () => {
+    const previousPost = { ...post };
+    const saveButton = q("#saveEdit");
+    saveButton.disabled = true;
+    saveButton.textContent = "Saving…";
+    post.type = q("#eType").value;
+    post.cropRatio = q("#eCropRatio").value;
+    applyWorkflow(post, q("#eWorkflow").value);
+    post.assignee = q("#eAssignee").value.trim();
+    post.dueDate = q("#eDueDate").value;
+    post.priority = q("#ePriority").value;
+    post.pillar = q("#ePillar").value;
+    post.scheduleState = q("#eScheduleState").value;
+    post.caption = q("#eCaption").value;
+    post.notes = q("#eNotes").value;
+    post.goal = q("#eGoal").value.trim();
+    post.hook = q("#eHook").value.trim();
+    post.cta = q("#eCta").value.trim();
+    post.audio = q("#eAudio").value.trim();
+    post.hashtags = q("#eHashtags").value.trim();
+    post.tagNotes = q("#eTagNotes").value.trim();
+    post.altText = q("#eAltText").value.trim();
     post.updatedBy = currentUser.name;
     post.updatedAt = new Date().toISOString();
-    renderAll();
-    await persistPlanner("updated planned content");
-    notify("Post updated");
+    try {
+      await persistPlanner("updated planned content");
+      renderAll();
+      notify("Post updated");
+    } catch (error) {
+      if (error.status !== 409) Object.assign(post, previousPost);
+      renderAll();
+      notify(error.message || "The post could not be saved");
+    }
   };
-  $("#deleteEdit").onclick = async () => {
+  q("#deleteEdit").onclick = async () => {
     const previousPosts = posts;
-    const deleteButton = $("#deleteEdit");
+    const deleteButton = q("#deleteEdit");
     deleteButton.disabled = true;
     deleteButton.textContent = "Deleting…";
     posts = posts.filter(item => item.id !== post.id);
@@ -543,10 +573,10 @@ function renderInspector(hostSelector = "#inspector") {
     await navigator.clipboard.writeText(value);
     notify(`${label} copied`);
   };
-  $("#copyCaption").onclick = () => copyText(post.caption, "Caption");
-  $("#copyHashtags").onclick = () => copyText(post.hashtags, "Hashtags");
-  if ($("#refreshCanva")) $("#refreshCanva").onclick = () => refreshCanvaPreview(post);
-  $("#markMeta").onclick = async () => {
+  q("#copyCaption").onclick = () => copyText(post.caption, "Caption");
+  q("#copyHashtags").onclick = () => copyText(post.hashtags, "Hashtags");
+  if (q("#refreshCanva")) q("#refreshCanva").onclick = () => refreshCanvaPreview(post);
+  q("#markMeta").onclick = async () => {
     applyWorkflow(post, "ready-meta");
     post.updatedBy = currentUser.name;
     post.updatedAt = new Date().toISOString();
@@ -554,8 +584,8 @@ function renderInspector(hostSelector = "#inspector") {
     await persistPlanner("marked content ready for Meta Business Suite");
     notify("Ready for Meta Business Suite");
   };
-  $("#addComment").onclick = async () => {
-    const value = $("#commentText").value.trim();
+  q("#addComment").onclick = async () => {
+    const value = q("#commentText").value.trim();
     if (!value) return;
     (post.comments ||= []).push({ author: currentUser.name, role: currentUser.role, text: value, at: new Date().toISOString() });
     post.updatedBy = currentUser.name;
@@ -639,7 +669,10 @@ function switchView(name) {
   $(`#view-${name}`).classList.remove("hidden");
   $$(".nav").forEach(nav => nav.classList.toggle("active", nav.dataset.view === name));
   $("#pageTitle").textContent = { grid: "Grid Planner", calendar: "Calendar", library: "Content Library", approvals: "Approvals", editor: "Edit post", settings: "Settings" }[name];
+  if (name !== "grid") $("#inspector").innerHTML = "";
+  if (name !== "editor") $("#postEditor").innerHTML = "";
   if (name === "settings") renderPlannerSettings();
+  if (name === "grid") renderInspector();
   if (name === "editor") renderInspector("#postEditor");
 }
 async function readFile(file) {
