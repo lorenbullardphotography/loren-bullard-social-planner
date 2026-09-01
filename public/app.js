@@ -236,6 +236,56 @@ function cropTransform(post) {
 function cropFrameRatio(post) {
   return post.cropRatio === "1:1" ? "1 / 1" : post.cropRatio === "1.91:1" ? "1.91 / 1" : post.cropRatio === "9:16" ? "9 / 16" : "4 / 5";
 }
+function locationSummary(post) {
+  const pin = post.locationTag;
+  const hasPin = pin && Number.isFinite(Number(pin.latitude)) && Number.isFinite(Number(pin.longitude));
+  const tags = Array.isArray(post.tags) && post.tags.length ? `<br><span class="location-tags">${post.tags.map(tag => `#${esc(tag)}`).join(" ")}</span>` : "";
+  return post.location || hasPin || tags ? `<div class="location-summary">${post.location ? `⌖ ${esc(post.location)}` : ""}${hasPin ? ` <a href="https://www.openstreetmap.org/?mlat=${pin.latitude}&mlon=${pin.longitude}#map=15/${pin.latitude}/${pin.longitude}" target="_blank" rel="noopener noreferrer">View map pin</a>` : ""}${tags}</div>` : "";
+}
+
+async function readExifGps(file) {
+  try {
+    const bytes = new DataView(await file.arrayBuffer());
+    if (bytes.getUint16(0) !== 0xffd8) return null;
+    let offset = 2;
+    while (offset + 4 < bytes.byteLength) {
+      if (bytes.getUint8(offset) !== 0xff || bytes.getUint8(offset + 1) === 0xda) break;
+      const marker = bytes.getUint8(offset + 1), length = bytes.getUint16(offset + 2);
+      if (marker === 0xe1 && new TextDecoder().decode(new Uint8Array(bytes.buffer, bytes.byteOffset + offset + 4, 6)) === "Exif\0\0") {
+        return parseExifGps(bytes, offset + 10);
+      }
+      offset += 2 + length;
+    }
+  } catch {}
+  return null;
+}
+function parseExifGps(view, tiff) {
+  const little = view.getUint16(tiff) === 0x4949;
+  const u16 = o => view.getUint16(o, little), u32 = o => view.getUint32(o, little);
+  if (u16(tiff + 2) !== 42) return null;
+  const readIfd = at => {
+    const out = {};
+    if (!at || at + 2 > view.byteLength) return out;
+    const count = u16(at);
+    for (let i = 0; i < count; i++) {
+      const entry = at + 2 + i * 12; if (entry + 12 > view.byteLength) break;
+      const tag = u16(entry), type = u16(entry + 2), countValue = u32(entry + 4), size = type === 3 ? 2 : type === 4 ? 4 : type === 5 ? 8 : 1;
+      const valueAt = size * countValue <= 4 ? entry + 8 : tiff + u32(entry + 8);
+      if (tag === 0x8825) out.gps = tiff + u32(valueAt);
+      else if (tag === 1 || tag === 3) out[tag] = String.fromCharCode(...new Uint8Array(view.buffer, view.byteOffset + valueAt, Math.min(countValue, 2))).replace(/\0/g, "");
+      else if (tag === 2 || tag === 4) out[tag] = [0, 1, 2].map(i => { const p = valueAt + i * 8; return p + 8 <= view.byteLength ? u32(p) / (u32(p + 4) || 1) : 0; });
+    }
+    return out;
+  };
+  const main = readIfd(tiff + u32(tiff + 4)), gps = readIfd(main.gps);
+  if (!gps[1] || !gps[3] || !gps[2]?.length || !gps[4]?.length) return null;
+  const latitude = (gps[2][0] + gps[2][1] / 60 + gps[2][2] / 3600) * (gps[1] === "S" ? -1 : 1);
+  const longitude = (gps[4][0] + gps[4][1] / 60 + gps[4][2] / 3600) * (gps[3] === "W" ? -1 : 1);
+  return Number.isFinite(latitude) && Number.isFinite(longitude) ? { latitude, longitude } : null;
+}
+async function readExifGpsFromUrl(url) {
+  try { return readExifGps(new File([await (await fetch(url)).arrayBuffer()], "asset.jpg", { type: "image/jpeg" })); } catch { return null; }
+}
 function renderPlannerSettings() {
   const pillars = $("#settingsPillars");
   if (!pillars) return;
@@ -357,6 +407,7 @@ function renderGrid() {
     media.classList.add("crop-rendered");
     media.style.transform = cropTransform(post);
     node.querySelector(".tag").textContent = post.status === "posted" ? "LIVE" : WORKFLOW_LABELS[workflowOf(post)];
+    node.querySelector(".location-icon").classList.toggle("hidden", !(post.location || post.locationTag || post.tags?.length));
     node.querySelector(".type-icon").textContent = post.type === "REEL" ? "▶" : post.type === "CAROUSEL" ? "▱" : "";
     if (selected === post.id) node.classList.add("selected");
     node.onclick = () => { selected = post.id; renderGrid(); renderInspector(); };
@@ -409,7 +460,7 @@ function renderInspector(hostSelector = "#inspector") {
   if (post.status === "posted") {
     host.innerHTML = `<div class="editor">
       <div class="preview-wrap">${assetPreview(post)}</div>
-      <div class="posted-lock">This post is live on Instagram and stays locked in the grid.<br><br><b>${post.timestamp ? new Date(post.timestamp).toLocaleDateString() : "Posted"}</b>${post.permalink ? ` · <a href="${esc(post.permalink)}" target="_blank" rel="noopener noreferrer">Open on Instagram</a>` : ""}<br>${esc(formatSchedule(post))}</div>
+      <div class="posted-lock">This post is live on Instagram and stays locked in the grid.<br><br><b>${post.timestamp ? new Date(post.timestamp).toLocaleDateString() : "Posted"}</b>${post.permalink ? ` · <a href="${esc(post.permalink)}" target="_blank" rel="noopener noreferrer">Open on Instagram</a>` : ""}<br>${esc(formatSchedule(post))}${locationSummary(post)}</div>
       <label class="field">Caption<textarea rows="8" readonly>${esc(post.caption || "")}</textarea></label>
     </div>`;
     return;
@@ -418,9 +469,11 @@ function renderInspector(hostSelector = "#inspector") {
   const workflowOptions = Object.entries(WORKFLOW_LABELS).map(([key, label]) => `<option value="${key}" ${workflowOf(post) === key ? "selected" : ""}>${label}</option>`).join("");
   const pillarOptions = `<option value="">Choose a pillar</option>` + settings.pillars.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${esc(pillar)}</option>`).join("");
   const cropOptions = ["1:1", "4:5", "1.91:1", "9:16"].map(ratio => `<option value="${ratio}" ${post.cropRatio === ratio ? "selected" : ""}>${ratio} ${ratio === "9:16" ? "· Reel / Story" : "· Feed"}</option>`).join("");
+  const pin = post.locationTag || {};
   host.innerHTML = `<div class="editor editable-editor"><div class="editor-scroll">
     <div class="preview-wrap crop-preview" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post)}</div>
     <div class="asset-meta"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva added" : "Uploaded"}</span></div>
+    <div class="location-card"><div><b>Location & tags</b><small>Add an Instagram-style place, map pin, and searchable tags for this asset.</small></div><label class="field nested">Location name<input id="eLocation" maxlength="120" value="${esc(post.location || pin.name || "")}" placeholder="Crystal Bridges, Bentonville"></label><div class="two"><label class="field nested">Latitude<input id="eLatitude" type="number" step="any" min="-90" max="90" value="${pin.latitude ?? ""}" placeholder="36.3729"></label><label class="field nested">Longitude<input id="eLongitude" type="number" step="any" min="-180" max="180" value="${pin.longitude ?? ""}" placeholder="-94.2088"></label></div><button id="readLocationMetadata" class="ghost" type="button">⌖ Use photo metadata</button><small id="locationHelp" class="field-help">If GPS is available in the original photo, we’ll place the coordinates here.</small><label class="field nested">Generic tags<input id="eTags" value="${esc((post.tags || []).join(", "))}" placeholder="newborn, studio, northwest arkansas"></label><div id="locationMapLink"></div></div>
     ${post.canvaUrl ? `<div class="canva-source"><b>Canva working draft</b><span>Preview refreshes from Canva when connected.</span><div class="handoff-actions"><a class="ghost button-link" href="${esc(post.canvaUrl)}" target="_blank" rel="noopener noreferrer">Open in Canva</a><button id="refreshCanva" class="ghost">Refresh preview</button></div></div>` : ""}
     <label class="field">Instagram crop<select id="eCropRatio">${cropOptions}</select><small class="field-help">The preview uses this frame; the original asset stays unchanged.</small></label>
     <label class="field">Zoom <input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="${post.cropZoom || 1}"><small class="field-help">Drag the preview to pan the crop.</small></label>
@@ -538,6 +591,10 @@ function renderInspector(hostSelector = "#inspector") {
     post.hashtags = q("#eHashtags").value.trim();
     post.tagNotes = q("#eTagNotes").value.trim();
     post.altText = q("#eAltText").value.trim();
+    post.location = q("#eLocation").value.trim();
+    const latitude = Number(q("#eLatitude").value), longitude = Number(q("#eLongitude").value);
+    post.locationTag = post.location || Number.isFinite(latitude) || Number.isFinite(longitude) ? { name: post.location, latitude: Number.isFinite(latitude) ? latitude : null, longitude: Number.isFinite(longitude) ? longitude : null, source: post.locationTag?.source || "manual" } : null;
+    post.tags = [...new Set(q("#eTags").value.split(",").map(tag => tag.trim().replace(/^#/, "")).filter(Boolean))].slice(0, 20);
     post.updatedBy = currentUser.name;
     post.updatedAt = new Date().toISOString();
     try {
@@ -584,6 +641,23 @@ function renderInspector(hostSelector = "#inspector") {
     await persistPlanner("marked content ready for Meta Business Suite");
     notify("Ready for Meta Business Suite");
   };
+  const updateMapLink = () => {
+    const lat = Number(q("#eLatitude")?.value), lng = Number(q("#eLongitude")?.value), name = q("#eLocation")?.value.trim();
+    const link = q("#locationMapLink");
+    if (link && Number.isFinite(lat) && Number.isFinite(lng)) link.innerHTML = `<a class="map-link" href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=15/${lat}/${lng}" target="_blank" rel="noopener noreferrer">⌖ View pinned location on map${name ? ` · ${esc(name)}` : ""}</a>`;
+    else if (link) link.innerHTML = "<span class=field-help>Add latitude and longitude to create a map pin.</span>";
+  };
+  [q("#eLocation"), q("#eLatitude"), q("#eLongitude")].forEach(input => input?.addEventListener("input", updateMapLink));
+  q("#readLocationMetadata").onclick = async () => {
+    if (assetSourceOf(post) !== "uploaded" || assetKindOf(post) !== "image") return notify("GPS metadata is available for uploaded photos");
+    const gps = await readExifGpsFromUrl(post.image);
+    if (!gps) return notify("No GPS metadata found in this photo");
+    q("#eLatitude").value = gps.latitude.toFixed(6); q("#eLongitude").value = gps.longitude.toFixed(6);
+    post.locationTag = { ...(post.locationTag || {}), latitude: gps.latitude, longitude: gps.longitude, source: "metadata" };
+    q("#locationHelp").textContent = "GPS coordinates found in photo metadata. Add a place name if you’d like one shown with the pin.";
+    updateMapLink(); notify("Photo location found");
+  };
+  updateMapLink();
   q("#addComment").onclick = async () => {
     const value = q("#commentText").value.trim();
     if (!value) return;
@@ -638,11 +712,11 @@ function renderLibrary() {
   const query = librarySearch.toLowerCase();
   const items = future().filter(post => {
     const matchesFilter = libraryFilter === "all" || post.status === libraryFilter || post.approval === libraryFilter || workflowOf(post) === libraryFilter;
-    const searchable = [post.caption, post.notes, post.pillar, post.client, post.assignee, post.goal, post.hook].join(" ").toLowerCase();
+    const searchable = [post.caption, post.notes, post.pillar, post.client, post.assignee, post.goal, post.hook, post.location, ...(post.tags || [])].join(" ").toLowerCase();
     return matchesFilter && (!query || searchable.includes(query));
   });
   $("#library").innerHTML = items.length
-    ? items.map(post => `<article class="library-card" data-open-editor="${post.id}"><div class="library-media">${assetMediaMarkup(post)}</div><div class="library-badges"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva added" : "Uploaded"}</span></div><div class="library-info"><b>${esc(post.notes || post.caption || "Untitled content")}</b><span>${esc(`${post.type} · ${formatSchedule(post)} · ${WORKFLOW_LABELS[workflowOf(post)]}${post.pillar ? ` · ${post.pillar}` : ""}`)}</span></div></article>`).join("")
+    ? items.map(post => `<article class="library-card" data-open-editor="${post.id}"><div class="library-media">${assetMediaMarkup(post)}</div><div class="library-badges"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva added" : "Uploaded"}</span></div><div class="library-info"><b>${esc(post.notes || post.caption || "Untitled content")}</b><span>${esc(`${post.type} · ${formatSchedule(post)} · ${WORKFLOW_LABELS[workflowOf(post)]}${post.pillar ? ` · ${post.pillar}` : ""}`)}</span>${post.location || post.tags?.length ? `<small class="library-location">⌖ ${esc(post.location || "Tagged asset")}${post.tags?.length ? ` · ${post.tags.map(tag => `#${esc(tag)}`).join(" ")}` : ""}</small>` : ""}</div></article>`).join("")
     : `<div class="empty">No content in this view yet.</div>`;
   $$("[data-open-editor]").forEach(node => node.onclick = () => openPost(node.dataset.openEditor, true));
 }
@@ -700,6 +774,7 @@ $("#upload").onchange = async event => {
   try {
     for (const [index, file] of validFiles.entries()) {
       uploadStatus.textContent = "Uploading " + (index + 1) + " of " + validFiles.length + "…";
+      const photoGps = file.type.startsWith("image/") ? await readExifGps(file) : null;
       const uploaded = await api("/api/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, data: await readFile(file) }) });
       const id = crypto.randomUUID();
       firstId ||= id;
@@ -717,6 +792,8 @@ $("#upload").onchange = async event => {
         scheduleState: "draft",
         caption: "",
         notes: "",
+        locationTag: photoGps ? { latitude: photoGps.latitude, longitude: photoGps.longitude, name: "", source: "metadata" } : null,
+        tags: [],
         comments: [],
         updatedBy: currentUser.name,
         updatedAt: new Date().toISOString()

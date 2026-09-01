@@ -447,6 +447,13 @@ function normalizePost(post) {
     audio: String(post?.audio || "").slice(0, 300),
     altText: String(post?.altText || "").slice(0, 500),
     location: String(post?.location || "").slice(0, 120),
+    tags: Array.isArray(post?.tags) ? [...new Set(post.tags.map(tag => String(tag).trim().replace(/^#/, "")).filter(Boolean))].slice(0, 20) : [],
+    locationTag: post?.locationTag && typeof post.locationTag === "object" ? {
+      name: String(post.locationTag.name || "").slice(0, 120),
+      latitude: Number.isFinite(Number(post.locationTag.latitude)) ? Math.max(-90, Math.min(90, Number(post.locationTag.latitude))) : null,
+      longitude: Number.isFinite(Number(post.locationTag.longitude)) ? Math.max(-180, Math.min(180, Number(post.locationTag.longitude))) : null,
+      source: ["metadata", "manual"].includes(post.locationTag.source) ? post.locationTag.source : "manual"
+    } : null,
     client: String(post?.client || "").slice(0, 120),
     tagNotes: String(post?.tagNotes || "").slice(0, 500),
     checklist: Array.isArray(post?.checklist) ? post.checklist.slice(0, 20).map(item => ({
