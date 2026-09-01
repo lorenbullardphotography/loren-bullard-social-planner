@@ -400,6 +400,7 @@ function renderInspector(hostSelector = "#inspector") {
   const cropOptions = ["1:1", "4:5", "1.91:1", "9:16"].map(ratio => `<option value="${ratio}" ${post.cropRatio === ratio ? "selected" : ""}>${ratio} ${ratio === "9:16" ? "· Reel / Story" : "· Feed"}</option>`).join("");
   host.innerHTML = `<div class="editor editable-editor"><div class="editor-scroll">
     <div class="preview-wrap crop-preview" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post)}</div>
+    <div class="asset-meta"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva added" : "Uploaded"}</span></div>
     ${post.canvaUrl ? `<div class="canva-source"><b>Canva working draft</b><span>Preview refreshes from Canva when connected.</span><div class="handoff-actions"><a class="ghost button-link" href="${esc(post.canvaUrl)}" target="_blank" rel="noopener noreferrer">Open in Canva</a><button id="refreshCanva" class="ghost">Refresh preview</button></div></div>` : ""}
     <label class="field">Instagram crop<select id="eCropRatio">${cropOptions}</select><small class="field-help">The preview uses this frame; the original asset stays unchanged.</small></label>
     <label class="field">Zoom <input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="${post.cropZoom || 1}"><small class="field-help">Drag the preview to pan the crop.</small></label>
@@ -611,20 +612,25 @@ function renderLibrary() {
     return matchesFilter && (!query || searchable.includes(query));
   });
   $("#library").innerHTML = items.length
-    ? items.map(post => `<article class="library-card" data-open="${post.id}"><img src="${post.image}"><div class="library-info"><b>${esc(post.notes || post.caption || "Untitled content")}</b><span>${esc(`${post.type} · ${formatSchedule(post)} · ${WORKFLOW_LABELS[workflowOf(post)]}${post.pillar ? ` · ${post.pillar}` : ""}`)}</span></div></article>`).join("")
+    ? items.map(post => `<article class="library-card" data-open-editor="${post.id}"><div class="library-media">${assetMediaMarkup(post)}</div><div class="library-badges"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva added" : "Uploaded"}</span></div><div class="library-info"><b>${esc(post.notes || post.caption || "Untitled content")}</b><span>${esc(`${post.type} · ${formatSchedule(post)} · ${WORKFLOW_LABELS[workflowOf(post)]}${post.pillar ? ` · ${post.pillar}` : ""}`)}</span></div></article>`).join("")
     : `<div class="empty">No content in this view yet.</div>`;
-  $$("[data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open));
+  $$("[data-open-editor]").forEach(node => node.onclick = () => openPost(node.dataset.openEditor, true));
 }
 function renderApprovals() {
   const columns = [["drafting", "Drafting"], ["needs-review", "Needs Review"], ["approved", "Approved"], ["ready-meta", "Ready for Meta"], ["meta-scheduled", "Scheduled in Meta"]];
   $("#approvalBoard").innerHTML = columns.map(([key, label]) => `<section class="approval-col"><h4>${label}</h4>${future().filter(post => workflowOf(post) === key).map(post => `<article class="approval-card" data-open="${post.id}"><img src="${post.image}"><b>${esc(post.notes || post.caption || post.type)}</b><span>${esc(formatSchedule(post))}</span></article>`).join("") || `<div class="empty">Nothing here.</div>`}</section>`).join("");
   $$("[data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open));
 }
-function openPost(id) {
+function openPost(id, openEditor = false) {
   selected = id;
-  switchView("grid");
-  renderGrid();
-  renderInspector();
+  if (openEditor) {
+    editorReturnView = currentView;
+    switchView("editor");
+  } else {
+    switchView("grid");
+    renderGrid();
+    renderInspector();
+  }
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 function switchView(name) {
@@ -668,6 +674,7 @@ $("#upload").onchange = async event => {
         id,
         image: uploaded.url,
         assetKind: uploaded.kind,
+        assetSource: "uploaded",
         cropRatio: uploaded.kind === "video" ? "9:16" : "4:5",
         status: "draft",
         approval: "draft",
@@ -719,7 +726,7 @@ async function loadCanvaDesigns(query = "") {
 function addCanvaDesign(design) {
   if (!design) return;
   const id = crypto.randomUUID();
-  const post = { id, image: design.thumbnail || "/assets/brand-cover.jpg", canvaUrl: design.editUrl || design.viewUrl, canvaDesignId: design.id, assetKind: "image", cropRatio: "4:5", status: "draft", approval: "draft", type: "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: design.title, comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
+  const post = { id, image: design.thumbnail || "/assets/brand-cover.jpg", assetSource: "canva", canvaUrl: design.editUrl || design.viewUrl, canvaDesignId: design.id, assetKind: "image", cropRatio: "4:5", status: "draft", approval: "draft", type: "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: design.title, comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
   posts.unshift(post); selected = id; $("#canvaModal").classList.add("hidden"); renderAll();
   persistPlanner("added a Canva working draft").then(() => notify("Canva draft added")).catch(error => { posts = posts.filter(item => item.id !== id); renderAll(); notify(error.message || "Canva draft could not be added"); });
 }
@@ -823,7 +830,7 @@ $("#settingsDisconnect").onclick = async () => {
   await checkInstagram();
   notify("Instagram disconnected");
 };
-$("#backToGrid").onclick = () => switchView("grid");
+$("#backToGrid").onclick = () => switchView(editorReturnView);
 $("#closeSettings").onclick = () => $("#settingsModal").classList.add("hidden");
 $("#settingsModal").onclick = event => { if (event.target.id === "settingsModal") $("#settingsModal").classList.add("hidden"); };
 $("#disconnectBtn").onclick = async () => {
