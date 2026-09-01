@@ -188,6 +188,57 @@ function exportBackup() {
   downloadFile('loren-content-planner-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify({ exportedAt: new Date().toISOString(), posts }, null, 2), "application/json");
   notify("Backup exported");
 }
+function approvedForMeta(post) {
+  return post?.approval === "approved" || ["approved", "ready-meta", "meta-scheduled"].includes(workflowOf(post));
+}
+function metaExportData(post) {
+  return {
+    exportedAt: new Date().toISOString(),
+    source: "Loren Bullard Content Planner",
+    posts: [{
+      id: post.id,
+      mediaUrl: post.image,
+      mediaType: assetKindOf(post),
+      format: post.type,
+      caption: post.caption || "",
+      hashtags: post.hashtags || "",
+      scheduledDate: post.date || "",
+      scheduledTime: post.time || "",
+      location: post.location || post.locationTag?.name || "",
+      altText: post.altText || "",
+      notes: post.notes || "",
+      goal: post.goal || "",
+      hook: post.hook || "",
+      callToAction: post.cta || "",
+      audio: post.audio || "",
+      taggingNotes: post.tagNotes || "",
+      tags: Array.isArray(post.tags) ? post.tags : [],
+      coverImageUrl: post.coverImage || ""
+    }]
+  };
+}
+async function downloadAsset(post) {
+  try {
+    const response = await fetch(post.image);
+    if (!response.ok) throw new Error("The media file could not be downloaded");
+    const blob = await response.blob();
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    const sourceExtension = post.image.match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1]?.toLowerCase();
+    const extension = sourceExtension || (assetKindOf(post) === "video" ? "mp4" : "jpg");
+    link.download = `loren-${post.type.toLowerCase()}-${post.id}.${extension}`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    notify("Approved media downloaded");
+  } catch (error) {
+    notify(error.message || "Media download failed");
+  }
+}
+function exportMetaData(post) {
+  if (!approvedForMeta(post)) return notify("Approve this asset before exporting it for Meta");
+  downloadFile(`meta-handoff-${post.id}.json`, JSON.stringify(metaExportData(post), null, 2), "application/json");
+  notify("Meta handoff data exported");
+}
 async function importBackup(file) {
   const raw = await file.text();
   let data;
@@ -605,7 +656,7 @@ function renderInspector(hostSelector = "#inspector") {
     <div class="field">Comments<div class="comment-list">${comments || `<span style="text-transform:none;font-weight:400">No feedback yet.</span>`}</div>
       <div style="display:flex;gap:6px"><input id="commentText" placeholder="Add feedback as ${esc(currentUser.name)}…" style="flex:1"><button id="addComment" class="ghost">Add</button></div>
     </div>
-    <div class="handoff"><b>Meta Business Suite handoff</b><span>Use Meta for final scheduling and publishing.</span><div class="handoff-actions"><button id="copyCaption" class="ghost">Copy caption</button><button id="copyHashtags" class="ghost">Copy hashtags</button><a class="ghost button-link" href="https://business.facebook.com/latest/home" target="_blank" rel="noopener noreferrer">Open Meta</a></div><button id="markMeta" class="primary">Mark ready for Meta</button></div>
+    <div class="handoff"><b>Meta Business Suite handoff</b><span>Use Meta for final scheduling and publishing.</span><div class="handoff-actions"><button id="copyCaption" class="ghost">Copy caption</button><button id="copyHashtags" class="ghost">Copy hashtags</button><a class="ghost button-link" href="https://business.facebook.com/latest/home" target="_blank" rel="noopener noreferrer">Open Meta</a>${approvedForMeta(post) ? '<button id="downloadApprovedAsset" class="ghost">↓ Download approved media</button><button id="exportMetaData" class="ghost">↓ Export Meta data</button>' : ""}</div><button id="markMeta" class="primary">Mark ready for Meta</button></div>
     <div class="posted-lock">Last updated${post.updatedBy ? ` by <b>${esc(post.updatedBy)}</b>` : ""}${post.updatedAt ? ` on ${new Date(post.updatedAt).toLocaleString()}` : ""}.</div>
     </div>
     <div class="actions"><button id="saveEdit" class="primary">Save</button><button id="deleteEdit" class="danger">Delete</button></div>
@@ -748,6 +799,8 @@ function renderInspector(hostSelector = "#inspector") {
   };
   q("#copyCaption").onclick = () => copyText(post.caption, "Caption");
   q("#copyHashtags").onclick = () => copyText(post.hashtags, "Hashtags");
+  if (q("#downloadApprovedAsset")) q("#downloadApprovedAsset").onclick = () => downloadAsset(post);
+  if (q("#exportMetaData")) q("#exportMetaData").onclick = () => exportMetaData(post);
   if (q("#refreshCanva")) q("#refreshCanva").onclick = () => refreshCanvaPreview(post);
   if (q("#coverInput")) q("#coverInput").onchange = async event => {
     const [file] = event.target.files;
