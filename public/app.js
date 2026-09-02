@@ -121,7 +121,19 @@ function setPlanner(data) {
 
 async function api(path, options) {
   const response = await fetch(path, options);
-  const data = await response.json();
+  // Some hosts (notably Vercel) return an HTML error page when the request
+  // exceeds their function body limit. Calling response.json() on that page
+  // produces Safari's unhelpful "The string did not match the expected
+  // pattern" error, hiding the actual upload problem.
+  const responseText = await response.text();
+  let data = {};
+  try { data = responseText ? JSON.parse(responseText) : {}; } catch {
+    if (!response.ok && response.status === 413) {
+      throw new Error("This asset is too large for the upload connection. Try a smaller image or video.");
+    }
+    if (!response.ok) throw new Error(`Upload failed (server returned ${response.status}).`);
+    throw new Error("The server returned an unreadable response. Please try again.");
+  }
   if (!response.ok) {
     const error = new Error(data.error || "Request failed");
     error.status = response.status;
