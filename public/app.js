@@ -120,7 +120,12 @@ function setPlanner(data) {
 }
 
 async function api(path, options) {
-  const response = await fetch(path, options);
+  let response;
+  try {
+    response = await fetch(path, options);
+  } catch {
+    throw new Error("Could not reach the planner server. Please refresh and try again.");
+  }
   // Some hosts (notably Vercel) return an HTML error page when the request
   // exceeds their function body limit. Calling response.json() on that page
   // produces Safari's unhelpful "The string did not match the expected

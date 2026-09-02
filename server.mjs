@@ -597,6 +597,13 @@ export async function handleRequest(req, res) {
   try {
     await seedEnvironmentSession();
     const url = new URL(req.url, `http://${req.headers.host}`);
+    // Vercel rewrites requests to the single API function. Preserve the
+    // original application path so /auth/* and /api/* routes remain distinct.
+    const routedPath = url.searchParams.get("__path");
+    if (routedPath) {
+      url.pathname = routedPath.startsWith("/") ? routedPath : `/${routedPath}`;
+      url.searchParams.delete("__path");
+    }
     let users = await readUsers();
     if (!users.length) users = await seedDefaultUsers();
     const account = userFromSession(req, users);

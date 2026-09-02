@@ -1,7 +1,7 @@
 {
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api" },
-    { "source": "/auth/:path*", "destination": "/api" },
+    { "source": "/api/:path*", "destination": "/api/index.mjs?__path=/api/:path*" },
+    { "source": "/auth/:path*", "destination": "/api/index.mjs?__path=/auth/:path*" },
     { "source": "/", "destination": "/public/index.html" },
     { "source": "/:path*", "destination": "/public/:path*" }
   ]
