@@ -811,7 +811,9 @@ function renderInspector(hostSelector = "#inspector") {
     const help = q("#coverHelp");
     if (help) help.textContent = "Uploading cover photo…";
     try {
-      const uploaded = await api("/api/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, data: await readFile(file) }) });
+      const uploadFile = await prepareUploadFile(file);
+      if (uploadFile.size > 3 * 1024 * 1024) throw new Error("This asset is too large for the hosted upload connection. Photos are compressed automatically; videos must be under 3 MB.");
+      const uploaded = await api("/api/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: uploadFile.name, data: await readFile(uploadFile) }) });
       post.coverImage = uploaded.url;
       post.updatedBy = currentUser.name;
       post.updatedAt = new Date().toISOString();
@@ -994,6 +996,25 @@ async function readFile(file) {
   });
 }
 
+async function prepareUploadFile(file) {
+  // Vercel Functions accept only a 4.5 MB request body. Because the upload is
+  // sent as base64 JSON, keep browser-compressed photos below 3 MB so normal
+  // camera images do not hit that platform limit.
+  if (!file.type.startsWith("image/") || file.size <= 3 * 1024 * 1024) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, Math.sqrt((3 * 1024 * 1024) / file.size));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.84));
+    if (blob && blob.size < file.size) return new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" });
+  } catch {}
+  return file;
+}
+
 $("#upload").onchange = async event => {
   const files = [...event.target.files];
   const oversized = files.filter(file => file.size > 30 * 1024 * 1024);
@@ -1011,7 +1032,9 @@ $("#upload").onchange = async event => {
     for (const [index, file] of validFiles.entries()) {
       uploadStatus.textContent = "Uploading " + (index + 1) + " of " + validFiles.length + "…";
       const photoGps = file.type.startsWith("image/") ? await readExifGps(file) : null;
-      const uploaded = await api("/api/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, data: await readFile(file) }) });
+      const uploadFile = await prepareUploadFile(file);
+      if (uploadFile.size > 3 * 1024 * 1024) throw new Error("This asset is too large for the hosted upload connection. Photos are compressed automatically; videos must be under 3 MB.");
+      const uploaded = await api("/api/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: uploadFile.name, data: await readFile(uploadFile) }) });
       const id = crypto.randomUUID();
       firstId ||= id;
       const uploadedPost = {
