@@ -626,19 +626,7 @@ export async function handleRequest(req, res) {
       setAccountCookie(res, user.id);
       return sendJson(res, 200, {ok:true, user: publicUser(user)});
     }
-    if (url.pathname === "/auth/register" && req.method === "POST") {
-      const body = await readBody(req);
-      const name = String(body.name || "").trim().slice(0, 80);
-      const role = ROLE_VALUES.includes(body.role) ? body.role : "Assistant";
-      const password = String(body.password || "");
-      if (name.length < 2) return sendJson(res, 400, {error: "Enter a display name."});
-      if (password.length < 8) return sendJson(res, 400, {error: "Use a password with at least 8 characters."});
-      if (users.some(item => item.name.toLowerCase() === name.toLowerCase())) return sendJson(res, 409, {error: "That display name is already in use."});
-      const user = { id: crypto.randomUUID(), name, role, passwordHash: hashPassword(password), createdAt: new Date().toISOString() };
-      await writeUsers([...users, user]);
-      setAccountCookie(res, user.id);
-      return sendJson(res, 201, {ok:true, user: publicUser(user)});
-    }
+    if (url.pathname === "/auth/register") return sendJson(res, 404, {error: "Account creation is disabled."});
     if (url.pathname === "/auth/logout" && req.method === "POST") {
       clearAccountCookie(res);
       return sendJson(res, 200, {ok:true});
@@ -663,7 +651,7 @@ export async function handleRequest(req, res) {
     }
     if (!account) {
       if (url.pathname.startsWith("/api/")) return sendJson(res, 401, {error: "Please sign in to the planner."});
-      if (url.pathname !== "/login.html" && url.pathname !== "/login.js" && url.pathname !== "/auth/login" && url.pathname !== "/auth/register") return redirect(res, "/login.html");
+      if (url.pathname !== "/login.html" && url.pathname !== "/login.js" && url.pathname !== "/auth/login") return redirect(res, "/login.html");
     }
 
     if (url.pathname === "/api/planner" && req.method === "GET") {
