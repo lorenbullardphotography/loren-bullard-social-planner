@@ -70,6 +70,14 @@ function assetTypeLabel(post) {
   const type = (post.canvaDesignTypes || []).map(value => labels[value] || value).filter(Boolean)[0];
   return type || (assetSourceOf(post) === "canva" ? "Canva Design" : "Image");
 }
+function needsCanvaPreviewRefresh(post) {
+  if (assetSourceOf(post) !== "canva") return false;
+  if (!post.image || !post.canvaPreviewUpdatedAt) return true;
+  try {
+    const expiresAt = new URL(post.image, "https://planner.local").searchParams.get("exp");
+    return expiresAt !== null && Number.isFinite(Number(expiresAt)) && Number(expiresAt) * 1000 <= Date.now();
+  } catch { return false; }
+}
 function hasReelCover(post) { return post.type === "REEL" && Boolean(post.coverImage); }
 function gridImageOf(post) { return hasReelCover(post) ? post.coverImage : post.image; }
 function assetMediaMarkup(post, className = "") {
@@ -490,8 +498,10 @@ function renderGrid() {
     node.querySelector(".type-icon").textContent = post.type === "REEL" ? "▶" : post.type === "CAROUSEL" ? "▱" : "";
     if (selected === post.id) node.classList.add("selected");
     const quickDelete = node.querySelector(".tile-delete");
+    const quickRefresh = node.querySelector(".tile-refresh");
     const isInstagramPost = Boolean(post.metaId || post.status === "posted");
     quickDelete.classList.toggle("hidden", isInstagramPost);
+    quickRefresh.classList.toggle("hidden", !needsCanvaPreviewRefresh(post) || isInstagramPost);
     quickDelete.addEventListener("pointerdown", event => event.stopPropagation());
     quickDelete.addEventListener("click", async event => {
       event.stopPropagation();
@@ -510,6 +520,11 @@ function renderGrid() {
         renderAll();
         notify(error.message || "The post could not be deleted");
       }
+    });
+    quickRefresh.addEventListener("pointerdown", event => event.stopPropagation());
+    quickRefresh.addEventListener("click", event => {
+      event.stopPropagation();
+      refreshCanvaPreview(post, post.type, quickRefresh);
     });
     node.onclick = () => {
       if (Date.now() < suppressTileClickUntil) return;
@@ -807,7 +822,7 @@ function renderInspector(hostSelector = "#inspector") {
   q("#copyHashtags").onclick = () => copyText(post.hashtags, "Hashtags");
   if (q("#downloadApprovedAsset")) q("#downloadApprovedAsset").onclick = () => downloadAsset(post);
   if (q("#exportMetaData")) q("#exportMetaData").onclick = () => exportMetaData(post);
-  if (q("#refreshCanva")) q("#refreshCanva").onclick = () => refreshCanvaPreview(post);
+  if (q("#refreshCanva")) q("#refreshCanva").onclick = () => refreshCanvaPreview(post, q("#eFormat")?.value);
   if (q("#coverInput")) q("#coverInput").onchange = async event => {
     const [file] = event.target.files;
     if (!file) return;
@@ -865,11 +880,10 @@ function renderInspector(hostSelector = "#inspector") {
     await persistPlanner("left feedback on a post");
   };
 }
-async function refreshCanvaPreview(post) {
-  const button = $("#refreshCanva");
+async function refreshCanvaPreview(post, format = post.type, button = $("#refreshCanva")) {
   if (button) { button.disabled = true; button.textContent = "Refreshing…"; }
   try {
-    const data = await api("/api/canva/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ canvaUrl: post.canvaUrl, designId: post.canvaDesignId || undefined }) });
+    const data = await api("/api/canva/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ canvaUrl: post.canvaUrl, designId: post.canvaDesignId || undefined, mediaType: format === "REEL" ? "video" : "image" }) });
     post.image = data.previewUrl;
     if (data.mediaType === "video") {
       post.assetKind = "video";

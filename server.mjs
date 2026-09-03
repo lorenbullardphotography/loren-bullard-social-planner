@@ -220,17 +220,25 @@ function canvaDesignId(value) {
   const match = String(value || "").match(/\/(?:design|api\/design)\/([^/?#]+)/);
   return match ? decodeURIComponent(match[1]) : "";
 }
+export async function waitForCanvaExport(job, token, { maxAttempts = 60, intervalMs = 1000 } = {}) {
+  const jobId = job?.job?.id || job?.id;
+  let result = job?.job || job;
+  if (!jobId) throw new Error("Canva did not return an export job ID.");
+
+  for (let attempt = 0; attempt < maxAttempts && result?.status !== "success"; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+    const response = await fetchJson(`https://api.canva.com/rest/v1/exports/${jobId}`, { headers: { Authorization: `Bearer ${token}` } });
+    result = response?.job || response;
+  }
+  return result;
+}
 async function exportCanvaFile(designId, token, formatType) {
   const job = await fetchJson("https://api.canva.com/rest/v1/exports", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ design_id: designId, format: { type: formatType, ...(formatType === "jpg" ? { quality: 90 } : {}), ...(formatType === "mp4" ? { quality: "vertical_1080p" } : {}) } })
   });
-  let result = job;
-  for (let attempt = 0; attempt < 12 && result.status !== "success"; attempt++) {
-    await new Promise(resolve => setTimeout(resolve, 500));
-    result = await fetchJson(`https://api.canva.com/rest/v1/exports/${job.job?.id || job.id}`, { headers: { Authorization: `Bearer ${token}` } });
-  }
+  const result = await waitForCanvaExport(job, token);
   const url = result.urls?.[0] || result.result?.urls?.[0];
   if (!url) throw new Error(`Canva did not return a ${formatType} export yet.`);
   const response = await fetch(url);
@@ -722,14 +730,10 @@ export async function handleRequest(req, res) {
       if (!designId) return sendJson(res, 400, { error: "Paste a Canva design link (the link should contain /design/...)." });
       const token = await canvaAccessToken(account.id);
       if (!token) return sendJson(res, 503, { error: "Connect Canva in Settings before refreshing previews." });
-      let previewUrl;
-      let mediaType = "image";
-      try {
-        previewUrl = await exportCanvaPreview(designId, token);
-      } catch (error) {
-        previewUrl = await exportCanvaFile(designId, token, "mp4");
-        mediaType = "video";
-      }
+      const mediaType = body.mediaType === "video" ? "video" : "image";
+      const previewUrl = mediaType === "video"
+        ? await exportCanvaFile(designId, token, "mp4")
+        : await exportCanvaPreview(designId, token);
       const session = await readCanvaSession(account.id);
       await writeCanvaSession(account.id, { ...session, last_synced_at: new Date().toISOString() });
       return sendJson(res, 200, { previewUrl, mediaType });
