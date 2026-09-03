@@ -524,7 +524,7 @@ function renderGrid() {
     quickRefresh.addEventListener("pointerdown", event => event.stopPropagation());
     quickRefresh.addEventListener("click", event => {
       event.stopPropagation();
-      refreshCanvaPreview(post, post.type, quickRefresh);
+      refreshCanvaPreview(post, quickRefresh);
     });
     node.onclick = () => {
       if (Date.now() < suppressTileClickUntil) return;
@@ -822,7 +822,7 @@ function renderInspector(hostSelector = "#inspector") {
   q("#copyHashtags").onclick = () => copyText(post.hashtags, "Hashtags");
   if (q("#downloadApprovedAsset")) q("#downloadApprovedAsset").onclick = () => downloadAsset(post);
   if (q("#exportMetaData")) q("#exportMetaData").onclick = () => exportMetaData(post);
-  if (q("#refreshCanva")) q("#refreshCanva").onclick = () => refreshCanvaPreview(post, q("#eFormat")?.value);
+  if (q("#refreshCanva")) q("#refreshCanva").onclick = () => refreshCanvaPreview(post, q("#refreshCanva"));
   if (q("#coverInput")) q("#coverInput").onchange = async event => {
     const [file] = event.target.files;
     if (!file) return;
@@ -880,10 +880,10 @@ function renderInspector(hostSelector = "#inspector") {
     await persistPlanner("left feedback on a post");
   };
 }
-async function refreshCanvaPreview(post, format = post.type, button = $("#refreshCanva")) {
+async function refreshCanvaPreview(post, button = $("#refreshCanva")) {
   if (button) { button.disabled = true; button.textContent = "Refreshing…"; }
   try {
-    const data = await api("/api/canva/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ canvaUrl: post.canvaUrl, designId: post.canvaDesignId || undefined, mediaType: format === "REEL" ? "video" : "image" }) });
+    const data = await api("/api/canva/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ canvaUrl: post.canvaUrl, designId: post.canvaDesignId || undefined }) });
     post.image = data.previewUrl;
     if (data.mediaType === "video") {
       post.assetKind = "video";

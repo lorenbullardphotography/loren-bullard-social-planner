@@ -232,6 +232,12 @@ export async function waitForCanvaExport(job, token, { maxAttempts = 60, interva
   }
   return result;
 }
+export async function preferredCanvaExportType(designId, token) {
+  const formats = await fetchJson(`https://api.canva.com/rest/v1/designs/${encodeURIComponent(designId)}/export-formats`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return formats?.formats?.mp4 ? "mp4" : "jpg";
+}
 async function exportCanvaFile(designId, token, formatType) {
   const job = await fetchJson("https://api.canva.com/rest/v1/exports", {
     method: "POST",
@@ -730,9 +736,10 @@ export async function handleRequest(req, res) {
       if (!designId) return sendJson(res, 400, { error: "Paste a Canva design link (the link should contain /design/...)." });
       const token = await canvaAccessToken(account.id);
       if (!token) return sendJson(res, 503, { error: "Connect Canva in Settings before refreshing previews." });
-      const mediaType = body.mediaType === "video" ? "video" : "image";
-      const previewUrl = mediaType === "video"
-        ? await exportCanvaFile(designId, token, "mp4")
+      const formatType = await preferredCanvaExportType(designId, token);
+      const mediaType = formatType === "mp4" ? "video" : "image";
+      const previewUrl = formatType === "mp4"
+        ? await exportCanvaFile(designId, token, formatType)
         : await exportCanvaPreview(designId, token);
       const session = await readCanvaSession(account.id);
       await writeCanvaSession(account.id, { ...session, last_synced_at: new Date().toISOString() });

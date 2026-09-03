@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { waitForCanvaExport } from "../server.mjs";
+import { preferredCanvaExportType, waitForCanvaExport } from "../server.mjs";
 
 test("waits for a reel export that completes after the original six-second window", async () => {
   const originalFetch = globalThis.fetch;
@@ -20,6 +20,20 @@ test("waits for a reel export that completes after the original six-second windo
     const result = await waitForCanvaExport({ job: { id: "job-123", status: "in_progress" } }, "test-token", { intervalMs: 0 });
     assert.equal(result.urls[0], "https://downloads.canva.test/reel.mp4");
     assert.equal(polls, 13);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("prefers MP4 when Canva reports that the design supports it", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ formats: { jpg: {}, mp4: {} } }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" }
+  });
+
+  try {
+    assert.equal(await preferredCanvaExportType("design-123", "test-token"), "mp4");
   } finally {
     globalThis.fetch = originalFetch;
   }
