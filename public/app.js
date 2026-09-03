@@ -315,7 +315,7 @@ function assetPreview(post, lockCrop = false) {
   const x = lockCrop ? 50 : cropCoordinate(post.cropX);
   const y = lockCrop ? 50 : cropCoordinate(post.cropY);
   return mediaKind === "video"
-    ? '<video class="crop-media" style="aspect-ratio:' + ratioValue + ';transform:translate(' + ((x - 50) * (zoom - 1)) + '%,' + ((y - 50) * (zoom - 1)) + '%) scale(' + zoom + ')" src="' + esc(post.image) + '" controls muted playsinline preload="metadata"></video>'
+    ? '<video class="crop-media" style="aspect-ratio:' + ratioValue + ';transform:translate(' + ((x - 50) * (zoom - 1)) + '%,' + ((y - 50) * (zoom - 1)) + '%) scale(' + zoom + ')" src="' + esc(post.image) + '" controls playsinline preload="metadata"></video>'
     : '<img class="crop-media" style="aspect-ratio:' + ratioValue + ';transform:translate(' + ((x - 50) * (zoom - 1)) + '%,' + ((y - 50) * (zoom - 1)) + '%) scale(' + zoom + ')" src="' + esc(post.image) + '" alt="">';
 }
 function cropCoordinate(value) {

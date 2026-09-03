@@ -31,6 +31,7 @@ test("renders a playable asset-page preview for an imported MP4 reel", () => {
   const markup = assetPreview({ assetKind: "image", image: "/uploads/canva-reel.mp4", cropRatio: "9:16" });
   assert.match(markup, /^<video /);
   assert.match(markup, /controls/);
+  assert.doesNotMatch(markup, / muted/);
 });
 
 test("keeps grid reels paused on their first frame", () => {
