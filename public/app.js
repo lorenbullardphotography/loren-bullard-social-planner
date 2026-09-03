@@ -844,6 +844,10 @@ function renderInspector(hostSelector = "#inspector") {
     if (carouselImages(post).length < carouselCount) {
       await refreshCanvaPreview(post, q("#refreshCanva"));
     }
+    if (carouselImages(post).length < 2) {
+      notify("Canva has not returned the carousel pages yet. Try Refresh preview again.");
+      return;
+    }
     carouselSlide = Math.min(carouselImages(post).length - 1, carouselSlide + 1);
     renderInspector(hostSelector);
   };
@@ -929,6 +933,7 @@ async function refreshCanvaPreview(post, button = $("#refreshCanva")) {
   finally {
     if (button) { button.disabled = false; button.textContent = "Refresh preview"; }
   }
+  return post;
 }
 function renderCalendar() {
   const year = calCursor.getFullYear(), month = calCursor.getMonth();
