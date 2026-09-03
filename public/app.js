@@ -19,6 +19,7 @@ let igStatus = { connected: false };
 let plannerVersion = 0;
 let currentUser = loadUser();
 let initialInstagramSyncDone = false;
+let carouselSlide = 0;
 
 async function loadAccount() {
   const data = await api("/api/auth/me");
@@ -79,6 +80,10 @@ function needsCanvaPreviewRefresh(post) {
 }
 function hasReelCover(post) { return post.type === "REEL" && Boolean(post.coverImage); }
 function gridImageOf(post) { return hasReelCover(post) ? post.coverImage : post.image; }
+function carouselImages(post) {
+  const images = Array.isArray(post.images) ? post.images.filter(Boolean) : [];
+  return images.length ? images : (post.image ? [post.image] : []);
+}
 function assetMediaMarkup(post, className = "") {
   return assetKindOf(post) === "video"
     ? `<video class="${className}" src="${esc(post.image)}" muted playsinline preload="metadata"></video>`
@@ -643,6 +648,8 @@ function renderInspector(hostSelector = "#inspector") {
     host.innerHTML = `<div class="inspector-empty"><b>Select a post</b>Click a tile to edit its caption, notes, workflow, or approval.</div>`;
     return;
   }
+  const isCarousel = post.type === "CAROUSEL" && carouselImages(post).length > 1;
+  if (isCarousel) carouselSlide = Math.max(0, Math.min(carouselSlide, carouselImages(post).length - 1));
   if (post.status === "posted") {
     host.innerHTML = `<div class="editor">
       <div class="preview-wrap">${assetPreview(post)}</div>
@@ -656,7 +663,7 @@ function renderInspector(hostSelector = "#inspector") {
   const workflowOptions = Object.entries(WORKFLOW_LABELS).map(([key, label]) => `<option value="${key}" ${workflowOf(post) === key ? "selected" : ""}>${label}</option>`).join("");
   const pillarOptions = `<option value="">Choose a pillar</option>` + settings.pillars.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${esc(pillar)}</option>`).join("");
   host.innerHTML = `<div class="editor editable-editor"><div class="editor-mobile-heading"><div><span class="eyebrow">EDITING SELECTED POST</span><b>${esc(post.caption || post.notes || assetTypeLabel(post))}</b></div><span>Swipe through fields below</span></div><div class="editor-scroll">
-    <div class="preview-wrap${cropLocked ? "" : " crop-preview"}" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post, cropLocked)}${cropLocked ? "" : '<div class="crop-grid" aria-hidden="true"></div><span class="crop-hint">Drag to reposition</span><div class="crop-zoom-overlay"><span>Zoom</span><input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="' + Math.max(1, Math.min(3, Number(post.cropZoom) || 1)) + '" aria-label="Crop zoom"><output id="cropOverlayZoom">100%</output><button id="resetCrop" class="crop-overlay-reset" type="button" aria-label="Reset crop" title="Reset crop">↺</button></div>'}</div>
+    ${isCarousel ? `<div class="carousel-preview" aria-label="Carousel preview"><img class="carousel-slide" src="${esc(carouselImages(post)[carouselSlide])}" alt="Carousel image ${carouselSlide + 1} of ${carouselImages(post).length}"><button id="carouselPrev" class="carousel-arrow carousel-prev" type="button" aria-label="Previous carousel image" ${carouselSlide === 0 ? "disabled" : ""}>‹</button><button id="carouselNext" class="carousel-arrow carousel-next" type="button" aria-label="Next carousel image" ${carouselSlide === carouselImages(post).length - 1 ? "disabled" : ""}>›</button><span class="carousel-counter" aria-live="polite">${carouselSlide + 1} / ${carouselImages(post).length}</span></div>` : `<div class="preview-wrap${cropLocked ? "" : " crop-preview"}" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post, cropLocked)}${cropLocked ? "" : '<div class="crop-grid" aria-hidden="true"></div><span class="crop-hint">Drag to reposition</span><div class="crop-zoom-overlay"><span>Zoom</span><input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="' + Math.max(1, Math.min(3, Number(post.cropZoom) || 1)) + '" aria-label="Crop zoom"><output id="cropOverlayZoom">100%</output><button id="resetCrop" class="crop-overlay-reset" type="button" aria-label="Reset crop" title="Reset crop">↺</button></div>'}</div>`}
     <div class="asset-meta"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva" : "Uploaded"}</span>${hasReelCover(post) ? '<span class="asset-badge cover-badge">Cover attached</span>' : ""}</div>
     ${post.type === "REEL" || assetKindOf(post) === "video" ? `<div class="cover-card"><div><b>Reel cover photo</b><small>${post.coverImage ? "This image appears on the grid instead of the video frame." : "Add an image to choose the frame shown on the grid."}</small></div>${post.coverImage ? `<img class="cover-thumb" src="${esc(post.coverImage)}" alt="Reel cover photo">` : ""}<div class="handoff-actions"><label class="ghost button-link cover-upload-label">${post.coverImage ? "Replace cover" : "Upload cover photo"}<input id="coverInput" type="file" accept="image/*" hidden></label>${post.coverImage ? '<button id="removeCover" class="ghost" type="button">Remove cover</button>' : ""}</div><small id="coverHelp" class="field-help"></small></div>` : ""}
     <div class="location-card"><div><b>Location tag</b><small>Add the place where this content was created.</small></div><label class="field nested">Location<input id="eLocation" maxlength="120" value="${esc(post.location || post.locationTag?.name || "")}" placeholder="Crystal Bridges, Bentonville"></label><button id="readLocationMetadata" class="ghost" type="button">⌖ Check photo metadata</button><small id="locationHelp" class="field-help">We’ll use the photo’s embedded location when available.</small></div>
@@ -831,6 +838,8 @@ function renderInspector(hostSelector = "#inspector") {
   if (q("#downloadApprovedAsset")) q("#downloadApprovedAsset").onclick = () => downloadAsset(post);
   if (q("#exportMetaData")) q("#exportMetaData").onclick = () => exportMetaData(post);
   if (q("#refreshCanva")) q("#refreshCanva").onclick = () => refreshCanvaPreview(post, q("#refreshCanva"));
+  if (q("#carouselPrev")) q("#carouselPrev").onclick = () => { carouselSlide = Math.max(0, carouselSlide - 1); renderInspector(hostSelector); };
+  if (q("#carouselNext")) q("#carouselNext").onclick = () => { carouselSlide = Math.min(carouselImages(post).length - 1, carouselSlide + 1); renderInspector(hostSelector); };
   if (q("#coverInput")) q("#coverInput").onchange = async event => {
     const [file] = event.target.files;
     if (!file) return;
@@ -893,6 +902,7 @@ async function refreshCanvaPreview(post, button = $("#refreshCanva")) {
   try {
     const data = await api("/api/canva/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ canvaUrl: post.canvaUrl, designId: post.canvaDesignId || undefined, pageCount: post.canvaPageCount || 0, designTypes: post.canvaDesignTypes || [], doctypeName: post.canvaDoctypeName || "" }) });
     post.image = data.previewUrl;
+    if (Array.isArray(data.images) && data.images.length) post.images = data.images;
     if (data.mediaType === "video") {
       post.assetKind = "video";
       post.type = "REEL";
@@ -1128,16 +1138,18 @@ async function addCanvaDesign(design) {
   if (!design) return;
   const id = crypto.randomUUID();
   let mediaUrl = design.thumbnail || "/assets/brand-cover.jpg";
+  let images = [mediaUrl];
   let contentType = Number(design.pageCount) > 1 ? "carousel" : "image";
   try {
     const data = await api("/api/canva/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ designId: design.id, pageCount: design.pageCount || 0, designTypes: design.designTypes || [], doctypeName: design.doctypeName || "" }) });
     mediaUrl = data.previewUrl || mediaUrl;
+    images = Array.isArray(data.images) && data.images.length ? data.images : [mediaUrl];
     contentType = data.contentType || contentType;
   } catch (error) {
     return notify(error.message || "Canva design could not be imported");
   }
   const isCanvaVideo = contentType === "video";
-  const post = { id, image: mediaUrl, assetSource: "canva", canvaUrl: design.editUrl || design.viewUrl, canvaDesignId: design.id, canvaDoctypeName: design.doctypeName || "", canvaDesignTypes: design.designTypes || [], canvaAssetType: isCanvaVideo ? "video" : "image", canvaPageCount: design.pageCount || 0, assetKind: isCanvaVideo ? "video" : "image", cropRatio: "4:5", status: "draft", approval: "draft", type: contentType === "carousel" ? "CAROUSEL" : isCanvaVideo ? "REEL" : "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: design.title, comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
+  const post = { id, image: images[0] || mediaUrl, images, assetSource: "canva", canvaUrl: design.editUrl || design.viewUrl, canvaDesignId: design.id, canvaDoctypeName: design.doctypeName || "", canvaDesignTypes: design.designTypes || [], canvaAssetType: isCanvaVideo ? "video" : "image", canvaPageCount: design.pageCount || 0, assetKind: isCanvaVideo ? "video" : "image", cropRatio: "4:5", status: "draft", approval: "draft", type: contentType === "carousel" ? "CAROUSEL" : isCanvaVideo ? "REEL" : "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: design.title, comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
   posts.unshift(post); selected = id; $("#canvaModal").classList.add("hidden"); renderAll();
   persistPlanner("added a Canva working draft").then(() => notify("Canva draft added")).catch(error => { posts = posts.filter(item => item.id !== id); renderAll(); notify(error.message || "Canva draft could not be added"); });
 }

@@ -143,3 +143,5 @@ body{font-family:Poppins,Arial,sans-serif;background:radial-gradient(circle at 9
   .calendar{overflow-x:auto;grid-template-columns:repeat(7,minmax(112px,1fr))}
   .cal-post{touch-action:pan-y;user-select:none}
 }
+/* Carousel editor controls */
+.carousel-preview{position:relative;width:100%;aspect-ratio:4/5;overflow:hidden;border-radius:12px;background:#eee}.carousel-preview .carousel-slide{width:100%;height:100%;object-fit:cover;display:block}.carousel-arrow{position:absolute;top:50%;transform:translateY(-50%);width:42px;height:42px;border:0;border-radius:999px;background:rgba(52,52,55,.82);color:#fff;font-size:32px;line-height:1;cursor:pointer}.carousel-arrow:hover:not(:disabled){background:#788ca5}.carousel-arrow:disabled{opacity:.3;cursor:not-allowed}.carousel-prev{left:12px}.carousel-next{right:12px}.carousel-counter{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);padding:5px 10px;border-radius:999px;background:rgba(52,52,55,.78);color:#fff;font-size:11px;font-weight:700}.carousel-arrow:focus-visible{outline:2px solid #fff;outline-offset:2px}
