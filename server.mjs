@@ -232,10 +232,18 @@ export async function waitForCanvaExport(job, token, { maxAttempts = 60, interva
   }
   return result;
 }
-export async function preferredCanvaExportType(designId, token) {
-  const formats = await fetchJson(`https://api.canva.com/rest/v1/designs/${encodeURIComponent(designId)}/export-formats`, {
+async function canvaExportFormats(designId, token) {
+  return fetchJson(`https://api.canva.com/rest/v1/designs/${encodeURIComponent(designId)}/export-formats`, {
     headers: { Authorization: `Bearer ${token}` }
   });
+}
+export function canvaContentType({ pageCount, designTypes = [], doctypeName = "", formats = {} }) {
+  if (Number(pageCount) > 1) return "carousel";
+  const isVideo = designTypes.some(type => /video|reel|movie/i.test(String(type))) || /\bvideo\b/i.test(doctypeName);
+  return isVideo && formats?.mp4 ? "video" : "image";
+}
+export async function preferredCanvaExportType(designId, token) {
+  const formats = await canvaExportFormats(designId, token);
   return formats?.formats?.mp4 ? "mp4" : "jpg";
 }
 async function exportCanvaFile(designId, token, formatType) {
@@ -736,14 +744,21 @@ export async function handleRequest(req, res) {
       if (!designId) return sendJson(res, 400, { error: "Paste a Canva design link (the link should contain /design/...)." });
       const token = await canvaAccessToken(account.id);
       if (!token) return sendJson(res, 503, { error: "Connect Canva in Settings before refreshing previews." });
-      const formatType = await preferredCanvaExportType(designId, token);
-      const mediaType = formatType === "mp4" ? "video" : "image";
+      const available = await canvaExportFormats(designId, token);
+      const contentType = canvaContentType({
+        pageCount: body.pageCount,
+        designTypes: Array.isArray(body.designTypes) ? body.designTypes : [],
+        doctypeName: body.doctypeName,
+        formats: available.formats
+      });
+      const formatType = contentType === "video" ? "mp4" : "jpg";
+      const mediaType = contentType === "video" ? "video" : "image";
       const previewUrl = formatType === "mp4"
         ? await exportCanvaFile(designId, token, formatType)
         : await exportCanvaPreview(designId, token);
       const session = await readCanvaSession(account.id);
       await writeCanvaSession(account.id, { ...session, last_synced_at: new Date().toISOString() });
-      return sendJson(res, 200, { previewUrl, mediaType });
+      return sendJson(res, 200, { previewUrl, mediaType, contentType });
     }
 
     if (url.pathname === "/api/canva/video" && req.method === "POST") {

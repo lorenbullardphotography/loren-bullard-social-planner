@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { preferredCanvaExportType, waitForCanvaExport } from "../server.mjs";
+import { canvaContentType, preferredCanvaExportType, waitForCanvaExport } from "../server.mjs";
 
 test("waits for a reel export that completes after the original six-second window", async () => {
   const originalFetch = globalThis.fetch;
@@ -37,4 +37,10 @@ test("prefers MP4 when Canva reports that the design supports it", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("keeps multi-page Canva designs as carousels even when MP4 is available", () => {
+  assert.equal(canvaContentType({ pageCount: 4, designTypes: ["video"], formats: { mp4: {} } }), "carousel");
+  assert.equal(canvaContentType({ pageCount: 1, designTypes: ["video"], formats: { mp4: {} } }), "video");
+  assert.equal(canvaContentType({ pageCount: 1, designTypes: ["social_media"], formats: { mp4: {} } }), "image");
 });
