@@ -84,6 +84,13 @@ function assetMediaMarkup(post, className = "") {
     ? `<video class="${className}" src="${esc(post.image)}" muted playsinline preload="metadata"></video>`
     : `<img class="${className}" src="${esc(post.image)}" alt="">`;
 }
+function configureGridVideo(video) {
+  video.muted = true;
+  video.loop = false;
+  video.autoplay = false;
+  video.playsInline = true;
+  video.preload = "metadata";
+}
 function scheduleLabel(post) {
   return post.scheduleState === "scheduled" ? "Scheduled" : post.scheduleState === "ready" ? "Ready" : "Draft";
 }
@@ -112,6 +119,9 @@ function applyWorkflow(post, workflow) {
   post.workflow = workflow;
   post.status = workflow === "published" ? "posted" : ["approved", "ready-meta", "meta-scheduled"].includes(workflow) ? "planned" : "draft";
   post.approval = workflow === "needs-review" ? "needs-review" : workflow === "approved" || workflow === "ready-meta" || workflow === "meta-scheduled" || workflow === "published" ? "approved" : "draft";
+}
+function workflowPill(workflow) {
+  return `<span class="workflow-pill" data-workflow="${esc(workflow)}">${esc(WORKFLOW_LABELS[workflow] || workflow)}</span>`;
 }
 function isOverdue(post) {
   return Boolean(post.dueDate && post.dueDate < new Date().toISOString().slice(0, 10) && !["published", "archived"].includes(workflowOf(post)));
@@ -474,6 +484,7 @@ function renderGrid() {
     const node = $("#tileTpl").content.firstElementChild.cloneNode(true);
     node.dataset.id = post.id;
     node.dataset.status = post.status;
+    node.dataset.workflow = workflowOf(post);
     // Use the pointer interaction below for consistent mouse, trackpad, and
     // touch behavior. Native HTML drag events are inconsistent in responsive
     // Chrome and unavailable on many mobile browsers.
@@ -481,10 +492,7 @@ function renderGrid() {
     if (!hasReelCover(post) && (post.assetKind === "video" || post.type === "REEL" && /\.((mp4)|(mov)|(webm))($|\?)/i.test(post.image))) {
       const video = document.createElement("video");
       video.src = post.image;
-      video.muted = true;
-      video.loop = true;
-      video.autoplay = true;
-      video.playsInline = true;
+      configureGridVideo(video);
       video.className = "tile-media";
       node.querySelector("img").replaceWith(video);
     } else node.querySelector("img").src = gridImageOf(post);
@@ -912,7 +920,7 @@ function renderCalendar() {
     day.setDate(begin.getDate() + i);
     const iso = day.toISOString().slice(0, 10);
     const items = future().filter(post => post.date === iso);
-    html += `<div class="day ${day.getMonth() !== month ? "muted" : ""}" data-day="${iso}"><div class="day-num">${day.getDate()}</div>${items.map(post => `<div class="cal-post" draggable="true" data-open="${post.id}" data-drag-post="${post.id}"><img src="${post.image}"><span>${esc((post.caption || post.notes || post.type || "Post").slice(0, 28))}<small>${esc(post.time || scheduleLabel(post))}</small></span></div>`).join("")}</div>`;
+    html += `<div class="day ${day.getMonth() !== month ? "muted" : ""}" data-day="${iso}"><div class="day-num">${day.getDate()}</div>${items.map(post => `<div class="cal-post" data-workflow="${workflowOf(post)}" draggable="true" data-open="${post.id}" data-drag-post="${post.id}"><img src="${post.image}"><span>${esc((post.caption || post.notes || post.type || "Post").slice(0, 28))}<small>${esc(post.time || scheduleLabel(post))}</small></span></div>`).join("")}</div>`;
   }
   $("#calendar").innerHTML = html;
   $$("[data-open]").forEach(node => node.onclick = () => {
@@ -972,13 +980,13 @@ function renderLibrary() {
     return matchesFilter && (!query || searchable.includes(query));
   });
   $("#library").innerHTML = items.length
-    ? items.map(post => `<article class="library-card" data-open-editor="${post.id}"><div class="library-media">${assetMediaMarkup(post)}</div><div class="library-badges"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva" : "Uploaded"}</span></div><div class="library-info"><b>${esc(post.notes || post.caption || "Untitled content")}</b><span>${esc(`${post.type} · ${formatSchedule(post)} · ${WORKFLOW_LABELS[workflowOf(post)]}${post.pillar ? ` · ${post.pillar}` : ""}`)}</span>${post.location ? `<small class="library-location">⌖ ${esc(post.location)}</small>` : ""}</div></article>`).join("")
+    ? items.map(post => `<article class="library-card" data-open-editor="${post.id}"><div class="library-media">${assetMediaMarkup(post)}</div><div class="library-badges"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva" : "Uploaded"}</span>${workflowPill(workflowOf(post))}</div><div class="library-info"><b>${esc(post.notes || post.caption || "Untitled content")}</b><span>${esc(`${post.type} · ${formatSchedule(post)} · ${WORKFLOW_LABELS[workflowOf(post)]}${post.pillar ? ` · ${post.pillar}` : ""}`)}</span>${post.location ? `<small class="library-location">⌖ ${esc(post.location)}</small>` : ""}</div></article>`).join("")
     : `<div class="empty">No content in this view yet.</div>`;
   $$("[data-open-editor]").forEach(node => node.onclick = () => openPost(node.dataset.openEditor, true));
 }
 function renderApprovals() {
   const columns = [["drafting", "Drafting"], ["needs-review", "Needs Review"], ["approved", "Approved"], ["ready-meta", "Ready for Meta"], ["meta-scheduled", "Scheduled in Meta"]];
-  $("#approvalBoard").innerHTML = columns.map(([key, label]) => `<section class="approval-col"><h4>${label}</h4>${future().filter(post => workflowOf(post) === key).map(post => `<article class="approval-card" data-open="${post.id}"><img src="${post.image}"><b>${esc(post.notes || post.caption || post.type)}</b><span>${esc(formatSchedule(post))}</span></article>`).join("") || `<div class="empty">Nothing here.</div>`}</section>`).join("");
+  $("#approvalBoard").innerHTML = columns.map(([key, label]) => `<section class="approval-col" data-workflow="${key}"><h4>${label}</h4>${future().filter(post => workflowOf(post) === key).map(post => `<article class="approval-card" data-open="${post.id}"><img src="${post.image}">${workflowPill(key)}<b>${esc(post.notes || post.caption || post.type)}</b><span>${esc(formatSchedule(post))}</span></article>`).join("") || `<div class="empty">Nothing here.</div>`}</section>`).join("");
   $$("[data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open));
 }
 function openPost(id, openEditor = false) {

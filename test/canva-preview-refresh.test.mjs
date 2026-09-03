@@ -15,7 +15,7 @@ function previewHelpers() {
     URL,
     Date
   };
-  vm.runInNewContext(`${helpers}\nthis.previewHelpers = { needsCanvaPreviewRefresh, assetPreview };`, context);
+  vm.runInNewContext(`${helpers}\nthis.previewHelpers = { needsCanvaPreviewRefresh, assetPreview, configureGridVideo, workflowPill };`, context);
   return context.previewHelpers;
 }
 
@@ -31,4 +31,20 @@ test("renders a playable asset-page preview for an imported MP4 reel", () => {
   const markup = assetPreview({ assetKind: "image", image: "/uploads/canva-reel.mp4", cropRatio: "9:16" });
   assert.match(markup, /^<video /);
   assert.match(markup, /controls/);
+});
+
+test("keeps grid reels paused on their first frame", () => {
+  const { configureGridVideo } = previewHelpers();
+  const video = {};
+  configureGridVideo(video);
+  assert.equal(video.autoplay, false);
+  assert.equal(video.loop, false);
+  assert.equal(video.muted, true);
+  assert.equal(video.playsInline, true);
+  assert.equal(video.preload, "metadata");
+});
+
+test("renders a workflow pill with a state hook for consistent color", () => {
+  const { workflowPill } = previewHelpers();
+  assert.equal(workflowPill("needs-review"), '<span class="workflow-pill" data-workflow="needs-review">Needs review</span>');
 });
