@@ -57,9 +57,8 @@ function safeCanvaUrl(value) {
   try { const url = new URL(value); return url.protocol === "https:" && /(^|\.)canva\.com$/i.test(url.hostname) ? url.toString() : ""; } catch { return ""; }
 }
 function assetKindOf(post) {
-  if (post.assetKind === "video") return "video";
-  if (post.assetKind === "image") return "image";
-  return /\.(mp4|mov|webm|m4v)(\?|$)/i.test(post.image || "") ? "video" : "image";
+  if (post.assetKind === "video" || /\.(mp4|mov|webm|m4v)(\?|$)/i.test(post.image || "")) return "video";
+  return "image";
 }
 function assetSourceOf(post) { return post.assetSource === "canva" || post.canvaUrl ? "canva" : "uploaded"; }
 function assetTypeLabel(post) {
@@ -299,13 +298,14 @@ function renderAll() {
   renderPlannerSettings();
 }
 function assetPreview(post, lockCrop = false) {
-  const ratio = post.cropRatio || (post.assetKind === "video" ? "9:16" : "4:5");
+  const mediaKind = assetKindOf(post);
+  const ratio = post.cropRatio || (mediaKind === "video" ? "9:16" : "4:5");
   const ratioValue = ratio === "1:1" ? "1 / 1" : ratio === "4:5" ? "4 / 5" : ratio === "1.91:1" ? "1.91 / 1" : "9 / 16";
   const zoom = lockCrop ? 1 : Math.max(1, Number(post.cropZoom) || 1);
   const x = lockCrop ? 50 : cropCoordinate(post.cropX);
   const y = lockCrop ? 50 : cropCoordinate(post.cropY);
-  return post.assetKind === "video"
-    ? '<video class="crop-media" style="aspect-ratio:' + ratioValue + ';transform:translate(' + ((x - 50) * (zoom - 1)) + '%,' + ((y - 50) * (zoom - 1)) + '%) scale(' + zoom + ')" src="' + esc(post.image) + '" controls muted playsinline></video>'
+  return mediaKind === "video"
+    ? '<video class="crop-media" style="aspect-ratio:' + ratioValue + ';transform:translate(' + ((x - 50) * (zoom - 1)) + '%,' + ((y - 50) * (zoom - 1)) + '%) scale(' + zoom + ')" src="' + esc(post.image) + '" controls muted playsinline preload="metadata"></video>'
     : '<img class="crop-media" style="aspect-ratio:' + ratioValue + ';transform:translate(' + ((x - 50) * (zoom - 1)) + '%,' + ((y - 50) * (zoom - 1)) + '%) scale(' + zoom + ')" src="' + esc(post.image) + '" alt="">';
 }
 function cropCoordinate(value) {
