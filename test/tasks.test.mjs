@@ -15,7 +15,7 @@ function taskHelpers() {
     URL,
     Date
   };
-  vm.runInNewContext(`${helpers}\nthis.taskHelpers = { taskPosts, filterActivity, activityLabel, assigneePeople, personInitials, activityFilterStorageKey, loadActivityFilters };`, context);
+  vm.runInNewContext(`${helpers}\nthis.taskHelpers = { taskPosts, approvalSections, filterActivity, activityLabel, assigneePeople, personInitials, activityFilterStorageKey, loadActivityFilters };`, context);
   return context.taskHelpers;
 }
 
@@ -34,6 +34,16 @@ test("My Tasks returns only actionable posts assigned to the logged-in user", ()
 test("Team Tasks returns every actionable post, including unassigned work", () => {
   const { taskPosts } = taskHelpers();
   assert.deepEqual(taskPosts(posts, { name: "Brooke" }, "team").map(post => post.id), ["brooke", "unassigned", "david"]);
+});
+
+test("groups approval posts by workflow without stacking them", () => {
+  const { approvalSections } = taskHelpers();
+  const sections = approvalSections(posts);
+  const section = sections.find(item => item.key === "needs-review");
+  assert.equal(section.label, "Needs Review");
+  assert.deepEqual(section.posts.map(post => post.id), ["brooke", "unassigned"]);
+  assert.equal(section.count, 2);
+  assert.equal(section.remaining, 1);
 });
 
 test("sorts tasks by most recent activity when requested", () => {

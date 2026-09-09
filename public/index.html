@@ -4,24 +4,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Loren Bullard Photography — Content Planner</title>
-  <link rel="stylesheet" href="/styles.css?v=20260908-15">
+  <link rel="stylesheet" href="/styles.css?v=20260908-16">
 </head>
 <body>
 <div id="toast" class="toast hidden"></div>
+<div id="mobileMenuBackdrop" class="mobile-menu-backdrop hidden" aria-hidden="true"></div>
 
 <div class="app">
-  <aside class="side">
+  <aside id="mobileMenu" class="side">
     <div class="brand">
       <div class="monogram"><img src="/assets/lbp-mark-white.png" alt="LB monogram"></div>
       <div><div class="brand-title">Studio Planner</div><p>Loren Bullard Photography</p></div>
     </div>
     <nav>
-      <button class="nav" data-view="tasks"><span>☑</span> Tasks</button>
-      <button class="nav active" data-view="grid"><span>▦</span> Grid Planner</button>
-      <button class="nav" data-view="calendar"><span>□</span> Calendar</button>
-      <button class="nav" data-view="library"><span>◫</span> Library</button>
-      <button class="nav" data-view="approvals"><span>✓</span> Approvals</button>
-      <button class="nav" data-view="settings"><span>⚙</span> Settings</button>
+      <button class="nav" data-view="tasks"><svg class="nav-icon" data-icon="tasks" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="m7.5 8 1.5 1.5L11.5 7M13 9h4M7.5 14l1.5 1.5 2.5-2.5M13 15h4"></path></svg><span class="nav-label">Tasks</span></button>
+      <button class="nav active" data-view="grid"><svg class="nav-icon" data-icon="grid" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg><span class="nav-label">Grid Planner</span></button>
+      <button class="nav" data-view="calendar"><svg class="nav-icon" data-icon="calendar" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M7 3v4M17 3v4M3 10h18M7 14h.01M12 14h.01M17 14h.01M7 17h.01M12 17h.01"></path></svg><span class="nav-label">Calendar</span></button>
+      <button class="nav" data-view="library"><svg class="nav-icon" data-icon="library" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V4Z"></path><path d="M7 4v16M10 8h5M10 12h5M10 16h3M18 7h1a2 2 0 0 1 2 2v11h-3"></path></svg><span class="nav-label">Library</span></button>
+      <button class="nav" data-view="settings"><svg class="nav-icon" data-icon="settings" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg><span class="nav-label">Settings</span></button>
     </nav>
     <div class="side-bottom">
       <section class="team-card">
@@ -31,12 +31,12 @@
         <div id="presenceList" class="presence-list"></div>
         <button id="identityBtn" class="ghost light">Your name</button>
       </section>
-      <button id="settingsBtn" class="ghost light">Planner settings</button>
     </div>
   </aside>
 
   <main>
     <header class="top">
+      <button id="mobileMenuBtn" class="mobile-menu-toggle" type="button" aria-label="Open navigation menu" aria-controls="mobileMenu" aria-expanded="false"><span></span><span></span><span></span></button>
       <div>
         <p class="eyebrow">LOREN BULLARD PHOTOGRAPHY</p>
         <h1 id="pageTitle">Grid Planner</h1>
@@ -81,15 +81,18 @@
       <div class="task-toolbar"><div class="task-tabs" role="tablist" aria-label="Task views">
         <button id="myTasksTab" class="task-tab active" type="button" role="tab" aria-selected="true">My Tasks</button>
         <button id="teamTasksTab" class="task-tab" type="button" role="tab" aria-selected="false">Team Tasks</button>
+        <button id="approvalsTab" class="task-tab" type="button" role="tab" aria-selected="false">Approvals</button>
         <button id="activityTab" class="task-tab" type="button" role="tab" aria-selected="false">Activity</button>
       </div><label class="task-sort">Sort tasks<select id="taskSort"><option value="priority">Priority</option><option value="activity">Recent activity</option><option value="due">Due date</option></select></label></div>
       <div id="taskList" class="task-list"></div>
+      <div id="approvalPanel" class="hidden"></div>
       <div id="activityPanel" class="hidden"><div class="activity-tools"><h4>Team Activity</h4><fieldset id="activityFilters" class="activity-filters"><legend>Show</legend><label><input type="checkbox" value="approval" checked> Approval</label><label><input type="checkbox" value="content" checked> Content</label><label><input type="checkbox" value="sync" checked> Sync</label><label><input type="checkbox" value="comment" checked> Comment</label><label><input type="checkbox" value="settings" checked> Settings</label><label><input type="checkbox" value="update" checked> Update</label></fieldset></div><div id="activityList" class="activity-list activity-page-list"></div></div>
     </section>
 
     <section id="view-calendar" class="view hidden">
-      <div class="intro"><div><p>See planned publishing dates at a glance.</p></div><div class="month-nav"><button id="prevMonth">‹</button><strong id="monthLabel"></strong><button id="nextMonth">›</button></div></div>
+      <div class="calendar-toolbar"><div class="calendar-toolbar-start"><button id="todayMonth" type="button" class="today-button">Today</button><label class="calendar-toggle"><input id="calendarInstagramToggle" type="checkbox" checked> Show Instagram posts</label></div><div class="month-nav"><button id="prevMonth" aria-label="Previous period">‹</button><strong id="monthLabel"></strong><button id="nextMonth" aria-label="Next period">›</button></div><div id="calendarViewSwitcher" class="calendar-view-switcher" role="group" aria-label="Calendar view"><button type="button" data-calendar-view="week">Week</button><button type="button" data-calendar-view="month" class="active">Month</button><button type="button" data-calendar-view="year">Year</button></div></div>
       <div id="calendar" class="calendar"></div>
+      <div id="calendarAgenda" class="calendar-agenda" aria-label="Scheduled posts by day"></div>
     </section>
 
     <section id="view-library" class="view hidden">
@@ -117,11 +120,6 @@
         <div id="scratchList" class="scratch-list"></div>
       </div>
       </div>
-    </section>
-
-    <section id="view-approvals" class="view hidden">
-      <div class="intro"><div><p>A simple review queue for you and your social media manager.</p></div></div>
-      <div id="approvalBoard" class="approval-board"></div>
     </section>
 
     <section id="view-editor" class="view hidden">
@@ -189,6 +187,6 @@
   <article class="tile"><img><button class="tile-delete" type="button" aria-label="Delete asset" title="Delete asset"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-3 6h12l-.8 11.2a1 1 0 0 1-1 .8H7.8a1 1 0 0 1-1-.8L6 9Zm4 2v8h2v-8h-2Zm4 0v8h2v-8h-2Z"/></svg></button><button class="tile-refresh" type="button" aria-label="Refresh Canva preview" title="Refresh Canva preview">⟳</button><div class="shade"><span class="tag"></span><span class="handle">⋮⋮</span></div><span class="type-icon"></span><span class="location-icon" title="Location tagged">⌖</span></article>
 </template>
 
-<script src="/app.js?v=20260909-3"></script>
+<script src="/app.js?v=20260908-asset-revisions"></script>
 </body>
 </html>

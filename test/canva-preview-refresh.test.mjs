@@ -15,9 +15,19 @@ function previewHelpers() {
     URL,
     Date
   };
-  vm.runInNewContext(`${helpers}\nthis.previewHelpers = { needsCanvaPreviewRefresh, assetPreview, configureGridVideo, workflowPill, WORKFLOW_LABELS, workflowOf, applyWorkflow, shouldRefreshPlanner, editorDestinationAfterSave, contentBriefMarkup };`, context);
+  vm.runInNewContext(`${helpers}\nthis.previewHelpers = { needsCanvaPreviewRefresh, assetPreview, configureGridVideo, workflowPill, libraryAssetBadges, WORKFLOW_LABELS, workflowOf, applyWorkflow, shouldRefreshPlanner, editorDestinationAfterSave, contentBriefMarkup, canShowAddActions };`, context);
   return context.previewHelpers;
 }
+
+test("shows add actions only in grid, calendar, and library views", () => {
+  const { canShowAddActions } = previewHelpers();
+  assert.equal(canShowAddActions("grid"), true);
+  assert.equal(canShowAddActions("calendar"), true);
+  assert.equal(canShowAddActions("library"), true);
+  assert.equal(canShowAddActions("tasks"), false);
+  assert.equal(canShowAddActions("editor"), false);
+  assert.equal(canShowAddActions("settings"), false);
+});
 
 test("shows Canva refresh only while a draft uses a temporary preview", () => {
   const { needsCanvaPreviewRefresh } = previewHelpers();
@@ -48,6 +58,12 @@ test("keeps grid reels paused on their first frame", () => {
 test("renders a workflow pill with a state hook for consistent color", () => {
   const { workflowPill } = previewHelpers();
   assert.equal(workflowPill("needs-review"), '<span class="workflow-pill" data-workflow="needs-review">Needs review</span>');
+});
+
+test("uses compact accessible asset/source indicators for library thumbnails", () => {
+  const { libraryAssetBadges } = previewHelpers();
+  assert.equal(libraryAssetBadges({ assetKind: "image", assetSource: "uploaded" }), '<span class="asset-badge library-asset-badge" title="Image" aria-label="Image">▧</span><span class="asset-badge library-asset-badge source-uploaded" title="Uploaded" aria-label="Uploaded">↑</span>');
+  assert.equal(libraryAssetBadges({ assetKind: "image", assetSource: "canva" }), '<span class="asset-badge library-asset-badge" title="Image" aria-label="Image">▧</span><span class="asset-badge library-asset-badge source-canva" title="Canva" aria-label="Canva">C</span>');
 });
 
 test("uses feedback as the middle approval state", () => {
