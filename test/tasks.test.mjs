@@ -15,7 +15,7 @@ function taskHelpers() {
     URL,
     Date
   };
-  vm.runInNewContext(`${helpers}\nthis.taskHelpers = { taskPosts, filterActivity };`, context);
+  vm.runInNewContext(`${helpers}\nthis.taskHelpers = { taskPosts, filterActivity, activityLabel };`, context);
   return context.taskHelpers;
 }
 
@@ -50,4 +50,31 @@ test("filters activity by event type while keeping newest activity first", () =>
     { type: "approval", text: "Loren requested review", at: "2026-09-05T10:00:00.000Z" }
   ];
   assert.deepEqual(filterActivity(source, "approval").map(item => item.text), ["Loren requested review", "Brooke approved a post"]);
+});
+
+test("filters activity by multiple checked event types", () => {
+  const { filterActivity } = taskHelpers();
+  const source = [
+    { type: "approval", text: "Approval", at: "2026-09-03T10:00:00.000Z" },
+    { type: "content", text: "Content", at: "2026-09-04T10:00:00.000Z" },
+    { type: "sync", text: "Sync", at: "2026-09-05T10:00:00.000Z" }
+  ];
+  assert.deepEqual(filterActivity(source, ["approval", "sync"]).map(item => item.text), ["Sync", "Approval"]);
+});
+
+test("provides a readable label for each activity type", () => {
+  const { activityLabel } = taskHelpers();
+  assert.equal(activityLabel("approval"), "Approval");
+  assert.equal(activityLabel("sync"), "Sync");
+});
+
+test("builds a unique assignee list from the team and current user", () => {
+  const { assigneePeople } = taskHelpers();
+  assert.deepEqual(assigneePeople({ name: "Brooke", role: "Manager" }, [{ name: "David", role: "Photographer" }, { name: "Brooke", role: "Manager" }], "Loren").map(person => person.name), ["Brooke", "David", "Loren"]);
+});
+
+test("creates compact profile initials for assignee avatars", () => {
+  const { personInitials } = taskHelpers();
+  assert.equal(personInitials("Brooke Smith"), "BS");
+  assert.equal(personInitials("David"), "D");
 });

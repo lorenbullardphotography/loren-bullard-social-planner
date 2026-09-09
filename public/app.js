@@ -156,7 +156,21 @@ function activityType(item) {
   return "update";
 }
 function filterActivity(items, type = "all") {
-  return items.filter(item => type === "all" || activityType(item) === type).sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+  const types = Array.isArray(type) ? type : type === "all" ? null : [type];
+  return items.filter(item => !types || types.includes(activityType(item))).sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+}
+const ACTIVITY_LABELS = { approval: "Approval", content: "Content", sync: "Sync", comment: "Comment", settings: "Settings", update: "Update" };
+function activityLabel(type) { return ACTIVITY_LABELS[type] || "Update"; }
+function scratchIdeaPayload(values) {
+  return {
+    title: String(values.title || "").trim(),
+    body: String(values.body || "").trim(),
+    image: String(values.image || "").trim(),
+    tags: String(values.tags || "").split(",").map(tag => tag.trim().replace(/^#/, "")).filter(Boolean),
+    goal: String(values.goal || "").trim(),
+    hook: String(values.hook || "").trim(),
+    cta: String(values.cta || "").trim()
+  };
 }
 function setPlanner(data) {
   posts = (Array.isArray(data?.posts) ? data.posts : []).map(post => ({ ...post, assetKind: assetKindOf(post), assetSource: assetSourceOf(post) }));
@@ -531,11 +545,13 @@ async function heartbeat() {
 function renderActivity() {
   const host = $("#activityList");
   if (!host) return;
-  const items = filterActivity(activity, $("#activityFilter")?.value || "all");
+  const checked = $$("#activityFilters input:checked").map(input => input.value);
+  const items = filterActivity(activity, checked.length ? checked : []);
   host.innerHTML = items.length
     ? items.map(item => {
       const at = new Date(item.at);
-      return `<article class="activity-item"><time datetime="${esc(item.at)}">${at.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</time><strong>${esc(item.text)}</strong></article>`;
+      const type = activityType(item);
+      return `<article class="activity-item activity-${esc(type)}"><time datetime="${esc(item.at)}">${at.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</time><div><span class="activity-type activity-type-${esc(type)}">${esc(activityLabel(type))}</span><strong>${esc(item.text)}</strong></div></article>`;
     }).join("")
     : `<div class="empty">Shared activity will appear here as the team edits, approves, and syncs content.</div>`;
 }
@@ -1072,10 +1088,10 @@ function renderScratch() {
   const host = $("#scratchList");
   if (!host) return;
   const entries = scratch.filter(entry => entry.status !== "archived");
-  host.innerHTML = entries.length ? entries.map(entry => `<article class="scratch-card" data-scratch-id="${esc(entry.id)}"><div class="scratch-card-head"><div><span class="eyebrow">${esc(entry.createdBy || "Team")}</span><h4>${esc(entry.title || "Untitled idea")}</h4></div><button class="ghost scratch-archive" type="button">Archive</button></div>${entry.image ? `<img src="${esc(entry.image)}" alt="">` : ""}<p>${esc(entry.body || "")}</p><div class="scratch-tags">${(entry.tags || []).map(tag => `<span>#${esc(tag)}</span>`).join("")}</div><div class="scratch-card-actions"><button class="ghost scratch-edit" type="button">Edit</button><button class="danger scratch-delete" type="button">Delete</button></div></article>`).join("") : `<div class="empty">Your Scratch Book is empty. Capture the next idea before it gets away.</div>`;
+  host.innerHTML = entries.length ? entries.map(entry => `<article class="scratch-card" data-scratch-id="${esc(entry.id)}"><div class="scratch-card-head"><div><span class="eyebrow">${esc(entry.createdBy || "Team")}</span><h4>${esc(entry.title || "Untitled idea")}</h4></div><button class="ghost scratch-archive" type="button">Archive</button></div>${entry.image ? `<img src="${esc(entry.image)}" alt="">` : ""}<p>${esc(entry.body || "")}</p>${entry.goal || entry.hook || entry.cta ? `<div class="scratch-brief">${entry.goal ? `<span><b>Goal</b>${esc(entry.goal)}</span>` : ""}${entry.hook ? `<span><b>Hook</b>${esc(entry.hook)}</span>` : ""}${entry.cta ? `<span><b>CTA</b>${esc(entry.cta)}</span>` : ""}</div>` : ""}<div class="scratch-tags">${(entry.tags || []).map(tag => `<span>#${esc(tag)}</span>`).join("")}</div><div class="scratch-card-actions"><button class="ghost scratch-edit" type="button">Edit</button><button class="danger scratch-delete" type="button">Delete</button></div></article>`).join("") : `<div class="empty">Your Scratch Book is empty. Capture the next idea before it gets away.</div>`;
   $$(".scratch-archive").forEach(button => button.onclick = async event => { const entry = scratch.find(item => item.id === event.currentTarget.closest("[data-scratch-id]").dataset.scratchId); if (!entry) return; entry.status = "archived"; entry.updatedBy = currentUser.name; entry.updatedAt = new Date().toISOString(); renderScratch(); await persistPlanner("archived a Scratch Book idea"); });
   $$(".scratch-delete").forEach(button => button.onclick = async event => { const id = event.currentTarget.closest("[data-scratch-id]").dataset.scratchId; scratch = scratch.filter(entry => entry.id !== id); renderScratch(); await persistPlanner("deleted a Scratch Book idea"); });
-  $$(".scratch-edit").forEach(button => button.onclick = () => { const card = button.closest("[data-scratch-id]"), entry = scratch.find(item => item.id === card.dataset.scratchId); if (!entry) return; $("#scratchTitle").value = entry.title; $("#scratchBody").value = entry.body; $("#scratchImage").value = entry.image; $("#scratchTags").value = (entry.tags || []).join(", "); $("#scratchForm").dataset.editing = entry.id; $("#scratchForm button[type=submit]").textContent = "Update idea"; setLibrarySection("ideas"); window.scrollTo({ top: 0, behavior: "smooth" }); });
+  $$(".scratch-edit").forEach(button => button.onclick = () => { const card = button.closest("[data-scratch-id]"), entry = scratch.find(item => item.id === card.dataset.scratchId); if (!entry) return; $("#scratchTitle").value = entry.title; $("#scratchBody").value = entry.body; $("#scratchGoal").value = entry.goal || ""; $("#scratchHook").value = entry.hook || ""; $("#scratchCta").value = entry.cta || ""; $("#scratchImage").value = entry.image; $("#scratchTags").value = (entry.tags || []).join(", "); $("#scratchForm").dataset.editing = entry.id; $("#scratchForm button[type=submit]").textContent = "Update idea"; setLibrarySection("ideas"); window.scrollTo({ top: 0, behavior: "smooth" }); });
 }
 function setLibrarySection(section) {
   librarySection = section === "ideas" ? "ideas" : "assets";
@@ -1264,7 +1280,7 @@ $("#myTasksTab").onclick = () => { taskTab = "mine"; renderTasks(); };
 $("#teamTasksTab").onclick = () => { taskTab = "team"; renderTasks(); };
 $("#activityTab").onclick = () => { taskTab = "activity"; renderTasks(); renderActivity(); };
 $("#taskSort").onchange = () => renderTasks();
-$("#activityFilter").onchange = () => renderActivity();
+$("#activityFilters").onchange = () => renderActivity();
 $("#prevMonth").onclick = () => { calCursor.setMonth(calCursor.getMonth() - 1); renderCalendar(); };
 $("#nextMonth").onclick = () => { calCursor.setMonth(calCursor.getMonth() + 1); renderCalendar(); };
 $$(".chip").forEach(chip => chip.onclick = () => {
@@ -1278,15 +1294,15 @@ $("#ideasTab").onclick = () => setLibrarySection("ideas");
 $("#scratchForm").onsubmit = async event => {
   event.preventDefault();
   const form = event.currentTarget;
-  const title = $("#scratchTitle").value.trim();
+  const idea = scratchIdeaPayload({ title: $("#scratchTitle").value, body: $("#scratchBody").value, image: $("#scratchImage").value, tags: $("#scratchTags").value, goal: $("#scratchGoal").value, hook: $("#scratchHook").value, cta: $("#scratchCta").value });
+  const title = idea.title;
   if (!title) return;
   const now = new Date().toISOString();
-  const tags = $("#scratchTags").value.split(",").map(tag => tag.trim().replace(/^#/, "")).filter(Boolean);
   const existing = scratch.find(entry => entry.id === form.dataset.editing);
   if (existing) {
-    Object.assign(existing, { title, body: $("#scratchBody").value.trim(), image: $("#scratchImage").value.trim(), tags, updatedBy: currentUser.name, updatedAt: now });
+    Object.assign(existing, { ...idea, updatedBy: currentUser.name, updatedAt: now });
   } else {
-    scratch.unshift({ id: crypto.randomUUID(), title, body: $("#scratchBody").value.trim(), image: $("#scratchImage").value.trim(), tags, status: "active", createdBy: currentUser.name, updatedBy: currentUser.name, createdAt: now, updatedAt: now });
+    scratch.unshift({ id: crypto.randomUUID(), ...idea, status: "active", createdBy: currentUser.name, updatedBy: currentUser.name, createdAt: now, updatedAt: now });
   }
   form.reset();
   delete form.dataset.editing;

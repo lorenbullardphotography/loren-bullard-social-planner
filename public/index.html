@@ -84,7 +84,7 @@
         <button id="activityTab" class="task-tab" type="button" role="tab" aria-selected="false">Activity</button>
       </div><label class="task-sort">Sort tasks<select id="taskSort"><option value="priority">Priority</option><option value="activity">Recent activity</option><option value="due">Due date</option></select></label></div>
       <div id="taskList" class="task-list"></div>
-      <div id="activityPanel" class="hidden"><div class="activity-tools"><h4>Team Activity</h4><label>Show<select id="activityFilter"><option value="all">All activity</option><option value="approval">Approvals</option><option value="content">Content</option><option value="sync">Syncs</option><option value="comment">Comments</option><option value="settings">Settings</option><option value="update">Updates</option></select></label></div><div id="activityList" class="activity-list activity-page-list"></div></div>
+      <div id="activityPanel" class="hidden"><div class="activity-tools"><h4>Team Activity</h4><fieldset id="activityFilters" class="activity-filters"><legend>Show</legend><label><input type="checkbox" value="approval" checked> Approval</label><label><input type="checkbox" value="content" checked> Content</label><label><input type="checkbox" value="sync" checked> Sync</label><label><input type="checkbox" value="comment" checked> Comment</label><label><input type="checkbox" value="settings" checked> Settings</label><label><input type="checkbox" value="update" checked> Update</label></fieldset></div><div id="activityList" class="activity-list activity-page-list"></div></div>
     </section>
 
     <section id="view-calendar" class="view hidden">
@@ -105,6 +105,11 @@
           <p class="eyebrow">NEW IDEA</p><h4>Save a thought</h4>
           <label class="field">Title<input id="scratchTitle" maxlength="160" placeholder="A thought to come back to…" required></label>
           <label class="field">Notes<textarea id="scratchBody" rows="8" maxlength="6000" placeholder="Write the idea, story, or visual direction…"></textarea></label>
+          <div class="field">Content brief
+            <label class="field nested">Goal<input id="scratchGoal" maxlength="240" placeholder="What should this idea accomplish?"></label>
+            <label class="field nested">Hook<input id="scratchHook" maxlength="300" placeholder="Opening line or visual hook"></label>
+            <label class="field nested">Call to action<input id="scratchCta" maxlength="240" placeholder="Book, comment, save…"></label>
+          </div>
           <label class="field">Image URL<input id="scratchImage" maxlength="2000" type="url" placeholder="Optional reference image link"></label>
           <label class="field">Tags<input id="scratchTags" maxlength="300" placeholder="e.g. newborn, behind the scenes"></label>
           <button class="primary" type="submit">Save idea</button>
