@@ -614,17 +614,24 @@ export function assetConflicts(post, submittedRevision, changes = {}) {
 }
 function normalizeScratchEntry(entry) {
   const status = entry?.status === "archived" ? "archived" : "active";
+  const rawImage = String(entry?.image || "").slice(0, 2000);
+  const images = Array.isArray(entry?.images)
+    ? entry.images.map(img => String(img).trim().slice(0, 2000)).filter(Boolean).slice(0, 20)
+    : (rawImage ? [rawImage] : []);
+  const primaryImage = images[0] || rawImage;
   return {
     id: String(entry?.id || crypto.randomUUID()),
     title: String(entry?.title || "").slice(0, 160),
     body: String(entry?.body || "").slice(0, 6000),
-    image: String(entry?.image || "").slice(0, 2000),
+    image: primaryImage,
+    images: images.length ? images : (primaryImage ? [primaryImage] : []),
     format: String(entry?.format || "").slice(0, 40),
     pillar: String(entry?.pillar || "").slice(0, 80),
     goal: String(entry?.goal || "").slice(0, 240),
     hook: String(entry?.hook || "").slice(0, 300),
     cta: String(entry?.cta || "").slice(0, 240),
     tags: Array.isArray(entry?.tags) ? [...new Set(entry.tags.map(tag => String(tag).trim().replace(/^#/, "")).filter(Boolean))].slice(0, 20) : [],
+    comments: Array.isArray(entry?.comments) ? entry.comments.map(normalizeComment) : [],
     status,
     createdBy: String(entry?.createdBy || "").slice(0, 80),
     updatedBy: String(entry?.updatedBy || "").slice(0, 80),

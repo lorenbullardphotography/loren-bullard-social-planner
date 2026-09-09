@@ -215,18 +215,49 @@ function assigneePeople(user, members = [], selected = "") {
     return true;
   });
 }
+let scratchAttachedImages = [];
+function formatIdeaTimestamp(isoString) {
+  if (!isoString) return "";
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) return "";
+  return date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
 function scratchIdeaPayload(values) {
+  const rawImages = Array.isArray(values.images)
+    ? values.images
+    : (values.images ? [values.images] : []);
+  const singleImage = String(values.image || "").trim();
+  const allImages = [...new Set([...rawImages.map(img => String(img).trim()), singleImage].filter(Boolean))];
   return {
     title: String(values.title || "").trim(),
     body: String(values.body || "").trim(),
-    image: String(values.image || "").trim(),
+    image: allImages[0] || singleImage,
+    images: allImages,
     format: String(values.format || "").trim(),
     pillar: String(values.pillar || "").trim(),
     tags: String(values.tags || "").split(",").map(tag => tag.trim().replace(/^#/, "")).filter(Boolean),
     goal: String(values.goal || "").trim(),
     hook: String(values.hook || "").trim(),
-    cta: String(values.cta || "").trim()
+    cta: String(values.cta || "").trim(),
+    comments: Array.isArray(values.comments) ? values.comments : []
   };
+}
+function renderScratchPhotosTray() {
+  const tray = $("#scratchPhotosTray");
+  if (!tray) return;
+  tray.innerHTML = scratchAttachedImages.map((url, idx) => `
+    <div class="scratch-photo-thumb">
+      <img src="${esc(url)}" alt="Attached photo">
+      <button type="button" class="scratch-photo-remove" data-photo-idx="${idx}" title="Remove photo">×</button>
+    </div>
+  `).join("");
+  $$(".scratch-photo-remove").forEach(btn => {
+    btn.onclick = () => {
+      const idx = Number(btn.dataset.photoIdx);
+      scratchAttachedImages.splice(idx, 1);
+      renderScratchPhotosTray();
+    };
+  });
 }
 function populateScratchSelects() {
   const formatEl = $("#scratchFormat");
@@ -1770,13 +1801,130 @@ function renderScratch() {
   if (!host) return;
   populateScratchSelects();
   const entries = scratch.filter(entry => entry.status !== "archived");
-  host.innerHTML = entries.length ? entries.map(entry => `<article class="scratch-card" data-scratch-id="${esc(entry.id)}"><div class="scratch-card-head"><div><div class="scratch-card-meta"><span class="eyebrow">${esc(entry.createdBy || "Team")}</span>${entry.format ? `<span class="scratch-badge scratch-badge-format">${esc(entry.format)}</span>` : ""}${entry.pillar ? `<span class="scratch-badge scratch-badge-pillar">${esc(entry.pillar)}</span>` : ""}</div><h4>${esc(entry.title || "Untitled idea")}</h4></div><button class="ghost scratch-archive" type="button">Archive</button></div>${entry.image ? `<img src="${esc(entry.image)}" alt="">` : ""}${entry.body ? `<p>${esc(entry.body)}</p>` : ""}${entry.goal || entry.hook || entry.cta ? `<div class="scratch-brief">${entry.goal ? `<span><b>Goal</b>${esc(entry.goal)}</span>` : ""}${entry.hook ? `<span><b>Hook</b>${esc(entry.hook)}</span>` : ""}${entry.cta ? `<span><b>CTA</b>${esc(entry.cta)}</span>` : ""}</div>` : ""}${(entry.tags && entry.tags.length) ? `<div class="scratch-tags">${entry.tags.map(tag => `<span>#${esc(tag)}</span>`).join("")}</div>` : ""}<div class="scratch-card-actions"><button class="ghost scratch-edit" type="button">Edit</button><button class="danger scratch-delete" type="button">Delete</button></div></article>`).join("") : `<div class="empty">No ideas saved yet. Capture the next idea before it gets away.</div>`;
-  $$(".scratch-archive").forEach(button => button.onclick = async event => { const entry = scratch.find(item => item.id === event.currentTarget.closest("[data-scratch-id]").dataset.scratchId); if (!entry) return; entry.status = "archived"; entry.updatedBy = currentUser.name; entry.updatedAt = new Date().toISOString(); renderScratch(); await persistPlanner("archived an idea"); });
-  $$(".scratch-delete").forEach(button => button.onclick = async event => { const id = event.currentTarget.closest("[data-scratch-id]").dataset.scratchId; scratch = scratch.filter(entry => entry.id !== id); renderScratch(); await persistPlanner("deleted an idea"); });
+  host.innerHTML = entries.length ? entries.map(entry => {
+    const images = Array.isArray(entry.images) && entry.images.length ? entry.images : (entry.image ? [entry.image] : []);
+    const comments = Array.isArray(entry.comments) ? entry.comments : [];
+    const timeDisplay = formatIdeaTimestamp(entry.createdAt);
+    const updatedDisplay = (entry.updatedAt && entry.updatedAt !== entry.createdAt) ? ` · Updated ${formatIdeaTimestamp(entry.updatedAt)}` : "";
+
+    return `<article class="scratch-card" data-scratch-id="${esc(entry.id)}">
+      <div class="scratch-card-head">
+        <div>
+          <div class="scratch-card-meta">
+            <span class="eyebrow">${esc(entry.createdBy || "Team")}</span>
+            ${entry.format ? `<span class="scratch-badge scratch-badge-format">${esc(entry.format)}</span>` : ""}
+            ${entry.pillar ? `<span class="scratch-badge scratch-badge-pillar">${esc(entry.pillar)}</span>` : ""}
+            <time class="scratch-time">${esc(timeDisplay)}${esc(updatedDisplay)}</time>
+          </div>
+          <h4>${esc(entry.title || "Untitled idea")}</h4>
+        </div>
+        <button class="ghost scratch-archive" type="button">Archive</button>
+      </div>
+      ${images.length > 1 ? `
+        <div class="scratch-gallery">
+          ${images.map(img => `<img src="${esc(img)}" alt="Idea photo" class="scratch-gallery-img">`).join("")}
+        </div>
+      ` : (images.length === 1 ? `<img src="${esc(images[0])}" alt="Idea photo" class="scratch-card-img">` : "")}
+      ${entry.body ? `<p>${esc(entry.body)}</p>` : ""}
+      ${entry.goal || entry.hook || entry.cta ? `<div class="scratch-brief">
+        ${entry.goal ? `<span><b>Goal</b>${esc(entry.goal)}</span>` : ""}
+        ${entry.hook ? `<span><b>Hook</b>${esc(entry.hook)}</span>` : ""}
+        ${entry.cta ? `<span><b>CTA</b>${esc(entry.cta)}</span>` : ""}
+      </div>` : ""}
+      ${(entry.tags && entry.tags.length) ? `<div class="scratch-tags">${entry.tags.map(tag => `<span>#${esc(tag)}</span>`).join("")}</div>` : ""}
+      
+      <div class="scratch-comments-section">
+        <div class="scratch-comments-head">
+          <b>Feedback & Notes ${comments.length ? `(${comments.length})` : ""}</b>
+        </div>
+        <div class="comment-list scratch-comment-list">
+          ${comments.map(c => `
+            <div class="comment scratch-comment" data-comment-id="${esc(c.id || '')}">
+              <div class="scratch-comment-head">
+                <b>${esc(c.author || 'Team')}${c.role ? ` · <span class="comment-role">${esc(c.role)}</span>` : ''}</b>
+                <time class="comment-time">${esc(formatIdeaTimestamp(c.at))}</time>
+                <button class="ghost comment-delete-btn" type="button" data-idea-id="${esc(entry.id)}" data-comment-id="${esc(c.id || '')}" title="Delete comment">×</button>
+              </div>
+              <div class="comment-text">${esc(c.text || '')}</div>
+            </div>
+          `).join("") || '<span class="scratch-no-comments">No feedback yet. Add thoughts below to collaborate.</span>'}
+        </div>
+        <form class="scratch-comment-form" data-idea-id="${esc(entry.id)}">
+          <input class="scratch-comment-input" placeholder="Add feedback as ${esc(currentUser.name)}…" maxlength="1000" required>
+          <button class="ghost" type="submit">Post</button>
+        </form>
+      </div>
+
+      <div class="scratch-card-actions">
+        <button class="ghost scratch-edit" type="button">Edit</button>
+        <button class="danger scratch-delete" type="button">Delete</button>
+      </div>
+    </article>`;
+  }).join("") : `<div class="empty">No ideas saved yet. Capture the next idea before it gets away.</div>`;
+
+  $$(".scratch-archive").forEach(button => button.onclick = async event => {
+    const entry = scratch.find(item => item.id === event.currentTarget.closest("[data-scratch-id]").dataset.scratchId);
+    if (!entry) return;
+    entry.status = "archived";
+    entry.updatedBy = currentUser.name;
+    entry.updatedAt = new Date().toISOString();
+    renderScratch();
+    await persistPlanner("archived an idea");
+  });
+
+  $$(".scratch-delete").forEach(button => button.onclick = async event => {
+    const id = event.currentTarget.closest("[data-scratch-id]").dataset.scratchId;
+    scratch = scratch.filter(entry => entry.id !== id);
+    renderScratch();
+    await persistPlanner("deleted an idea");
+  });
+
+  $$(".scratch-comment-form").forEach(form => {
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const ideaId = form.dataset.ideaId;
+      const entry = scratch.find(item => item.id === ideaId);
+      if (!entry) return;
+      const input = form.querySelector(".scratch-comment-input");
+      const text = input.value.trim();
+      if (!text) return;
+      entry.comments = Array.isArray(entry.comments) ? entry.comments : [];
+      entry.comments.push({
+        id: crypto.randomUUID(),
+        author: currentUser.name,
+        role: currentUser.role,
+        text,
+        at: new Date().toISOString()
+      });
+      entry.updatedBy = currentUser.name;
+      entry.updatedAt = new Date().toISOString();
+      renderScratch();
+      await persistPlanner("commented on an idea");
+      notify("Feedback posted");
+    };
+  });
+
+  $$(".comment-delete-btn").forEach(btn => {
+    btn.onclick = async () => {
+      const ideaId = btn.dataset.ideaId;
+      const commentId = btn.dataset.commentId;
+      const entry = scratch.find(item => item.id === ideaId);
+      if (!entry || !Array.isArray(entry.comments)) return;
+      entry.comments = entry.comments.filter(c => c.id !== commentId);
+      entry.updatedBy = currentUser.name;
+      entry.updatedAt = new Date().toISOString();
+      renderScratch();
+      await persistPlanner("removed a comment from an idea");
+      notify("Comment removed");
+    };
+  });
+
   $$(".scratch-edit").forEach(button => button.onclick = () => {
     const card = button.closest("[data-scratch-id]"), entry = scratch.find(item => item.id === card.dataset.scratchId);
     if (!entry) return;
     populateScratchSelects();
+    scratchAttachedImages = Array.isArray(entry.images) && entry.images.length ? [...entry.images] : (entry.image ? [entry.image] : []);
+    renderScratchPhotosTray();
     $("#scratchTitle").value = entry.title || "";
     $("#scratchFormat").value = entry.format || "";
     $("#scratchPillar").value = entry.pillar || "";
@@ -1784,7 +1932,7 @@ function renderScratch() {
     $("#scratchGoal").value = entry.goal || "";
     $("#scratchHook").value = entry.hook || "";
     $("#scratchCta").value = entry.cta || "";
-    $("#scratchImage").value = entry.image || "";
+    $("#scratchImage").value = "";
     $("#scratchTags").value = (entry.tags || []).join(", ");
     $("#scratchForm").dataset.editing = entry.id;
     $("#scratchForm button[type=submit]").textContent = "Update idea";
@@ -2058,27 +2206,31 @@ $("#ideasTab").onclick = () => setLibrarySection("ideas");
 $("#scratchForm").onsubmit = async event => {
   event.preventDefault();
   const form = event.currentTarget;
+  const existing = scratch.find(entry => entry.id === form.dataset.editing);
   const idea = scratchIdeaPayload({
     title: $("#scratchTitle").value,
     format: $("#scratchFormat") ? $("#scratchFormat").value : "",
     pillar: $("#scratchPillar") ? $("#scratchPillar").value : "",
     body: $("#scratchBody").value,
+    images: scratchAttachedImages,
     image: $("#scratchImage").value,
     tags: $("#scratchTags").value,
     goal: $("#scratchGoal").value,
     hook: $("#scratchHook").value,
-    cta: $("#scratchCta").value
+    cta: $("#scratchCta").value,
+    comments: existing ? existing.comments : []
   });
   const title = idea.title;
   if (!title) return;
   const now = new Date().toISOString();
-  const existing = scratch.find(entry => entry.id === form.dataset.editing);
   if (existing) {
     Object.assign(existing, { ...idea, updatedBy: currentUser.name, updatedAt: now });
   } else {
     scratch.unshift({ id: crypto.randomUUID(), ...idea, status: "active", createdBy: currentUser.name, updatedBy: currentUser.name, createdAt: now, updatedAt: now });
   }
   form.reset();
+  scratchAttachedImages = [];
+  renderScratchPhotosTray();
   delete form.dataset.editing;
   form.querySelector('button[type="submit"]').textContent = "Save idea";
   const cancelBtn = $("#scratchCancelEdit");
@@ -2092,9 +2244,48 @@ if (cancelEditBtn) {
   cancelEditBtn.onclick = () => {
     const form = $("#scratchForm");
     form.reset();
+    scratchAttachedImages = [];
+    renderScratchPhotosTray();
     delete form.dataset.editing;
     form.querySelector('button[type="submit"]').textContent = "Save idea";
     cancelEditBtn.classList.add("hidden");
+  };
+}
+if ($("#scratchPhotoInput")) {
+  $("#scratchPhotoInput").onchange = async event => {
+    const files = Array.from(event.target.files || []).filter(f => f.type.startsWith("image/"));
+    if (!files.length) return;
+    const statusEl = $("#scratchUploadStatus");
+    if (statusEl) {
+      statusEl.classList.remove("hidden");
+      statusEl.textContent = `Uploading ${files.length} photo${files.length > 1 ? "s" : ""}…`;
+    }
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (statusEl) statusEl.textContent = `Uploading photo ${i + 1} of ${files.length}…`;
+        const uploadFile = await prepareUploadFile(file);
+        if (uploadFile.size > 3 * 1024 * 1024) throw new Error("Photos must be under 3 MB");
+        const uploaded = await api("/api/assets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: uploadFile.name, data: await readFile(uploadFile) })
+        });
+        if (uploaded?.url) {
+          scratchAttachedImages.push(uploaded.url);
+        }
+      }
+      renderScratchPhotosTray();
+      if (statusEl) {
+        statusEl.textContent = "Photos attached";
+        setTimeout(() => statusEl.classList.add("hidden"), 2500);
+      }
+    } catch (err) {
+      if (statusEl) statusEl.textContent = err.message || "Upload failed";
+      notify(err.message || "Photo upload failed");
+    } finally {
+      event.target.value = "";
+    }
   };
 }
 
