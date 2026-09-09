@@ -15,7 +15,7 @@ function taskHelpers() {
     URL,
     Date
   };
-  vm.runInNewContext(`${helpers}\nthis.taskHelpers = { taskPosts, filterActivity, activityLabel, assigneePeople, personInitials };`, context);
+  vm.runInNewContext(`${helpers}\nthis.taskHelpers = { taskPosts, filterActivity, activityLabel, assigneePeople, personInitials, activityFilterStorageKey, loadActivityFilters };`, context);
   return context.taskHelpers;
 }
 
@@ -89,4 +89,17 @@ test("places Tasks before Grid Planner in the sidebar", () => {
   const nav = html.slice(html.indexOf("<nav>"), html.indexOf("</nav>"));
   assert.ok(nav.indexOf('data-view="tasks"') < nav.indexOf('data-view="grid"'));
   assert.ok(nav.indexOf('data-view="tasks"') < nav.indexOf('data-view="calendar"'));
+});
+
+test("stores Activity filters under a user-specific preference key", () => {
+  const { activityFilterStorageKey } = taskHelpers();
+  assert.equal(activityFilterStorageKey({ name: "Brooke" }), "lb-activity-filters-v1-brooke");
+  assert.notEqual(activityFilterStorageKey({ name: "Brooke" }), activityFilterStorageKey({ name: "David" }));
+});
+
+test("restores saved Activity filters and defaults to all types", () => {
+  const { loadActivityFilters } = taskHelpers();
+  const storage = { getItem: key => key === "lb-activity-filters-v1-brooke" ? '["approval","sync"]' : null };
+  assert.deepEqual([...loadActivityFilters({ name: "Brooke" }, storage)], ["approval", "sync"]);
+  assert.equal(loadActivityFilters({ name: "David" }, storage).length, 6);
 });

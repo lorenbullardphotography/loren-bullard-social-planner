@@ -1,6 +1,6 @@
 const USER_KEY = "lb-content-planner-user-v1";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
-let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "grid", editorReturnView = "grid", libraryFilter = "all", librarySearch = "", librarySection = "assets", taskTab = "mine", editorDirty = false, editorSaveInProgress = false;
+let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "grid", editorReturnView = "grid", libraryFilter = "all", librarySearch = "", librarySection = "assets", taskTab = "mine", activityFilters = null, editorDirty = false, editorSaveInProgress = false;
 let settings = { pillars: [], formats: ["IMAGE", "REEL", "CAROUSEL"], goals: [], syncPhotoCount: 12, workflowAutomations: {} };
 let calCursor = new Date(); calCursor.setDate(1);
 
@@ -27,6 +27,7 @@ async function loadAccount() {
   if (!data.user) throw new Error("Please sign in to the planner.");
   currentUser = data.user;
   saveUser();
+  activityFilters = loadActivityFilters(currentUser);
 }
 
 function loadUser() {
@@ -163,6 +164,16 @@ function filterActivity(items, type = "all") {
 }
 const ACTIVITY_LABELS = { approval: "Approval", content: "Content", sync: "Sync", comment: "Comment", settings: "Settings", update: "Update" };
 function activityLabel(type) { return ACTIVITY_LABELS[type] || "Update"; }
+const ACTIVITY_FILTER_TYPES = Object.keys(ACTIVITY_LABELS);
+function activityFilterStorageKey(user) { return `lb-activity-filters-v1-${encodeURIComponent((user?.name || "").trim().toLowerCase())}`; }
+function loadActivityFilters(user, storage = localStorage) {
+  const raw = storage.getItem(activityFilterStorageKey(user));
+  if (raw === null) return [...ACTIVITY_FILTER_TYPES];
+  try { return ACTIVITY_FILTER_TYPES.filter(type => JSON.parse(raw).includes(type)); } catch { return [...ACTIVITY_FILTER_TYPES]; }
+}
+function saveActivityFilters(user, filters, storage = localStorage) {
+  storage.setItem(activityFilterStorageKey(user), JSON.stringify(ACTIVITY_FILTER_TYPES.filter(type => filters.includes(type))));
+}
 function personInitials(name = "") {
   return name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0].toUpperCase()).join("");
 }
@@ -565,8 +576,9 @@ async function heartbeat() {
 function renderActivity() {
   const host = $("#activityList");
   if (!host) return;
-  const checked = $$("#activityFilters input:checked").map(input => input.value);
-  const items = filterActivity(activity, checked.length ? checked : []);
+  if (!activityFilters) activityFilters = loadActivityFilters(currentUser);
+  $$("#activityFilters input").forEach(input => { input.checked = activityFilters.includes(input.value); });
+  const items = filterActivity(activity, activityFilters);
   host.innerHTML = items.length
     ? items.map(item => {
       const at = new Date(item.at);
@@ -1326,7 +1338,7 @@ $("#myTasksTab").onclick = () => { taskTab = "mine"; renderTasks(); };
 $("#teamTasksTab").onclick = () => { taskTab = "team"; renderTasks(); };
 $("#activityTab").onclick = () => { taskTab = "activity"; renderTasks(); renderActivity(); };
 $("#taskSort").onchange = () => renderTasks();
-$("#activityFilters").onchange = () => renderActivity();
+$("#activityFilters").onchange = () => { activityFilters = $$("#activityFilters input:checked").map(input => input.value); saveActivityFilters(currentUser, activityFilters); renderActivity(); };
 $("#prevMonth").onclick = () => { calCursor.setMonth(calCursor.getMonth() - 1); renderCalendar(); };
 $("#nextMonth").onclick = () => { calCursor.setMonth(calCursor.getMonth() + 1); renderCalendar(); };
 $$(".chip").forEach(chip => chip.onclick = () => {
