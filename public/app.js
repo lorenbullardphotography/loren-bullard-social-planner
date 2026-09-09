@@ -261,6 +261,14 @@ function shouldRefreshPlanner({ currentView, editorDirty, editorSaveInProgress }
 function editorDestinationAfterSave(currentView, editorReturnView) {
   return currentView === "editor" ? editorReturnView : currentView;
 }
+const ASSET_EDIT_FIELDS = ["type", "workflow", "status", "approval", "assignee", "priority", "pillar", "date", "scheduleState", "caption", "notes", "audio", "hashtags", "tagNotes", "altText", "location", "locationTag", "cropZoom", "cropX", "cropY", "updatedBy", "updatedAt"];
+function mergeAssetEdit(latestPost, editedPost) {
+  const edit = {};
+  for (const field of ASSET_EDIT_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(editedPost, field)) edit[field] = editedPost[field];
+  }
+  return { ...latestPost, ...edit };
+}
 async function refreshSharedPlanner() {
   if (!shouldRefreshPlanner({ currentView, editorDirty, editorSaveInProgress })) return;
   try {
@@ -928,13 +936,30 @@ function renderInspector(hostSelector = "#inspector") {
     post.locationTag = post.location ? { ...(post.locationTag || {}), name: post.location, source: post.locationTag?.source || "manual" } : null;
     post.updatedBy = currentUser.name;
     post.updatedAt = new Date().toISOString();
-    try {
-      await persistPlanner("updated planned content");
+    const editedPost = { ...post };
+    const finishSave = () => {
       editorDirty = false;
       renderAll();
       switchView(editorDestinationAfterSave(currentView, editorReturnView));
       notify("Post updated");
+    };
+    try {
+      await persistPlanner("updated planned content");
+      finishSave();
     } catch (error) {
+      if (error.status === 409 && error.planner) {
+        const latestPost = posts.find(item => item.id === editedPost.id);
+        if (latestPost) {
+          Object.assign(latestPost, mergeAssetEdit(latestPost, editedPost));
+          try {
+            await persistPlanner("updated planned content after shared planner refresh");
+            finishSave();
+            return;
+          } catch (retryError) {
+            error = retryError;
+          }
+        }
+      }
       if (error.status !== 409) Object.assign(post, previousPost);
       renderAll();
       notify(error.message || "The post could not be saved");
