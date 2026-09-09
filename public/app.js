@@ -1,6 +1,6 @@
 const USER_KEY = "lb-content-planner-user-v1";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
-let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "grid", editorReturnView = "grid", libraryFilter = "all", librarySearch = "", librarySection = "assets", taskTab = "mine", activityFilters = null, editorDirty = false, editorSaveInProgress = false;
+let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "grid", editorReturnView = "grid", calendarView = "month", libraryFilter = "all", librarySearch = "", librarySection = "assets", taskTab = "mine", approvalDetail = null, activityFilters = null, editorDirty = false, editorSaveInProgress = false;
 let settings = { pillars: [], formats: ["IMAGE", "REEL", "CAROUSEL"], goals: [], syncPhotoCount: 12, workflowAutomations: {} };
 let calCursor = new Date(); calCursor.setDate(1);
 
@@ -19,6 +19,8 @@ let presence = [];
 let igStatus = { connected: false };
 let plannerVersion = 0;
 let currentUser = loadUser();
+const CALENDAR_INSTAGRAM_KEY = "lb-calendar-instagram-v1";
+let calendarShowInstagram = loadCalendarInstagramPreference(currentUser);
 let initialInstagramSyncDone = false;
 let carouselSlide = 0;
 
@@ -26,6 +28,7 @@ async function loadAccount() {
   const data = await api("/api/auth/me");
   if (!data.user) throw new Error("Please sign in to the planner.");
   currentUser = data.user;
+  calendarShowInstagram = loadCalendarInstagramPreference(currentUser);
   saveUser();
   activityFilters = loadActivityFilters(currentUser);
 }
@@ -40,6 +43,12 @@ function loadUser() {
 function saveUser() {
   localStorage.setItem(USER_KEY, JSON.stringify(currentUser));
 }
+function loadCalendarInstagramPreference(user) {
+  return localStorage.getItem(CALENDAR_INSTAGRAM_KEY + ":" + (user?.name || "default")) !== "false";
+}
+function saveCalendarInstagramPreference(user, value) {
+  localStorage.setItem(CALENDAR_INSTAGRAM_KEY + ":" + (user?.name || "default"), String(value));
+}
 function notify(msg) {
   const t = $("#toast");
   t.textContent = msg;
@@ -53,6 +62,9 @@ function visiblePosted() {
   return posted()
     .sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""))
     .slice(0, Number(settings.syncPhotoCount) || 12);
+}
+function calendarPosts() {
+  return calendarShowInstagram ? [...future(), ...visiblePosted()] : future();
 }
 function ordered() { return [...future(), ...visiblePosted()]; }
 function esc(s = "") { return s.replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m])); }
@@ -90,6 +102,15 @@ function assetMediaMarkup(post, className = "") {
   return assetKindOf(post) === "video"
     ? `<video class="${className}" src="${esc(post.image)}" muted playsinline preload="metadata"></video>`
     : `<img class="${className}" src="${esc(post.image)}" alt="">`;
+}
+function libraryAssetBadges(post) {
+  const assetKind = assetKindOf(post);
+  const source = assetSourceOf(post);
+  const typeLabel = assetKind === "video" ? "Video" : "Image";
+  const typeIcon = assetKind === "video" ? "▶" : "▧";
+  const sourceLabel = source === "canva" ? "Canva" : "Uploaded";
+  const sourceIcon = source === "canva" ? "C" : "↑";
+  return `<span class="asset-badge library-asset-badge" title="${typeLabel}" aria-label="${typeLabel}">${typeIcon}</span><span class="asset-badge library-asset-badge source-${source}" title="${sourceLabel}" aria-label="${sourceLabel}">${sourceIcon}</span>`;
 }
 function configureGridVideo(video) {
   video.muted = true;
@@ -146,6 +167,13 @@ function taskPosts(sourcePosts, user, tab = "mine", sort = "priority") {
     if (sort === "due") return (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
     const rank = post => isOverdue(post) ? 0 : workflowOf(post) === "needs-review" ? 1 : workflowOf(post) === "ready-meta" ? 2 : 3;
     return rank(a) - rank(b) || (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
+  });
+}
+const APPROVAL_COLUMNS = [["drafting", "Drafting"], ["needs-review", "Needs Review"], ["feedback", "Feedback"], ["approved", "Approved"], ["ready-meta", "Ready for Meta"], ["meta-scheduled", "Scheduled in Meta"]];
+function approvalSections(sourcePosts) {
+  return APPROVAL_COLUMNS.map(([key, label]) => {
+    const grouped = sourcePosts.filter(post => post.status !== "posted" && workflowOf(post) === key);
+    return { key, label, posts: grouped, count: grouped.length, remaining: Math.max(0, grouped.length - 1) };
   });
 }
 function activityType(item) {
@@ -233,6 +261,8 @@ async function api(path, options) {
     const error = new Error(data.error || "Request failed");
     error.status = response.status;
     error.planner = data.planner;
+    error.asset = data.asset;
+    error.conflicts = data.conflicts;
     throw error;
   }
   return data;
@@ -261,13 +291,55 @@ function shouldRefreshPlanner({ currentView, editorDirty, editorSaveInProgress }
 function editorDestinationAfterSave(currentView, editorReturnView) {
   return currentView === "editor" ? editorReturnView : currentView;
 }
-const ASSET_EDIT_FIELDS = ["type", "workflow", "status", "approval", "assignee", "priority", "pillar", "date", "scheduleState", "caption", "notes", "audio", "hashtags", "tagNotes", "altText", "location", "locationTag", "cropZoom", "cropX", "cropY", "updatedBy", "updatedAt"];
+const ASSET_EDIT_FIELDS = ["type", "workflow", "status", "approval", "assignee", "priority", "pillar", "date", "scheduleState", "caption", "notes", "audio", "hashtags", "tagNotes", "altText", "location", "locationTag", "cropZoom", "cropX", "cropY"];
+let currentEditorBaseline = null;
+let editorConflictState = null;
+
 function mergeAssetEdit(latestPost, editedPost) {
   const edit = {};
   for (const field of ASSET_EDIT_FIELDS) {
     if (Object.prototype.hasOwnProperty.call(editedPost, field)) edit[field] = editedPost[field];
   }
   return { ...latestPost, ...edit };
+}
+
+function assetEditorBaseline(post) {
+  return {
+    revision: post?.revision || 1,
+    values: Object.fromEntries(ASSET_EDIT_FIELDS.map(field => [field, post?.[field]]))
+  };
+}
+
+function assetEditorChanges(baseline, edited) {
+  return Object.fromEntries(ASSET_EDIT_FIELDS
+    .filter(field => JSON.stringify(baseline?.values?.[field] ?? "") !== JSON.stringify(edited?.[field] ?? ""))
+    .map(field => [field, edited[field]]));
+}
+
+function replaceAsset(postsList, savedAsset) {
+  const normalized = { ...savedAsset, assetKind: assetKindOf(savedAsset), assetSource: assetSourceOf(savedAsset) };
+  return (postsList || []).map(post => post.id === savedAsset.id ? normalized : post);
+}
+
+function removeConflictField(changes = {}, field) {
+  const next = { ...changes };
+  delete next[field];
+  return next;
+}
+
+function forceConflictField(forceFields = [], field) {
+  return [...new Set([...forceFields, field])];
+}
+function canShowAddActions(view) {
+  return ["grid", "calendar", "library"].includes(view);
+}
+function syncTopActions(view) {
+  const visible = canShowAddActions(view);
+  [$("#addCanvaBtn"), $("#addAssetLabel")].forEach(action => {
+    if (!action) return;
+    action.classList.toggle("hidden", !visible);
+    action.setAttribute("aria-hidden", String(!visible));
+  });
 }
 async function refreshSharedPlanner() {
   if (!shouldRefreshPlanner({ currentView, editorDirty, editorSaveInProgress })) return;
@@ -376,6 +448,7 @@ async function importBackup(file) {
 }
 
 function renderAll() {
+  syncTopActions(currentView);
   renderStats();
   renderTasks();
   renderGrid();
@@ -540,15 +613,20 @@ function renderTasks() {
   if (!host) return;
   const sort = $("#taskSort")?.value || "priority";
   const items = taskPosts(posts, currentUser, taskTab, sort);
-  $("#taskList").classList.toggle("hidden", taskTab === "activity");
+  const isApprovals = taskTab === "approvals";
+  $("#taskList").classList.toggle("hidden", taskTab === "activity" || isApprovals);
   $("#activityPanel")?.classList.toggle("hidden", taskTab !== "activity");
-  $("#taskSort")?.closest(".task-sort")?.classList.toggle("hidden", taskTab === "activity");
+  $("#approvalPanel")?.classList.toggle("hidden", !isApprovals);
+  $("#taskSort")?.closest(".task-sort")?.classList.toggle("hidden", taskTab === "activity" || isApprovals);
   $("#myTasksTab")?.classList.toggle("active", taskTab === "mine");
   $("#teamTasksTab")?.classList.toggle("active", taskTab === "team");
+  $("#approvalsTab")?.classList.toggle("active", isApprovals);
   $("#activityTab")?.classList.toggle("active", taskTab === "activity");
   $("#myTasksTab")?.setAttribute("aria-selected", String(taskTab === "mine"));
   $("#teamTasksTab")?.setAttribute("aria-selected", String(taskTab === "team"));
+  $("#approvalsTab")?.setAttribute("aria-selected", String(isApprovals));
   $("#activityTab")?.setAttribute("aria-selected", String(taskTab === "activity"));
+  if (isApprovals) { renderApprovals(); return; }
   host.innerHTML = items.length ? items.map(post => `<button class="attention-card task-card" data-open="${post.id}"><img src="${post.image}" alt=""><span><b>${esc(post.notes || post.caption || "Untitled content")}</b><small>${esc(taskReason(post))} · ${esc(post.dueDate || post.date || "No due date")}</small></span><strong class="task-assignee">${esc(post.assignee || "Unassigned")}</strong><i>›</i></button>`).join("") : `<div class="empty">No ${taskTab === "mine" ? "tasks assigned to you" : "team tasks"} right now.</div>`;
   $$("#taskList [data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open, true));
 }
@@ -752,6 +830,103 @@ async function reorder(a, b) {
   renderAll();
   await persistPlanner("reordered the grid");
 }
+
+const FIELD_LABELS = {
+  caption: "Caption",
+  notes: "Notes",
+  workflow: "Workflow",
+  assignee: "Assignee",
+  priority: "Priority",
+  pillar: "Content Pillar",
+  type: "Format",
+  date: "Schedule Date",
+  scheduleState: "Scheduling",
+  audio: "Audio Notes",
+  hashtags: "Hashtags",
+  tagNotes: "Account Tags",
+  altText: "Alt Text",
+  location: "Location",
+  cropZoom: "Crop Zoom",
+  status: "Status",
+  approval: "Approval"
+};
+
+function setEditorFieldValue(host, field, value) {
+  const q = selector => host.querySelector(selector);
+  if (field === "caption") { const el = q("#eCaption"); if (el) el.value = value || ""; }
+  else if (field === "notes") { const el = q("#eNotes"); if (el) el.value = value || ""; }
+  else if (field === "workflow") { const el = q("#eWorkflow"); if (el) el.value = value || "idea"; }
+  else if (field === "assignee") {
+    const el = q("#eAssignee");
+    if (el) el.value = value || "";
+    const nameEl = q("#assigneePickerName");
+    if (nameEl) nameEl.textContent = value || "Unassigned";
+    const avEl = q("#assigneePickerButton .person-avatar");
+    if (avEl) avEl.textContent = personInitials(value || "Unassigned");
+  }
+  else if (field === "priority") { const el = q("#ePriority"); if (el) el.value = value || "normal"; }
+  else if (field === "pillar") { const el = q("#ePillar"); if (el) el.value = value || ""; }
+  else if (field === "type") { const el = q("#eType"); if (el) el.value = value || "IMAGE"; }
+  else if (field === "date") { const el = q("#eScheduleDate"); if (el) el.value = value || ""; }
+  else if (field === "scheduleState") { const el = q("#eScheduleState"); if (el) el.value = value || "draft"; }
+  else if (field === "audio") { const el = q("#eAudio"); if (el) el.value = value || ""; }
+  else if (field === "hashtags") { const el = q("#eHashtags"); if (el) el.value = value || ""; }
+  else if (field === "tagNotes") { const el = q("#eTagNotes"); if (el) el.value = value || ""; }
+  else if (field === "altText") { const el = q("#eAltText"); if (el) el.value = value || ""; }
+  else if (field === "location") { const el = q("#eLocation"); if (el) el.value = value || ""; }
+  else if (field === "approval") {
+    host.querySelectorAll("[data-ap]").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.ap === value);
+    });
+  }
+}
+
+function renderConflictPanel(host, conflictState, onResolve) {
+  const mount = host.querySelector("#conflictPanelMount");
+  if (!mount) return;
+  const conflicts = conflictState?.conflicts || {};
+  const conflictKeys = Object.keys(conflicts);
+  if (!conflictKeys.length) {
+    mount.innerHTML = "";
+    return;
+  }
+  mount.innerHTML = `<div class="conflict-panel" id="conflictPanel">
+    <div class="conflict-panel-header">
+      <b>Same-field changes detected</b>
+      <span>A teammate edited this post while you were working. Choose which version to keep for each field below.</span>
+    </div>
+    <div class="conflict-list">
+      ${conflictKeys.map(field => {
+        const info = conflicts[field];
+        const val = info?.currentValue;
+        const displayVal = val == null || val === "" ? "(empty)" : (typeof val === "object" ? JSON.stringify(val) : String(val));
+        return `<div class="conflict-item" data-conflict-row="${esc(field)}">
+          <div class="conflict-field-info">
+            <span class="conflict-field-name">${esc(FIELD_LABELS[field] || field)}</span>
+            <span class="conflict-author">${info?.updatedBy ? `Updated by <b>${esc(info.updatedBy)}</b>` : "Updated by teammate"}${info?.updatedAt ? ` on ${new Date(info.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ""}</span>
+          </div>
+          <div class="conflict-value">
+            <small>Current server value:</small>
+            <div class="conflict-value-box">${esc(displayVal)}</div>
+          </div>
+          <div class="conflict-actions">
+            <button type="button" class="ghost small" data-conflict-action="keep" data-conflict-field="${esc(field)}">Keep mine</button>
+            <button type="button" class="ghost small" data-conflict-action="latest" data-conflict-field="${esc(field)}">Use latest</button>
+          </div>
+        </div>`;
+      }).join("")}
+    </div>
+  </div>`;
+
+  mount.querySelectorAll("[data-conflict-action]").forEach(btn => {
+    btn.onclick = () => {
+      const action = btn.dataset.conflictAction;
+      const field = btn.dataset.conflictField;
+      onResolve(action, field);
+    };
+  });
+}
+
 function renderInspector(hostSelector = "#inspector") {
   const host = $(hostSelector);
   const q = selector => host.querySelector(selector);
@@ -810,6 +985,7 @@ function renderInspector(hostSelector = "#inspector") {
     </div>
     <div class="handoff"><b>Meta Business Suite handoff</b><span>Use Meta for final scheduling and publishing.</span><div class="handoff-actions"><button id="copyCaption" class="ghost">Copy caption</button><button id="copyHashtags" class="ghost">Copy hashtags</button><a class="ghost button-link" href="https://business.facebook.com/latest/home" target="_blank" rel="noopener noreferrer">Open Meta</a>${approvedForMeta(post) ? '<button id="downloadApprovedAsset" class="ghost">↓ Download approved media</button><button id="exportMetaData" class="ghost">↓ Export Meta data</button>' : ""}</div><button id="markMeta" class="primary">Mark ready for Meta</button></div>
     <div class="posted-lock">Last updated${post.updatedBy ? ` by <b>${esc(post.updatedBy)}</b>` : ""}${post.updatedAt ? ` on ${new Date(post.updatedAt).toLocaleString()}` : ""}.</div>
+    <div id="conflictPanelMount"></div>
     </div>
     <div class="actions"><button id="saveEdit" class="primary">Save</button><button id="deleteEdit" class="danger">Delete</button></div>
   </div>`;
@@ -818,6 +994,12 @@ function renderInspector(hostSelector = "#inspector") {
       control.addEventListener("input", () => { editorDirty = true; });
       control.addEventListener("change", () => { editorDirty = true; });
     });
+  }
+  if (!currentEditorBaseline || currentEditorBaseline.id !== post.id) {
+    currentEditorBaseline = { id: post.id, ...assetEditorBaseline(post) };
+  }
+  if (editorConflictState && editorConflictState.asset?.id === post.id) {
+    renderConflictPanel(host, editorConflictState, (action, field) => handleConflictResolution(action, field));
   }
   const assigneePicker = q(".assignee-picker");
   if (assigneePicker) {
@@ -913,12 +1095,52 @@ function renderInspector(hostSelector = "#inspector") {
   if (cropPreview) cropPreview.onpointercancel = stopPan;
   if (cropPreview) cropPreview.onlostpointercapture = () => { dragStart = null; cropPreview.classList.remove("is-adjusting"); };
   applyCrop();
-  q("#saveEdit").onclick = async () => {
-    const previousPost = { ...post };
+
+  const handleConflictResolution = async (action, field) => {
+    if (!editorConflictState) return;
+    if (action === "latest") {
+      const val = editorConflictState.conflicts[field]?.currentValue;
+      setEditorFieldValue(host, field, val);
+      editorConflictState.changes = removeConflictField(editorConflictState.changes, field);
+      delete editorConflictState.conflicts[field];
+      if (!Object.keys(editorConflictState.conflicts).length) {
+        if (!Object.keys(editorConflictState.changes).length) {
+          posts = replaceAsset(posts, editorConflictState.asset);
+          currentEditorBaseline = { id: editorConflictState.asset.id, ...assetEditorBaseline(editorConflictState.asset) };
+          editorConflictState = null;
+          renderConflictPanel(host, null, handleConflictResolution);
+          editorDirty = false;
+          renderAll();
+          switchView(editorDestinationAfterSave(currentView, editorReturnView));
+          notify("Post updated");
+          return;
+        }
+        renderConflictPanel(host, null, handleConflictResolution);
+        await submitAssetPatch();
+      } else {
+        renderConflictPanel(host, editorConflictState, handleConflictResolution);
+      }
+    } else if (action === "keep") {
+      editorConflictState.forceFields = forceConflictField(editorConflictState.forceFields, field);
+      delete editorConflictState.conflicts[field];
+      if (!Object.keys(editorConflictState.conflicts).length) {
+        renderConflictPanel(host, null, handleConflictResolution);
+        await submitAssetPatch();
+      } else {
+        renderConflictPanel(host, editorConflictState, handleConflictResolution);
+      }
+    }
+  };
+
+  const submitAssetPatch = async () => {
     const saveButton = q("#saveEdit");
     editorSaveInProgress = true;
-    saveButton.disabled = true;
-    saveButton.textContent = "Saving…";
+    if (saveButton) {
+      saveButton.disabled = true;
+      saveButton.textContent = "Saving…";
+    }
+
+    const baseline = currentEditorBaseline || assetEditorBaseline(post);
     post.type = q("#eType").value;
     applyWorkflow(post, q("#eWorkflow").value);
     post.assignee = q("#eAssignee").value.trim();
@@ -928,45 +1150,81 @@ function renderInspector(hostSelector = "#inspector") {
     post.scheduleState = q("#eScheduleState").value;
     post.caption = q("#eCaption").value;
     post.notes = q("#eNotes").value;
-    post.audio = q("#eAudio").value.trim();
-    post.hashtags = q("#eHashtags").value.trim();
-    post.tagNotes = q("#eTagNotes").value.trim();
-    post.altText = q("#eAltText").value.trim();
-    post.location = q("#eLocation").value.trim();
+    post.audio = q("#eAudio") ? q("#eAudio").value.trim() : post.audio;
+    post.hashtags = q("#eHashtags") ? q("#eHashtags").value.trim() : post.hashtags;
+    post.tagNotes = q("#eTagNotes") ? q("#eTagNotes").value.trim() : post.tagNotes;
+    post.altText = q("#eAltText") ? q("#eAltText").value.trim() : post.altText;
+    post.location = q("#eLocation") ? q("#eLocation").value.trim() : post.location;
     post.locationTag = post.location ? { ...(post.locationTag || {}), name: post.location, source: post.locationTag?.source || "manual" } : null;
-    post.updatedBy = currentUser.name;
-    post.updatedAt = new Date().toISOString();
-    const editedPost = { ...post };
-    const finishSave = () => {
+
+    const baseChanges = editorConflictState?.changes ? editorConflictState.changes : assetEditorChanges(baseline, post);
+    const forceFields = editorConflictState?.forceFields || [];
+    const revision = editorConflictState?.asset?.revision || baseline.revision;
+
+    if (!Object.keys(baseChanges).length && !forceFields.length) {
       editorDirty = false;
+      editorConflictState = null;
       renderAll();
       switchView(editorDestinationAfterSave(currentView, editorReturnView));
       notify("Post updated");
-    };
-    try {
-      await persistPlanner("updated planned content");
-      finishSave();
-    } catch (error) {
-      if (error.status === 409 && error.planner) {
-        const latestPost = posts.find(item => item.id === editedPost.id);
-        if (latestPost) {
-          Object.assign(latestPost, mergeAssetEdit(latestPost, editedPost));
-          try {
-            await persistPlanner("updated planned content after shared planner refresh");
-            finishSave();
-            return;
-          } catch (retryError) {
-            error = retryError;
-          }
-        }
+      editorSaveInProgress = false;
+      if (saveButton) {
+        saveButton.disabled = false;
+        saveButton.textContent = "Save";
       }
-      if (error.status !== 409) Object.assign(post, previousPost);
+      return;
+    }
+
+    try {
+      const res = await api(`/api/assets/${post.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          revision,
+          changes: baseChanges,
+          forceFields,
+          actor: currentUser
+        })
+      });
+      posts = replaceAsset(posts, res.asset);
+      selected = res.asset.id;
+      currentEditorBaseline = { id: res.asset.id, ...assetEditorBaseline(res.asset) };
+      editorConflictState = null;
+      editorDirty = false;
       renderAll();
-      notify(error.message || "The post could not be saved");
+      switchView(editorDestinationAfterSave(currentView, editorReturnView));
+      notify(res.merged ? "Saved alongside a teammate’s changes" : "Post updated");
+    } catch (error) {
+      if (error.status === 409 && error.conflicts) {
+        editorConflictState = {
+          asset: error.asset,
+          conflicts: error.conflicts,
+          changes: baseChanges,
+          forceFields: []
+        };
+        renderConflictPanel(host, editorConflictState, handleConflictResolution);
+        notify(error.message || "This asset changed while you were editing it.");
+      } else if (error.status === 404) {
+        posts = posts.filter(item => item.id !== post.id);
+        selected = null;
+        editorConflictState = null;
+        editorDirty = false;
+        renderAll();
+        switchView(editorDestinationAfterSave(currentView, editorReturnView));
+        notify("This asset was removed by a teammate.");
+      } else {
+        notify(error.message || "The post could not be saved");
+      }
     } finally {
       editorSaveInProgress = false;
+      if (saveButton) {
+        saveButton.disabled = false;
+        saveButton.textContent = "Save";
+      }
     }
   };
+
+  q("#saveEdit").onclick = submitAssetPatch;
   q("#deleteEdit").onclick = async () => {
     if (post.metaId) return notify("Instagram posts stay in the grid");
     const previousPosts = posts;
@@ -1092,28 +1350,76 @@ async function refreshCanvaPreview(post, button = $("#refreshCanva")) {
   }
   return post;
 }
+function renderCalendarYear(year) {
+  const months = Array.from({ length: 12 }, (_, index) => {
+    const key = year + "-" + String(index + 1).padStart(2, "0");
+    const items = calendarPosts().filter(post => post.date?.slice(0, 7) === key);
+    const dots = new Set(items.map(post => post.date));
+    return '<button class="year-month" type="button" data-year-month="' + key + '"><strong>' + new Date(year, index, 1).toLocaleDateString(undefined, { month: "long" }) + '</strong><span>' + items.length + ' ' + (items.length === 1 ? "post" : "posts") + '</span><div class="year-dots">' + (Array.from(dots).slice(0, 12).map(() => "<i></i>").join("") || "<em>No posts</em>") + "</div></button>";
+  }).join("");
+  $("#calendar").innerHTML = '<div class="calendar-year">' + months + "</div>";
+  $("#calendarAgenda").innerHTML = "";
+  $$("#calendar [data-year-month]").forEach(button => button.onclick = () => {
+    calendarView = "month";
+    calCursor = new Date(button.dataset.yearMonth + "-01T12:00:00");
+    renderCalendar();
+  });
+}
 function renderCalendar() {
   const year = calCursor.getFullYear(), month = calCursor.getMonth();
-  $("#monthLabel").textContent = calCursor.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-  const begin = new Date(year, month, 1 - new Date(year, month, 1).getDay());
+  const weekEnd = new Date(calCursor); weekEnd.setDate(calCursor.getDate() + 6);
+  $("#monthLabel").textContent = calendarView === "year" ? String(year) : calendarView === "week" ? calCursor.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " – " + weekEnd.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : calCursor.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  $$("#calendarViewSwitcher [data-calendar-view]").forEach(button => button.classList.toggle("active", button.dataset.calendarView === calendarView));
+  if (calendarView === "year") return renderCalendarYear(year);
+  const begin = calendarView === "week" ? new Date(calCursor.getFullYear(), calCursor.getMonth(), calCursor.getDate() - calCursor.getDay()) : new Date(year, month, 1 - new Date(year, month, 1).getDay());
   const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const calendarPostMarkup = (post, extraClass = "") => `<div class="cal-post ${extraClass}" data-workflow="${workflowOf(post)}" draggable="true" data-open="${post.id}" data-drag-post="${post.id}" role="button" tabindex="0" aria-label="Edit ${esc(post.notes || post.caption || post.type || "post")}"><img src="${esc(gridImageOf(post))}" alt=""><span>${esc((post.caption || post.notes || post.type || "Post").slice(0, 28))}<small>${esc(post.time || scheduleLabel(post))}</small></span></div>`;
   let html = names.map(name => `<div class="cal-head">${name}</div>`).join("");
-  for (let i = 0; i < 42; i++) {
+  for (let i = 0; i < (calendarView === "week" ? 7 : 42); i++) {
     const day = new Date(begin);
     day.setDate(begin.getDate() + i);
     const iso = day.toISOString().slice(0, 10);
-    const items = future().filter(post => post.date === iso);
-    html += `<div class="day ${day.getMonth() !== month ? "muted" : ""}" data-day="${iso}"><div class="day-num">${day.getDate()}</div>${items.map(post => `<div class="cal-post" data-workflow="${workflowOf(post)}" draggable="true" data-open="${post.id}" data-drag-post="${post.id}"><img src="${post.image}"><span>${esc((post.caption || post.notes || post.type || "Post").slice(0, 28))}<small>${esc(post.time || scheduleLabel(post))}</small></span></div>`).join("")}</div>`;
+    const items = calendarPosts().filter(post => post.date === iso).sort((a, b) => (a.time || "23:59").localeCompare(b.time || "23:59"));
+    html += `<div class="day ${day.getMonth() !== month ? "muted" : ""}" data-day="${iso}"><div class="day-num">${day.getDate()}</div>${items.slice(0, 3).map(post => calendarPostMarkup(post)).join("")}${items.length > 3 ? `${items.slice(3).map(post => calendarPostMarkup(post, "is-overflow")).join("")}<button class="calendar-more" type="button" data-calendar-more="${iso}">+${items.length - 3} more</button>` : ""}</div>`;
   }
   $("#calendar").innerHTML = html;
-  $$("[data-open]").forEach(node => node.onclick = () => {
-    if (Date.now() < suppressCalendarClickUntil) return;
-    openPost(node.dataset.open);
+  $$("#calendar .cal-post, #calendarAgenda .cal-post").forEach(node => {
+    const post = posts.find(item => item.id === node.dataset.open);
+    if (post?.status === "posted") {
+      node.classList.add("instagram-post", "instagram-badge");
+      node.dataset.instagram = "true";
+      node.draggable = false;
+    }
   });
-  $$("[data-drag-post]").forEach(node => node.ondragstart = event => { dragId = node.dataset.dragPost; event.stopPropagation(); });
+  const today = new Date();
+  const todayIso = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
+  $$("#calendar .day[data-day]").forEach(day => day.classList.toggle("is-today", day.dataset.day === todayIso));
+  const monthPosts = calendarPosts().filter(post => post.date && post.date.slice(0, 7) === `${year}-${String(month + 1).padStart(2, "0")}`).sort((a, b) => `${a.date} ${a.time || "23:59"}`.localeCompare(`${b.date} ${b.time || "23:59"}`));
+  const agendaPosts = calendarView === "week" ? calendarPosts().filter(post => post.date >= begin.toISOString().slice(0, 10) && post.date <= new Date(begin.getTime() + 6 * 86400000).toISOString().slice(0, 10)) : monthPosts;
+  const grouped = agendaPosts.reduce((groups, post) => { (groups[post.date] ||= []).push(post); return groups; }, {});
+  $("#calendarAgenda").innerHTML = Object.entries(grouped).map(([date, items]) => `<section class="agenda-day"><div class="agenda-date"><strong>${new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: "short" })}</strong><span>${new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span><small>${items.length} ${items.length === 1 ? "post" : "posts"}</small></div><div class="agenda-posts">${items.map(post => calendarPostMarkup(post)).join("")}</div></section>`).join("") || `<div class="empty">No planned posts this month.</div>`;
+  $("#calendarAgenda .cal-post").forEach(node => {
+    const post = posts.find(item => item.id === node.dataset.open);
+    if (post?.status === "posted") { node.classList.add("instagram-post", "instagram-badge"); node.dataset.instagram = "true"; node.draggable = false; }
+  });
+  $("#calendar").querySelectorAll("[data-open]").forEach(node => node.onclick = () => {
+    if (Date.now() < suppressCalendarClickUntil) return;
+    openPost(node.dataset.open, true);
+  });
+  $("#calendarAgenda").querySelectorAll("[data-open]").forEach(node => {
+    node.onclick = () => openPost(node.dataset.open, true);
+    node.onkeydown = event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openPost(node.dataset.open, true); } };
+  });
+  $$('[data-calendar-more]').forEach(button => button.onclick = event => {
+    event.stopPropagation();
+    const day = button.closest('.day');
+    const expanded = day.classList.toggle('is-expanded');
+    button.textContent = expanded ? 'Show less' : `+${day.querySelectorAll('.cal-post.is-overflow').length} more`;
+  });
+  $$("[data-drag-post]").forEach(node => node.ondragstart = event => { if (node.dataset.instagram === "true") return event.preventDefault(); dragId = node.dataset.dragPost; event.stopPropagation(); });
   $$("[data-drag-post]").forEach(node => {
     node.addEventListener("pointerdown", event => {
-      if (!event.isPrimary || event.pointerType === "mouse" || event.button !== 0) return;
+      if (!event.isPrimary || event.pointerType === "mouse" || event.button !== 0 || node.dataset.instagram === "true") return;
       calendarTouch = { id: node.dataset.dragPost, node, timer: setTimeout(() => {
         if (!calendarTouch || calendarTouch.node !== node) return;
         calendarTouch.active = true;
@@ -1163,7 +1469,7 @@ function renderLibrary() {
     return matchesFilter && (!query || searchable.includes(query));
   });
   $("#library").innerHTML = items.length
-    ? items.map(post => `<article class="library-card" data-open-editor="${post.id}"><div class="library-media">${assetMediaMarkup(post)}</div><div class="library-badges"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva" : "Uploaded"}</span>${workflowPill(workflowOf(post))}</div><div class="library-info"><b>${esc(post.notes || post.caption || "Untitled content")}</b><span>${esc(`${post.type} · ${formatSchedule(post)} · ${WORKFLOW_LABELS[workflowOf(post)]}${post.pillar ? ` · ${post.pillar}` : ""}`)}</span>${post.location ? `<small class="library-location">⌖ ${esc(post.location)}</small>` : ""}</div></article>`).join("")
+    ? items.map(post => `<article class="library-card" data-open-editor="${post.id}"><div class="library-media">${assetMediaMarkup(post)}<div class="library-badges">${workflowPill(workflowOf(post))}</div><div class="library-asset-badges">${libraryAssetBadges(post)}</div></div><div class="library-info"><b>${esc(post.notes || post.caption || "Untitled content")}</b><span>${esc(`${post.type} · ${formatSchedule(post)} · ${WORKFLOW_LABELS[workflowOf(post)]}${post.pillar ? ` · ${post.pillar}` : ""}`)}</span>${post.location ? `<small class="library-location">⌖ ${esc(post.location)}</small>` : ""}</div></article>`).join("")
     : `<div class="empty">No content in this view yet.</div>`;
   $$("[data-open-editor]").forEach(node => node.onclick = () => openPost(node.dataset.openEditor, true));
 }
@@ -1187,12 +1493,34 @@ function setLibrarySection(section) {
   if (librarySection === "ideas") renderScratch();
 }
 function renderApprovals() {
-  const columns = [["drafting", "Drafting"], ["needs-review", "Needs Review"], ["feedback", "Feedback"], ["approved", "Approved"], ["ready-meta", "Ready for Meta"], ["meta-scheduled", "Scheduled in Meta"]];
-  $("#approvalBoard").innerHTML = columns.map(([key, label]) => `<section class="approval-col" data-workflow="${key}"><h4>${label}</h4>${future().filter(post => workflowOf(post) === key).map(post => `<article class="approval-card" data-open="${post.id}"><img src="${post.image}">${workflowPill(key)}<b>${esc(post.notes || post.caption || post.type)}</b><span>${esc(formatSchedule(post))}</span></article>`).join("") || `<div class="empty">Nothing here.</div>`}</section>`).join("");
-  $$("[data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open));
+  const host = $("#approvalPanel");
+  if (!host) return;
+  const sections = approvalSections(future());
+  if (approvalDetail) {
+    const section = sections.find(item => item.key === approvalDetail);
+    if (!section) { approvalDetail = null; return renderApprovals(); }
+    host.innerHTML = `<div class="approval-detail-head"><div><p class="eyebrow">APPROVAL QUEUE</p><h3>${esc(section.label)}</h3><p>Review every item in this section.</p></div><button id="backToApprovals" class="ghost" type="button">← All approvals</button></div><div class="approval-detail-list">${section.posts.map(post => `<button class="approval-card" data-open="${post.id}" type="button"><img src="${esc(post.image)}" alt=""><span>${workflowPill(section.key)}<b>${esc(post.notes || post.caption || post.type)}</b><small>${esc(formatSchedule(post))}</small></span></button>`).join("") || `<div class="empty">Nothing here.</div>`}</div>`;
+    $("#backToApprovals").onclick = () => { approvalDetail = null; renderTasks(); };
+    $$("#approvalPanel [data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open, true));
+    return;
+  }
+  host.innerHTML = `<div class="approval-intro"><div><p class="eyebrow">REVIEW QUEUE</p><h3>Approvals</h3><p>Keep every stage of review visible without stacking the queue.</p></div></div><div class="approval-board">${sections.map(section => {
+    const post = section.posts[0];
+    return `<section class="approval-col" data-workflow="${section.key}"><h4>${esc(section.label)}</h4>${post ? `<button class="approval-summary" data-approval-section="${section.key}" type="button"><img src="${esc(post.image)}" alt=""><span>${workflowPill(section.key)}<b>${esc(post.notes || post.caption || post.type)}</b><small>${esc(formatSchedule(post))}</small></span>${section.remaining ? `<strong class="approval-more">+${section.remaining}</strong>` : ""}</button>` : `<div class="empty">Nothing here.</div>`}</section>`;
+  }).join("")}</div>`;
+  $$("#approvalPanel [data-approval-section]").forEach(node => node.onclick = () => {
+    const section = sections.find(item => item.key === node.dataset.approvalSection);
+    if (section.count > 1) { approvalDetail = section.key; renderApprovals(); }
+    else if (section.posts[0]) openPost(section.posts[0].id, true);
+  });
 }
 function openPost(id, openEditor = false) {
   selected = id;
+  const post = posts.find(item => item.id === id);
+  if (post) {
+    currentEditorBaseline = { id: post.id, ...assetEditorBaseline(post) };
+    editorConflictState = null;
+  }
   if (openEditor) {
     editorDirty = false;
     editorReturnView = currentView;
@@ -1206,6 +1534,7 @@ function openPost(id, openEditor = false) {
 }
 function switchView(name) {
   currentView = name;
+  syncTopActions(name);
   $$(".view").forEach(view => view.classList.add("hidden"));
   $(`#view-${name}`).classList.remove("hidden");
   $$(".nav").forEach(nav => nav.classList.toggle("active", nav.dataset.view === name));
@@ -1218,6 +1547,26 @@ function switchView(name) {
   if (name === "library") { setLibrarySection(librarySection); renderLibrary(); }
   if (name === "grid") renderInspector();
   if (name === "editor") renderInspector("#postEditor");
+  closeMobileMenu();
+}
+function closeMobileMenu() {
+  document.body.classList.remove("mobile-menu-open");
+  const button = $("#mobileMenuBtn");
+  const backdrop = $("#mobileMenuBackdrop");
+  button?.setAttribute("aria-expanded", "false");
+  button?.setAttribute("aria-label", "Open navigation menu");
+  backdrop?.classList.add("hidden");
+  backdrop?.setAttribute("aria-hidden", "true");
+}
+function toggleMobileMenu() {
+  const open = !document.body.classList.contains("mobile-menu-open");
+  document.body.classList.toggle("mobile-menu-open", open);
+  const button = $("#mobileMenuBtn");
+  const backdrop = $("#mobileMenuBackdrop");
+  button?.setAttribute("aria-expanded", String(open));
+  button?.setAttribute("aria-label", open ? "Close navigation menu" : "Open navigation menu");
+  backdrop?.classList.toggle("hidden", !open);
+  backdrop?.setAttribute("aria-hidden", String(!open));
 }
 async function readFile(file) {
   return new Promise((resolve, reject) => {
@@ -1359,13 +1708,21 @@ $("#importInput").onchange = async event => {
   event.target.value = "";
 };
 $$(".nav").forEach(nav => nav.onclick = () => switchView(nav.dataset.view));
-$("#myTasksTab").onclick = () => { taskTab = "mine"; renderTasks(); };
-$("#teamTasksTab").onclick = () => { taskTab = "team"; renderTasks(); };
-$("#activityTab").onclick = () => { taskTab = "activity"; renderTasks(); renderActivity(); };
+$("#mobileMenuBtn").onclick = toggleMobileMenu;
+$("#mobileMenuBackdrop").onclick = closeMobileMenu;
+document.addEventListener("keydown", event => { if (event.key === "Escape") closeMobileMenu(); });
+$("#myTasksTab").onclick = () => { taskTab = "mine"; approvalDetail = null; renderTasks(); };
+$("#teamTasksTab").onclick = () => { taskTab = "team"; approvalDetail = null; renderTasks(); };
+$("#approvalsTab").onclick = () => { taskTab = "approvals"; approvalDetail = null; renderTasks(); };
+$("#activityTab").onclick = () => { taskTab = "activity"; approvalDetail = null; renderTasks(); renderActivity(); };
 $("#taskSort").onchange = () => renderTasks();
 $("#activityFilters").onchange = () => { activityFilters = $$("#activityFilters input:checked").map(input => input.value); saveActivityFilters(currentUser, activityFilters); renderActivity(); };
-$("#prevMonth").onclick = () => { calCursor.setMonth(calCursor.getMonth() - 1); renderCalendar(); };
-$("#nextMonth").onclick = () => { calCursor.setMonth(calCursor.getMonth() + 1); renderCalendar(); };
+$("#prevMonth").onclick = () => { if (calendarView === "week") calCursor.setDate(calCursor.getDate() - 7); else if (calendarView === "year") calCursor.setFullYear(calCursor.getFullYear() - 1); else calCursor.setMonth(calCursor.getMonth() - 1); renderCalendar(); };
+$("#todayMonth").onclick = () => { const today = new Date(); calCursor = new Date(today.getFullYear(), today.getMonth(), calendarView === "week" ? today.getDate() : 1); renderCalendar(); };
+$("#nextMonth").onclick = () => { if (calendarView === "week") calCursor.setDate(calCursor.getDate() + 7); else if (calendarView === "year") calCursor.setFullYear(calCursor.getFullYear() + 1); else calCursor.setMonth(calCursor.getMonth() + 1); renderCalendar(); };
+$$("[data-calendar-view]").forEach(button => button.onclick = () => { calendarView = button.dataset.calendarView; renderCalendar(); });
+$("#calendarInstagramToggle").checked = calendarShowInstagram;
+$("#calendarInstagramToggle").onchange = event => { calendarShowInstagram = event.target.checked; saveCalendarInstagramPreference(currentUser, calendarShowInstagram); renderCalendar(); };
 $$(".chip").forEach(chip => chip.onclick = () => {
   libraryFilter = chip.dataset.filter;
   $$(".chip").forEach(item => item.classList.toggle("active", item === chip));
@@ -1452,8 +1809,6 @@ setInterval(heartbeat, 20000);
 window.addEventListener("focus", () => { refreshSharedPlanner(); checkInstagram(); });
 
 $("#modalSync").onclick = syncInstagram;
-$("#settingsBtn").onclick = () => { $("#settingsModal").classList.remove("hidden"); renderSettings(); };
-$("#settingsBtn").onclick = () => switchView("settings");
 $("#saveSettings").onclick = async () => {
   const pillars = $("#settingsPillars").value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
   const goals = $("#settingsGoals").value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
