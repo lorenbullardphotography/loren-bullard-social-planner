@@ -444,7 +444,25 @@ function normalizeComment(comment) {
   };
 }
 
-function normalizePost(post) {
+export const ASSET_EDITABLE_FIELDS = new Set([
+  "type", "workflow", "status", "approval", "assignee", "priority", "pillar",
+  "date", "scheduleState", "caption", "notes", "audio", "hashtags", "tagNotes",
+  "altText", "location", "locationTag", "cropZoom", "cropX", "cropY"
+]);
+
+function sanitizeFieldMap(map, sanitizeVal) {
+  if (!map || typeof map !== "object" || Array.isArray(map)) return {};
+  const out = {};
+  for (const field of ASSET_EDITABLE_FIELDS) {
+    if (Object.hasOwn(map, field)) {
+      const cleaned = sanitizeVal(map[field]);
+      if (cleaned !== undefined) out[field] = cleaned;
+    }
+  }
+  return out;
+}
+
+export function normalizePost(post) {
   const workflowValues = ["idea", "drafting", "needs-assets", "needs-caption", "needs-review", "feedback", "approved", "ready-meta", "meta-scheduled", "published", "archived"];
   const workflow = workflowValues.includes(post?.workflow)
     ? post.workflow
@@ -459,6 +477,14 @@ function normalizePost(post) {
           : post?.status === "draft" ? "drafting" : "idea";
   const images = Array.isArray(post?.images) ? post.images.map(image => String(image || "").slice(0, 2000)).filter(Boolean).slice(0, 100) : [];
   const image = String(post?.image || images[0] || "").slice(0, 2000);
+  const revision = Math.max(1, Number(post?.revision) || 1);
+  const fieldUpdatedRevision = sanitizeFieldMap(post?.fieldUpdatedRevision, v => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  });
+  const fieldUpdatedAt = sanitizeFieldMap(post?.fieldUpdatedAt, v => (v ? String(v) : undefined));
+  const fieldUpdatedBy = sanitizeFieldMap(post?.fieldUpdatedBy, v => (v ? String(v).slice(0, 80) : undefined));
+
   return {
     id: String(post?.id || crypto.randomUUID()),
     metaId: post?.metaId ? String(post.metaId) : "",
@@ -514,9 +540,74 @@ function normalizePost(post) {
     comments: Array.isArray(post?.comments) ? post.comments.map(normalizeComment) : [],
     timestamp: String(post?.timestamp || ""),
     permalink: String(post?.permalink || ""),
+    revision,
+    fieldUpdatedRevision,
+    fieldUpdatedAt,
+    fieldUpdatedBy,
     updatedBy: String(post?.updatedBy || ""),
     updatedAt: post?.updatedAt || new Date().toISOString()
   };
+}
+
+export function normalizeAssetChanges(changes = {}) {
+  const candidate = normalizePost({ id: "candidate", image: "/placeholder.jpg", ...changes });
+  return Object.fromEntries([...ASSET_EDITABLE_FIELDS]
+    .filter(field => Object.hasOwn(changes, field))
+    .map(field => [field, candidate[field]]));
+}
+
+export function applyAssetChanges(post, changes = {}, actor = {}, now = new Date().toISOString()) {
+  const normalizedChanges = normalizeAssetChanges(changes);
+  const normalizedPost = normalizePost(post);
+  const changedFields = Object.keys(normalizedChanges);
+  if (!changedFields.length) return normalizedPost;
+
+  const nextRevision = normalizedPost.revision + 1;
+  const nextFieldUpdatedRevision = { ...normalizedPost.fieldUpdatedRevision };
+  const nextFieldUpdatedAt = { ...normalizedPost.fieldUpdatedAt };
+  const nextFieldUpdatedBy = { ...normalizedPost.fieldUpdatedBy };
+  const actorName = String(actor?.name || "").slice(0, 80);
+
+  for (const field of changedFields) {
+    nextFieldUpdatedRevision[field] = nextRevision;
+    nextFieldUpdatedAt[field] = now;
+    if (actorName) {
+      nextFieldUpdatedBy[field] = actorName;
+    } else {
+      delete nextFieldUpdatedBy[field];
+    }
+  }
+
+  return normalizePost({
+    ...normalizedPost,
+    ...normalizedChanges,
+    revision: nextRevision,
+    fieldUpdatedRevision: nextFieldUpdatedRevision,
+    fieldUpdatedAt: nextFieldUpdatedAt,
+    fieldUpdatedBy: nextFieldUpdatedBy,
+    updatedBy: actorName || normalizedPost.updatedBy,
+    updatedAt: now
+  });
+}
+
+export function assetConflicts(post, submittedRevision, changes = {}) {
+  const normalizedChanges = normalizeAssetChanges(changes);
+  const normalizedPost = normalizePost(post);
+  const subRev = Number(submittedRevision) || 1;
+  const conflicts = {};
+
+  for (const field of Object.keys(normalizedChanges)) {
+    const fieldRev = normalizedPost.fieldUpdatedRevision[field] || 1;
+    if (fieldRev > subRev) {
+      conflicts[field] = {
+        currentValue: normalizedPost[field],
+        updatedBy: normalizedPost.fieldUpdatedBy[field] || normalizedPost.updatedBy || "",
+        updatedAt: normalizedPost.fieldUpdatedAt[field] || normalizedPost.updatedAt || ""
+      };
+    }
+  }
+
+  return conflicts;
 }
 function normalizeScratchEntry(entry) {
   const status = entry?.status === "archived" ? "archived" : "active";
