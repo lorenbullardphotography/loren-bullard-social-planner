@@ -41,10 +41,10 @@ const AUTH_SECRET = process.env.AUTH_SECRET || PLANNER_PASSWORD || "planner-deve
 const ASSET_STORAGE_LIMIT_MB = Math.max(50, Number(process.env.ASSET_STORAGE_LIMIT_MB) || 500);
 const ACCOUNT_SESSION_DAYS = 14;
 
-const ROLE_VALUES = ["Photographer", "Social Media Manager", "Assistant", "Editor"];
+const ROLE_VALUES = ["Admin", "Photographer", "Social Media Manager", "Assistant", "Editor"];
 const DEFAULT_ACCOUNTS = [
-  { name: "Loren", role: "Photographer" },
-  { name: "Brooke", role: "Social Media Manager" }
+  { name: "Loren", role: "Admin" },
+  { name: "Brooke", role: "Admin" }
 ];
 function publicUser(user) {
   return user ? { id: user.id, name: user.name, role: user.role } : null;
@@ -683,7 +683,7 @@ async function readPlanner() {
 function upsertTeamMember(planner, actor = {}) {
   if (!actor?.name) return;
   const name = String(actor.name).slice(0, 80);
-  const role = String(actor.role || "Teammate").slice(0, 40);
+  const role = String(actor.role || "Admin").slice(0, 40);
   const existing = planner.team.find(member => member.name.toLowerCase() === name.toLowerCase());
   if (existing) {
     existing.role = role;
@@ -723,7 +723,7 @@ async function writePresence(actor = {}) {
   const current = stored && typeof stored === "object" ? stored : {};
   const key = String(actor.name).trim().toLowerCase();
   if (!key) return readPresence();
-  current[key] = { name: String(actor.name).slice(0, 80), role: String(actor.role || "Teammate").slice(0, 40), lastSeenAt: new Date().toISOString() };
+  current[key] = { name: String(actor.name).slice(0, 80), role: String(actor.role || "Admin").slice(0, 40), lastSeenAt: new Date().toISOString() };
   const cutoff = Date.now() - 1000 * 60 * 60;
   for (const [name, person] of Object.entries(current)) {
     if (Date.parse(person.lastSeenAt || "") <= cutoff) delete current[name];
@@ -784,7 +784,7 @@ export async function handleRequest(req, res) {
       // Keep existing deployments working: the old shared password can create
       // the first Loren account, after which all sign-ins use named accounts.
       if (!user && !users.length && PLANNER_PASSWORD && passwordsMatch(body.password) && (!login || login === "loren")) {
-        user = { id: crypto.randomUUID(), name: "Loren", role: "Photographer", passwordHash: hashPassword(body.password), createdAt: new Date().toISOString() };
+        user = { id: crypto.randomUUID(), name: "Loren", role: "Admin", passwordHash: hashPassword(body.password), createdAt: new Date().toISOString() };
         await writeUsers([user]);
         valid = true;
       }
@@ -816,6 +816,101 @@ export async function handleRequest(req, res) {
       if (password) account.passwordHash = hashPassword(password);
       await writeUsers(users);
       return sendJson(res, 200, {user: publicUser(account)});
+    }
+
+    if (url.pathname === "/api/team/members" && req.method === "GET") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      return sendJson(res, 200, { members: users.map(publicUser) });
+    }
+
+    if (url.pathname === "/api/team/members" && req.method === "POST") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      const body = await readBody(req);
+      const name = String(body.name || "").trim().slice(0, 80);
+      const role = ROLE_VALUES.includes(body.role) ? body.role : "Admin";
+      const password = String(body.password || "");
+      if (name.length < 2) return sendJson(res, 400, { error: "Enter a display name with at least 2 characters." });
+      if (!password || password.length < 8) return sendJson(res, 400, { error: "Password must have at least 8 characters." });
+      if (users.some(item => item.name.toLowerCase() === name.toLowerCase())) {
+        return sendJson(res, 409, { error: "A team member with that name already exists." });
+      }
+      const newUser = {
+        id: crypto.randomUUID(),
+        name,
+        role,
+        passwordHash: hashPassword(password),
+        createdAt: new Date().toISOString()
+      };
+      users.push(newUser);
+      await writeUsers(users);
+
+      const planner = await readPlanner();
+      upsertTeamMember(planner, newUser);
+      addActivity(planner, `${account.name} added ${name} (${role}) to the team`);
+      await writePlanner(planner);
+
+      return sendJson(res, 201, { ok: true, member: publicUser(newUser) });
+    }
+
+    if (url.pathname.startsWith("/api/team/members/") && req.method === "PUT") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      const memberId = url.pathname.slice("/api/team/members/".length);
+      const targetUser = users.find(item => item.id === memberId);
+      if (!targetUser) return sendJson(res, 404, { error: "Team member not found." });
+
+      const body = await readBody(req);
+      const name = String(body.name || "").trim().slice(0, 80);
+      const role = ROLE_VALUES.includes(body.role) ? body.role : targetUser.role;
+      const password = String(body.password || "");
+
+      if (name.length < 2) return sendJson(res, 400, { error: "Enter a display name with at least 2 characters." });
+      if (password && password.length < 8) return sendJson(res, 400, { error: "New password must have at least 8 characters." });
+      if (users.some(item => item.id !== memberId && item.name.toLowerCase() === name.toLowerCase())) {
+        return sendJson(res, 409, { error: "That display name is already in use by another team member." });
+      }
+
+      const oldName = targetUser.name;
+      targetUser.name = name;
+      targetUser.role = role;
+      if (password) targetUser.passwordHash = hashPassword(password);
+      await writeUsers(users);
+
+      const planner = await readPlanner();
+      const existingTeamIdx = planner.team.findIndex(m => m.name.toLowerCase() === oldName.toLowerCase());
+      if (existingTeamIdx >= 0) {
+        planner.team[existingTeamIdx] = { name, role, lastSeenAt: planner.team[existingTeamIdx].lastSeenAt || new Date().toISOString() };
+      } else {
+        upsertTeamMember(planner, targetUser);
+      }
+      addActivity(planner, `${account.name} updated team member ${name}`);
+      await writePlanner(planner);
+
+      return sendJson(res, 200, { ok: true, member: publicUser(targetUser) });
+    }
+
+    if (url.pathname.startsWith("/api/team/members/") && req.method === "DELETE") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      const memberId = url.pathname.slice("/api/team/members/".length);
+      const targetUser = users.find(item => item.id === memberId);
+      if (!targetUser) return sendJson(res, 404, { error: "Team member not found." });
+
+      if (targetUser.id === account.id) {
+        return sendJson(res, 400, { error: "You cannot remove your own active account from settings." });
+      }
+      const adminCount = users.filter(item => item.role === "Admin").length;
+      if (targetUser.role === "Admin" && adminCount <= 1) {
+        return sendJson(res, 400, { error: "Cannot remove the last remaining Admin account." });
+      }
+
+      users = users.filter(item => item.id !== memberId);
+      await writeUsers(users);
+
+      const planner = await readPlanner();
+      planner.team = planner.team.filter(m => m.name.toLowerCase() !== targetUser.name.toLowerCase());
+      addActivity(planner, `${account.name} removed ${targetUser.name} from the team`);
+      await writePlanner(planner);
+
+      return sendJson(res, 200, { ok: true, memberId });
     }
     if (!account) {
       if (url.pathname.startsWith("/api/")) return sendJson(res, 401, {error: "Please sign in to the planner."});

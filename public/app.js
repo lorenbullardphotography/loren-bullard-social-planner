@@ -36,9 +36,9 @@ async function loadAccount() {
 function loadUser() {
   try {
     const saved = JSON.parse(localStorage.getItem(USER_KEY));
-    if (saved?.name) return { name: saved.name, role: saved.role || "Photographer" };
+    if (saved?.name) return { name: saved.name, role: saved.role || "Admin" };
   } catch {}
-  return { name: "Loren", role: "Photographer" };
+  return { name: "Loren", role: "Admin" };
 }
 function saveUser() {
   localStorage.setItem(USER_KEY, JSON.stringify(currentUser));
@@ -744,6 +744,88 @@ function renderPlannerSettings() {
   $("#accountSettingsRole").value = currentUser.role;
   refreshStorageUsage();
   refreshCanvaStatus();
+  loadTeamMembers().then(renderTeamSettings);
+}
+let teamMembers = [];
+async function loadTeamMembers() {
+  try {
+    const data = await api("/api/team/members");
+    teamMembers = Array.isArray(data.members) ? data.members : [];
+  } catch {
+    teamMembers = [];
+  }
+}
+function renderTeamSettings() {
+  const host = $("#teamMemberList");
+  if (!host) return;
+  if (!teamMembers.length) {
+    host.innerHTML = '<div class="empty">No team members loaded.</div>';
+    return;
+  }
+  host.innerHTML = teamMembers.map(member => {
+    const isCurrent = currentUser && (member.id === currentUser.id || member.name.toLowerCase() === currentUser.name.toLowerCase());
+    return `
+      <div class="team-member-card" data-member-id="${esc(member.id)}">
+        <div class="team-member-info">
+          <span class="person-avatar">${esc(personInitials(member.name))}</span>
+          <div class="team-member-meta">
+            <b>${esc(member.name)} ${isCurrent ? '<span class="team-member-you">(You)</span>' : ''}</b>
+            <small><span class="team-member-badge">${esc(member.role || "Admin")}</span></small>
+          </div>
+        </div>
+        <div class="team-member-actions">
+          <button type="button" class="ghost edit-member-btn" data-id="${esc(member.id)}" data-name="${esc(member.name)}" data-role="${esc(member.role || "Admin")}">Edit</button>
+          ${!isCurrent ? `<button type="button" class="danger delete-member-btn" data-id="${esc(member.id)}" data-name="${esc(member.name)}">Remove</button>` : ''}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  host.querySelectorAll(".edit-member-btn").forEach(btn => {
+    btn.onclick = () => openTeamMemberModal({
+      id: btn.dataset.id,
+      name: btn.dataset.name,
+      role: btn.dataset.role
+    });
+  });
+
+  host.querySelectorAll(".delete-member-btn").forEach(btn => {
+    btn.onclick = async () => {
+      const id = btn.dataset.id;
+      const name = btn.dataset.name;
+      if (!confirm(`Are you sure you want to remove ${name} from the team?`)) return;
+      try {
+        await api(`/api/team/members/${encodeURIComponent(id)}`, { method: "DELETE" });
+        notify(`Removed ${name} from the team`);
+        await loadPlanner();
+        await loadTeamMembers();
+        renderTeamSettings();
+        renderAll();
+      } catch (error) {
+        notify(error.message);
+      }
+    };
+  });
+}
+function openTeamMemberModal(member = null) {
+  const modal = $("#teamMemberModal");
+  if (!modal) return;
+  const isEdit = Boolean(member && member.id);
+  $("#teamMemberId").value = isEdit ? member.id : "";
+  $("#teamMemberName").value = isEdit ? member.name : "";
+  $("#teamMemberRole").value = isEdit ? (member.role || "Admin") : "Admin";
+  $("#teamMemberPassword").value = "";
+  $("#teamMemberModalTitle").textContent = isEdit ? "Edit team member" : "Add team member";
+  $("#teamMemberModalEyebrow").textContent = isEdit ? "EDIT PROFILE" : "NEW PROFILE";
+  $("#teamMemberPasswordField").querySelector("input").placeholder = isEdit ? "Leave blank to keep password" : "Minimum 8 characters";
+  $("#teamMemberError").classList.add("hidden");
+  $("#teamMemberError").textContent = "";
+  modal.classList.remove("hidden");
+  $("#teamMemberName").focus();
+}
+function closeTeamMemberModal() {
+  const modal = $("#teamMemberModal");
+  if (modal) modal.classList.add("hidden");
 }
 async function refreshCanvaStatus() {
   const host = $("#canvaConnection");
@@ -2152,6 +2234,64 @@ $("#saveAccountSettings").onclick = async () => {
 $("#accountLogoutBtn").onclick = async () => {
   await fetch("/auth/logout", { method: "POST" });
   location.href = "/login.html";
+};
+
+$("#addTeamMemberBtn").onclick = () => openTeamMemberModal();
+$("#closeTeamMemberModal").onclick = closeTeamMemberModal;
+$("#cancelTeamMemberBtn").onclick = closeTeamMemberModal;
+$("#teamMemberModal").onclick = event => { if (event.target.id === "teamMemberModal") closeTeamMemberModal(); };
+$("#saveTeamMemberBtn").onclick = async () => {
+  const id = $("#teamMemberId").value;
+  const name = $("#teamMemberName").value.trim();
+  const role = $("#teamMemberRole").value;
+  const password = $("#teamMemberPassword").value;
+  const errorEl = $("#teamMemberError");
+  errorEl.classList.add("hidden");
+
+  if (name.length < 2) {
+    errorEl.textContent = "Please enter a display name (at least 2 characters).";
+    errorEl.classList.remove("hidden");
+    return;
+  }
+  if (!id && (!password || password.length < 8)) {
+    errorEl.textContent = "Password must be at least 8 characters.";
+    errorEl.classList.remove("hidden");
+    return;
+  }
+  if (id && password && password.length < 8) {
+    errorEl.textContent = "New password must be at least 8 characters.";
+    errorEl.classList.remove("hidden");
+    return;
+  }
+
+  try {
+    const isEdit = Boolean(id);
+    const url = isEdit ? `/api/team/members/${encodeURIComponent(id)}` : "/api/team/members";
+    const method = isEdit ? "PUT" : "POST";
+    const body = { name, role };
+    if (password) body.password = password;
+
+    await api(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+
+    closeTeamMemberModal();
+    notify(isEdit ? `Updated ${name}` : `Added ${name} to the team`);
+    if (isEdit && currentUser && currentUser.id === id) {
+      currentUser.name = name;
+      currentUser.role = role;
+      saveUser();
+    }
+    await loadPlanner();
+    await loadTeamMembers();
+    renderTeamSettings();
+    renderAll();
+  } catch (error) {
+    errorEl.textContent = error.message;
+    errorEl.classList.remove("hidden");
+  }
 };
 
 const query = new URLSearchParams(location.search);

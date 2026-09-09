@@ -152,7 +152,18 @@
         <section class="settings-card"><p class="eyebrow">CANVA DRAFTS</p><h4>Working design previews</h4><p class="settings-help">Helpers can paste Canva links. Connect Canva to let the planner refresh image previews automatically.</p><div id="canvaConnection" class="connection-card">Checking Canva…</div><div class="modal-actions"><a id="canvaConnectLink" href="/auth/canva" class="primary button-link">Connect Canva</a></div></section>
         <section class="settings-card"><p class="eyebrow">ASSET STORAGE</p><h4>Space available</h4><p class="settings-help">Uploaded images and reels use your connected Vercel Blob store.</p><div id="storageUsage" class="storage-usage">Checking storage…</div></section>
         <section class="settings-card"><p class="eyebrow">PLANNER BACKUP</p><h4>Export or import</h4><p class="settings-help">Save a copy of your planner or restore one when moving between devices.</p><div class="modal-actions"><button id="exportBtn" class="ghost">↓ Export backup</button><label class="ghost button-link">↑ Import backup<input id="importInput" type="file" accept="application/json,.json" hidden></label></div></section>
-        <section class="settings-card account-settings"><p class="eyebrow">YOUR ACCOUNT</p><h4>User settings</h4><p class="settings-help">Choose the name and role your teammates will see in comments, activity, and assignments.</p><div class="two"><label class="field">Display name<input id="accountSettingsName" maxlength="80" placeholder="Loren"></label><label class="field">Role<select id="accountSettingsRole"><option>Photographer</option><option>Social Media Manager</option><option>Assistant</option><option>Editor</option></select></label></div><label class="field account-setting-field">New password<input id="accountSettingsPassword" type="password" autocomplete="new-password" placeholder="Leave blank to keep current password"></label><div class="modal-actions account-actions"><button id="saveAccountSettings" class="primary">Save user settings</button><button id="accountLogoutBtn" class="danger">Sign out</button></div></section>
+        <section class="settings-card team-settings">
+          <div class="team-settings-head">
+            <div>
+              <p class="eyebrow">TEAM MANAGEMENT</p>
+              <h4>Team members</h4>
+              <p class="settings-help">Manage user profiles, assign roles, and grant access to your studio planner.</p>
+            </div>
+            <button id="addTeamMemberBtn" class="primary" type="button">+ Add team member</button>
+          </div>
+          <div id="teamMemberList" class="team-member-list"></div>
+        </section>
+        <section class="settings-card account-settings"><p class="eyebrow">YOUR ACCOUNT</p><h4>User settings</h4><p class="settings-help">Choose the name and role your teammates will see in comments, activity, and assignments.</p><div class="two"><label class="field">Display name<input id="accountSettingsName" maxlength="80" placeholder="Loren"></label><label class="field">Role<select id="accountSettingsRole"><option>Admin</option><option>Photographer</option><option>Social Media Manager</option><option>Assistant</option><option>Editor</option></select></label></div><label class="field account-setting-field">New password<input id="accountSettingsPassword" type="password" autocomplete="new-password" placeholder="Leave blank to keep current password"></label><div class="modal-actions account-actions"><button id="saveAccountSettings" class="primary">Save user settings</button><button id="accountLogoutBtn" class="danger">Sign out</button></div></section>
       </div>
     </section>
   </main>
@@ -179,12 +190,29 @@
     <p class="eyebrow">TEAM PROFILE</p>
     <h3>Your planner identity</h3>
     <label class="field">Display name<input id="identityName" maxlength="80" placeholder="Loren"></label>
-    <label class="field">Role<select id="identityRole"><option>Photographer</option><option>Social Media Manager</option><option>Assistant</option><option>Editor</option></select></label>
+    <label class="field">Role<select id="identityRole"><option>Admin</option><option>Photographer</option><option>Social Media Manager</option><option>Assistant</option><option>Editor</option></select></label>
     <div class="modal-actions">
       <button id="saveIdentity" class="primary">Save identity</button>
       <button id="logoutBtn" class="danger">Sign out</button>
     </div>
     <p class="fine">Your account is shared across browsers. Comments and activity updates use this name so the shared planner stays clear for everyone.</p>
+  </div>
+</div>
+
+<div id="teamMemberModal" class="modal-backdrop hidden">
+  <div class="modal">
+    <button id="closeTeamMemberModal" class="modal-x" type="button">×</button>
+    <p class="eyebrow" id="teamMemberModalEyebrow">TEAM MEMBER</p>
+    <h3 id="teamMemberModalTitle">Add team member</h3>
+    <input id="teamMemberId" type="hidden" value="">
+    <label class="field">Display name<input id="teamMemberName" maxlength="80" placeholder="e.g. David" required></label>
+    <label class="field">Role<select id="teamMemberRole"><option>Admin</option><option>Photographer</option><option>Social Media Manager</option><option>Assistant</option><option>Editor</option></select></label>
+    <label class="field" id="teamMemberPasswordField">Password<input id="teamMemberPassword" type="password" autocomplete="new-password" placeholder="Minimum 8 characters"></label>
+    <div id="teamMemberError" class="error hidden" role="alert"></div>
+    <div class="modal-actions">
+      <button id="saveTeamMemberBtn" class="primary" type="button">Save member</button>
+      <button id="cancelTeamMemberBtn" class="ghost" type="button">Cancel</button>
+    </div>
   </div>
 </div>
 
