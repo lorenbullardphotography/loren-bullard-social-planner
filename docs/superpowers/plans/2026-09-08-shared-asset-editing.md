@@ -4,7 +4,7 @@
 
 **Goal:** Replace planner-wide asset saves with asset-level, revision-aware updates that merge different-field edits and surface same-field conflicts.
 
-**Architecture:** The server continues storing a planner document, but adds a revision and per-field change metadata to each post. A new `PATCH /api/assets/:id` route validates and applies only submitted asset fields. The browser stores an editor baseline, sends only changed fields, replaces only the returned asset, and renders an inline conflict choice only for fields that changed in both sessions.
+**Architecture:** The server continues storing a planner document, but adds an asset revision plus per-field revision metadata to each post. A new `PATCH /api/assets/:id` route validates and applies only submitted asset fields. The browser stores an editor baseline, sends only changed fields, replaces only the returned asset, and renders an inline conflict choice only for fields that changed after that baseline revision.
 
 **Tech Stack:** Node.js HTTP server, JSON persistence through `lib/store.mjs`, vanilla browser JavaScript, Node’s built-in test runner.
 
@@ -47,6 +47,7 @@ test("records metadata only for fields that changed", () => {
   );
   assert.equal(updated.revision, 4);
   assert.equal(updated.caption, "After");
+  assert.equal(updated.fieldUpdatedRevision.caption, 4);
   assert.equal(updated.fieldUpdatedBy.caption, "Loren");
   assert.equal(updated.fieldUpdatedAt.caption, "2026-09-08T20:00:00.000Z");
 });
@@ -77,7 +78,7 @@ export function normalizeAssetChanges(changes = {}) {
 }
 ```
 
-Extend `normalizePost` to return `revision: Math.max(1, Number(post?.revision) || 1)` plus sanitized `fieldUpdatedAt` and `fieldUpdatedBy` objects limited to `ASSET_EDITABLE_FIELDS`. Implement `applyAssetChanges` to copy only normalized changed fields, add actor/timestamp metadata for each changed field, increment revision once, and update `updatedBy`/`updatedAt`.
+Extend `normalizePost` to return `revision: Math.max(1, Number(post?.revision) || 1)` plus sanitized `fieldUpdatedRevision`, `fieldUpdatedAt`, and `fieldUpdatedBy` objects limited to `ASSET_EDITABLE_FIELDS`. Implement `applyAssetChanges` to copy only normalized changed fields, increment the asset revision once, record that new revision plus actor/timestamp metadata for each changed field, and update `updatedBy`/`updatedAt`.
 
 - [ ] **Step 4: Run the revision tests to confirm they pass**
 
@@ -143,7 +144,7 @@ const changes = normalizeAssetChanges(body.changes);
 if (!Object.keys(changes).length) return sendJson(res, 400, { error: "Choose at least one asset field to update." });
 ```
 
-Compare `body.revision` to `post.revision`. For a stale request, create `conflicts` from fields whose `fieldUpdatedAt[field]` is newer than the stored timestamp associated with the submitted revision. Return `409` unless every conflicted field is included in `forceFields`. Otherwise call `applyAssetChanges`, replace only the matching post in `planner.posts`, add one activity entry, write the planner, and return the normalized saved asset with `merged: submittedRevision !== post.revision`.
+Compare `body.revision` to `post.revision`. For a stale request, create `conflicts` from fields whose `fieldUpdatedRevision[field] > body.revision`. Return `409` unless every conflicted field is included in `forceFields`. Otherwise call `applyAssetChanges`, replace only the matching post in `planner.posts`, add one activity entry, write the planner, and return the normalized saved asset with `merged: submittedRevision !== post.revision`.
 
 - [ ] **Step 4: Run endpoint tests to confirm they pass**
 
@@ -325,4 +326,4 @@ Expected: the deployed bundle includes the asset patch and conflict-resolution l
 
 - Spec coverage: Tasks 1–2 implement revisions, field metadata, automatic merges, same-field conflicts, and forced field resolution. Tasks 3–4 implement minimal browser patches, asset replacement, conflict UI, and dirty-editor preservation. Task 5 verifies production delivery.
 - Placeholder scan: no unresolved implementation placeholders remain; every task names files, tests, commands, interfaces, and expected behavior.
-- Type consistency: the browser sends `revision`, `changes`, `forceFields`, and `actor`; the PATCH route returns `asset`, optional `merged`, and optional `conflicts`; the editor uses those names consistently.
+- Type consistency: the browser sends `revision`, `changes`, `forceFields`, and `actor`; the PATCH route uses `fieldUpdatedRevision` to decide conflicts and returns `asset`, optional `merged`, and optional `conflicts`; the editor uses those names consistently.

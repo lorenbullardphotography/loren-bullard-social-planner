@@ -17,6 +17,7 @@ The browser currently sends the complete planner document with one shared versio
 Each stored post receives these fields:
 
 - `revision`: positive integer, starting at `1` for existing and newly created posts.
+- `fieldUpdatedRevision`: object whose keys are editable field names and whose values are the asset revision at which that field last changed.
 - `fieldUpdatedAt`: object whose keys are editable field names and whose values are ISO timestamps.
 - `fieldUpdatedBy`: object whose keys are editable field names and whose values are the editor’s display name.
 
@@ -49,10 +50,10 @@ The server validates the changed fields using the same limits and allowed values
 
 ### Automatic merge response
 
-If the submitted asset revision is older than the stored revision, the server compares every requested field with `fieldUpdatedAt`.
+If the submitted asset revision is older than the stored revision, the server compares every requested field with `fieldUpdatedRevision`.
 
-- If none of the requested fields changed after the submitted revision, it applies the requested fields to the latest asset and returns `200` with `merged: true`.
-- If one or more requested fields changed after the submitted revision, it returns `409` with the latest asset and a `conflicts` object containing only those field names.
+- If every requested field has `fieldUpdatedRevision[field] <= submitted revision`, it applies the requested fields to the latest asset and returns `200` with `merged: true`.
+- If one or more requested fields have `fieldUpdatedRevision[field] > submitted revision`, it returns `409` with the latest asset and a `conflicts` object containing only those field names.
 
 Example same-field conflict response:
 
@@ -77,7 +78,7 @@ The editor presents the latest value alongside the user’s value for each confl
 - **Keep mine** resubmits that field with `forceFields: ["fieldName"]` and the latest returned revision.
 - **Use latest** removes that field from the pending changes.
 
-The server accepts `forceFields` only for fields included in `changes`; it applies the selected fields to the latest revision, tracks their editor metadata, and increments the revision. The response is `200` with the saved asset.
+The server accepts `forceFields` only for fields included in `changes`; it applies the selected fields to the latest revision, records the new revision in `fieldUpdatedRevision`, tracks the editor metadata, and increments the revision. The response is `200` with the saved asset.
 
 ## Browser behavior
 
