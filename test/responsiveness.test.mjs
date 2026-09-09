@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const css = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+const html = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+const app = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 const loginHtml = fs.readFileSync(new URL("../public/login.html", import.meta.url), "utf8");
 
 test("mobile drawer restores brand title, team presence, and identity actions", () => {
@@ -12,6 +14,15 @@ test("mobile drawer restores brand title, team presence, and identity actions", 
   assert.match(css, /body\.mobile-menu-open \.side \.brand p\{display:block/);
   assert.match(css, /body\.mobile-menu-open \.side \.team-card\{display:grid\}/);
   assert.match(css, /body\.mobile-menu-open \.side \.ghost\.light\{display:inline-flex\}/);
+  assert.match(css, /body\.mobile-menu-open \.side\{[^}]*z-index:100/);
+  assert.match(css, /\.mobile-menu-backdrop\{[^}]*z-index:90/);
+  assert.match(html, /id="mobileDrawerClose"/);
+  assert.match(app, /mobileDrawerClose/);
+});
+
+test("mobile header stays sticky when scrolling and hides action buttons when drawer is open", () => {
+  assert.match(css, /@media\(max-width:700px\)\{[\s\S]*?\.top\{[^}]*position:sticky;top:0/);
+  assert.match(css, /body\.mobile-menu-open \.top-actions\{display:none!important\}/);
 });
 
 test("tablet viewport maintains a 2-column workspace and collapsed icon navigation", () => {
