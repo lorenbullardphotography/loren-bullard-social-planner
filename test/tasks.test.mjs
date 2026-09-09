@@ -78,3 +78,8 @@ test("creates compact profile initials for assignee avatars", () => {
   assert.equal(personInitials("Brooke Smith"), "BS");
   assert.equal(personInitials("David"), "D");
 });
+
+test("keeps the open assignee menu in the editor layout flow", () => {
+  const css = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.assignee-picker\.open \.assignee-picker-menu\{position:static/);
+});
