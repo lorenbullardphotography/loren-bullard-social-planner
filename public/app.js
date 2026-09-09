@@ -254,6 +254,7 @@ function normalizeActivityText(text = "") {
     .replace(/\ba\s+idea\b/gi, "an idea");
 }
 function setPlanner(data) {
+  isPlannerLoaded = true;
   posts = (Array.isArray(data?.posts) ? data.posts : []).map(post => ({ ...post, assetKind: assetKindOf(post), assetSource: assetSourceOf(post) }));
   scratch = Array.isArray(data?.scratch) ? data.scratch : [];
   team = Array.isArray(data?.team) ? data.team : [];
@@ -264,6 +265,154 @@ function setPlanner(data) {
   if (selected && !posts.find(post => post.id === selected)) selected = null;
   populateScratchSelects();
 }
+
+let isPlannerLoaded = false;
+let isPlannerLoading = false;
+
+function setPageLoading(isLoading) {
+  isPlannerLoading = Boolean(isLoading);
+  const bar = $("#pageLoadingBar");
+  if (bar) bar.classList.toggle("active", isPlannerLoading);
+}
+
+function renderTasksSkeleton() {
+  const host = $("#taskList");
+  if (!host) return;
+  host.innerHTML = Array.from({ length: 4 }).map(() => `
+    <article class="skeleton-task-card" aria-hidden="true">
+      <div class="skeleton-task-thumb skeleton"></div>
+      <div class="skeleton-task-info">
+        <div class="skeleton skeleton-pill"></div>
+        <div class="skeleton skeleton-line"></div>
+        <div class="skeleton skeleton-line short"></div>
+      </div>
+    </article>
+  `).join("");
+}
+
+function renderApprovalsSkeleton() {
+  const host = $("#approvalPanel");
+  if (!host) return;
+  host.innerHTML = `
+    <div class="approval-board" aria-hidden="true">
+      ${Array.from({ length: 3 }).map(() => `
+        <div class="approval-col">
+          <div class="skeleton skeleton-line" style="height:20px;width:120px;margin-bottom:12px"></div>
+          <div class="skeleton-task-card">
+            <div class="skeleton-task-thumb skeleton"></div>
+            <div class="skeleton-task-info">
+              <div class="skeleton skeleton-pill"></div>
+              <div class="skeleton skeleton-line"></div>
+            </div>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderActivitySkeleton() {
+  const host = $("#activityList");
+  if (!host) return;
+  host.innerHTML = Array.from({ length: 5 }).map(() => `
+    <div class="activity-item skeleton-card" aria-hidden="true">
+      <div class="skeleton skeleton-line" style="width:100px;height:10px"></div>
+      <div class="skeleton skeleton-line" style="width:90%"></div>
+    </div>
+  `).join("");
+}
+
+function renderGridSkeleton() {
+  const host = $("#grid");
+  if (!host) return;
+  host.innerHTML = Array.from({ length: 9 }).map(() => `
+    <div class="skeleton-tile skeleton" aria-hidden="true"></div>
+  `).join("");
+}
+
+function renderCalendarSkeleton() {
+  const host = $("#calendar");
+  const agendaHost = $("#calendarAgenda");
+  if (host) {
+    host.innerHTML = `
+      <div class="cal-head">Sun</div><div class="cal-head">Mon</div><div class="cal-head">Tue</div><div class="cal-head">Wed</div><div class="cal-head">Thu</div><div class="cal-head">Fri</div><div class="cal-head">Sat</div>
+      ${Array.from({ length: 14 }).map(() => `
+        <div class="skeleton-day" aria-hidden="true">
+          <div class="skeleton skeleton-line short" style="width:20px;height:12px"></div>
+          <div class="skeleton skeleton-line" style="height:24px;border-radius:6px"></div>
+        </div>
+      `).join("")}
+    `;
+  }
+  if (agendaHost) {
+    agendaHost.innerHTML = Array.from({ length: 3 }).map(() => `
+      <div class="skeleton-agenda-card" aria-hidden="true">
+        <div class="skeleton skeleton-line" style="height:40px;border-radius:8px"></div>
+        <div class="skeleton skeleton-line" style="height:40px;border-radius:8px"></div>
+      </div>
+    `).join("");
+  }
+}
+
+function renderLibrarySkeleton() {
+  const host = $("#library");
+  const scratchHost = $("#scratchList");
+  if (host) {
+    host.innerHTML = Array.from({ length: 8 }).map(() => `
+      <div class="skeleton-library-card" aria-hidden="true">
+        <div class="skeleton-library-thumb skeleton"></div>
+        <div class="skeleton-library-info">
+          <div class="skeleton skeleton-line" style="width:70%"></div>
+          <div class="skeleton skeleton-line short"></div>
+        </div>
+      </div>
+    `).join("");
+  }
+  if (scratchHost) {
+    scratchHost.innerHTML = Array.from({ length: 3 }).map(() => `
+      <div class="skeleton-card" aria-hidden="true">
+        <div class="skeleton skeleton-line" style="width:50%;height:16px"></div>
+        <div class="skeleton skeleton-line" style="width:100%;height:40px"></div>
+      </div>
+    `).join("");
+  }
+}
+
+function renderEditorSkeleton() {
+  const host = $("#postEditor");
+  if (!host) return;
+  host.innerHTML = `
+    <div class="editor" aria-hidden="true">
+      <div class="preview-wrap skeleton" style="aspect-ratio:16/9;width:100%;min-height:220px"></div>
+      <div class="skeleton skeleton-line" style="height:36px;border-radius:9px;margin-top:10px"></div>
+      <div class="skeleton skeleton-line" style="height:70px;border-radius:9px"></div>
+    </div>
+  `;
+}
+
+function renderSettingsSkeleton() {
+  const automations = $("#workflowAutomations");
+  if (automations) {
+    automations.innerHTML = Array.from({ length: 4 }).map(() => `
+      <div class="automation-row" aria-hidden="true">
+        <div class="skeleton skeleton-line" style="width:120px;height:14px"></div>
+        <div class="skeleton skeleton-pill" style="width:140px;height:30px"></div>
+      </div>
+    `).join("");
+  }
+}
+
+function renderAllSkeletons() {
+  renderTasksSkeleton();
+  renderApprovalsSkeleton();
+  renderActivitySkeleton();
+  renderGridSkeleton();
+  renderCalendarSkeleton();
+  renderLibrarySkeleton();
+  renderSettingsSkeleton();
+  if (currentView === "editor") renderEditorSkeleton();
+}
+
 
 async function api(path, options) {
   let response;
@@ -1617,11 +1766,21 @@ function switchView(name) {
   currentView = name;
   syncTopActions(name);
   $$(".view").forEach(view => view.classList.add("hidden"));
-  $(`#view-${name}`).classList.remove("hidden");
+  $(`#view-${name}`)?.classList.remove("hidden");
   $$(".nav").forEach(nav => nav.classList.toggle("active", nav.dataset.view === name));
-  $("#pageTitle").textContent = { grid: "Grid Planner", calendar: "Calendar", library: "Library", tasks: "Tasks", approvals: "Approvals", activity: "Team Activity", editor: "Edit post", settings: "Settings" }[name];
-  if (name !== "grid") $("#inspector").innerHTML = "";
-  if (name !== "editor") $("#postEditor").innerHTML = "";
+  $("#pageTitle").textContent = { grid: "Grid Planner", calendar: "Calendar", library: "Library", tasks: "Tasks", approvals: "Approvals", activity: "Team Activity", editor: "Edit post", settings: "Settings" }[name] || "Planner";
+  if (name !== "grid" && $("#inspector")) $("#inspector").innerHTML = "";
+  if (name !== "editor" && $("#postEditor")) $("#postEditor").innerHTML = "";
+  if (!isPlannerLoaded) {
+    if (name === "tasks") { renderTasksSkeleton(); renderActivitySkeleton(); }
+    if (name === "grid") renderGridSkeleton();
+    if (name === "calendar") renderCalendarSkeleton();
+    if (name === "library") renderLibrarySkeleton();
+    if (name === "settings") renderSettingsSkeleton();
+    if (name === "editor") renderEditorSkeleton();
+    closeMobileMenu();
+    return;
+  }
   if (name === "settings") renderPlannerSettings();
   if (name === "activity") renderActivity();
   if (name === "tasks") { renderTasks(); renderActivity(); }
@@ -1748,7 +1907,7 @@ $("#upload").onchange = async event => {
 };
 async function loadCanvaDesigns(query = "") {
   const host = $("#canvaDesignList");
-  host.innerHTML = '<div class="empty">Loading Canva designs…</div>';
+  host.innerHTML = '<div class="empty"><span class="loading-spinner-inline" style="margin-right:8px" aria-hidden="true"></span>Loading Canva designs…</div>';
   try {
     const data = await api(`/api/canva/designs${query ? `?query=${encodeURIComponent(query)}` : ""}`);
     host.innerHTML = data.designs?.length ? data.designs.map(design => `<button class="canva-design" data-canva-id="${esc(design.id)}"><img src="${esc(design.thumbnail)}" alt=""><span><b>${esc(design.title)}</b><small>${esc(design.doctypeName || (design.designTypes || []).map(type => type.replaceAll("_", " ")).join(" · ") || "Canva design")}${design.pageCount > 1 ? ` · ${design.pageCount} pages` : ""}</small><em>Updated ${design.updatedAt ? new Date(design.updatedAt * 1000).toLocaleDateString() : "recently"}</em></span></button>`).join("") : '<div class="empty">No Canva designs found.</div>';
@@ -1888,6 +2047,13 @@ function renderSettings(extra = "") {
   $("#disconnectBtn").classList.toggle("hidden", !connected);
 }
 async function syncInstagram({silent = false} = {}) {
+  setPageLoading(true);
+  const syncButtons = [$("#settingsSync"), $("#modalSync")].filter(Boolean);
+  syncButtons.forEach(btn => {
+    btn.disabled = true;
+    btn.dataset.prevText = btn.textContent;
+    btn.innerHTML = '<span class="button-spinner"></span>Syncing…';
+  });
   try {
     if (!silent) notify("Syncing Instagram…");
     const data = await api("/api/instagram/sync", {
@@ -1902,6 +2068,12 @@ async function syncInstagram({silent = false} = {}) {
   } catch (error) {
     notify(error.message);
     $("#settingsModal").classList.remove("hidden");
+  } finally {
+    setPageLoading(false);
+    syncButtons.forEach(btn => {
+      btn.disabled = false;
+      if (btn.dataset.prevText) btn.textContent = btn.dataset.prevText;
+    });
   }
 }
 
@@ -2000,17 +2172,24 @@ if (query.get("meta") === "error") {
 }
 
 async function init() {
-  await loadAccount();
-  await loadPlanner();
-  renderAll();
-  await heartbeat();
-  await checkInstagram();
-  if (igStatus.connected && !initialInstagramSyncDone) {
-    initialInstagramSyncDone = true;
-    await syncInstagram({silent: true});
+  setPageLoading(true);
+  renderAllSkeletons();
+  try {
+    await loadAccount();
+    await loadPlanner();
+    renderAll();
+    await heartbeat();
+    await checkInstagram();
+    if (igStatus.connected && !initialInstagramSyncDone) {
+      initialInstagramSyncDone = true;
+      await syncInstagram({silent: true});
+    }
+  } finally {
+    setPageLoading(false);
   }
 }
 
 init().catch(error => {
+  setPageLoading(false);
   notify(error.message || "Planner failed to load");
 });
