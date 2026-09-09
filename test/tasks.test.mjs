@@ -81,5 +81,5 @@ test("creates compact profile initials for assignee avatars", () => {
 
 test("keeps the open assignee menu floating above the editor fields", () => {
   const css = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
-  assert.match(css, /\.assignee-picker\.open \.assignee-picker-menu\{position:absolute/);
+  assert.match(css, /\.assignee-picker\.open \.assignee-picker-menu\{position:fixed/);
 });

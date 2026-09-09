@@ -801,7 +801,21 @@ function renderInspector(hostSelector = "#inspector") {
   }
   const assigneePicker = q(".assignee-picker");
   if (assigneePicker) {
-    q("#assigneePickerButton").onclick = () => assigneePicker.classList.toggle("open");
+    const pickerButton = q("#assigneePickerButton");
+    const pickerMenu = q("#assigneePickerMenu");
+    const positionAssigneeMenu = () => {
+      const rect = pickerButton.getBoundingClientRect();
+      pickerMenu.style.left = `${rect.left}px`;
+      pickerMenu.style.width = `${rect.width}px`;
+      pickerMenu.style.top = `${rect.bottom + 6}px`;
+      const menuBottom = rect.bottom + 6 + pickerMenu.offsetHeight;
+      if (menuBottom > window.innerHeight - 8 && rect.top > pickerMenu.offsetHeight + 14) pickerMenu.style.top = `${rect.top - pickerMenu.offsetHeight - 6}px`;
+    };
+    pickerButton.onclick = () => {
+      assigneePicker.classList.toggle("open");
+      if (assigneePicker.classList.contains("open")) requestAnimationFrame(positionAssigneeMenu);
+    };
+    q(".editor-scroll")?.addEventListener("scroll", () => assigneePicker.classList.remove("open"), { passive: true });
     qq(".assignee-option").forEach(option => option.onclick = () => {
       const value = option.dataset.assignee || "";
       q("#eAssignee").value = value;
