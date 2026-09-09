@@ -161,6 +161,19 @@ function filterActivity(items, type = "all") {
 }
 const ACTIVITY_LABELS = { approval: "Approval", content: "Content", sync: "Sync", comment: "Comment", settings: "Settings", update: "Update" };
 function activityLabel(type) { return ACTIVITY_LABELS[type] || "Update"; }
+function personInitials(name = "") {
+  return name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0].toUpperCase()).join("");
+}
+function assigneePeople(user, members = [], selected = "") {
+  const people = [user, ...members, selected ? { name: selected, role: "Teammate" } : null].filter(person => person?.name);
+  const seen = new Set();
+  return people.filter(person => {
+    const key = person.name.trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 function scratchIdeaPayload(values) {
   return {
     title: String(values.title || "").trim(),
@@ -744,7 +757,7 @@ function renderInspector(hostSelector = "#inspector") {
     ${post.canvaUrl ? `<div class="canva-source"><b>Canva working draft</b><span>Preview refreshes from Canva when connected.</span><div class="handoff-actions"><a class="ghost button-link" href="${esc(post.canvaUrl)}" target="_blank" rel="noopener noreferrer">Open in Canva</a><button id="refreshCanva" class="ghost">Refresh preview</button></div></div>` : ""}
     <div class="two">
       <label class="field">Workflow<select id="eWorkflow">${workflowOptions}</select></label>
-      <label class="field">Assigned to<input id="eAssignee" value="${esc(post.assignee || "")}" placeholder="Loren or social planner"></label>
+      <label class="field">Assigned to<div class="assignee-picker"><input id="eAssignee" type="hidden" value="${esc(post.assignee || "")}"><button id="assigneePickerButton" class="assignee-picker-button" type="button"><span class="person-avatar">${esc(personInitials(post.assignee || "Unassigned"))}</span><span id="assigneePickerName">${esc(post.assignee || "Unassigned")}</span><span class="assignee-chevron">⌄</span></button><div id="assigneePickerMenu" class="assignee-picker-menu">${assigneePeople(currentUser, team, post.assignee).map(person => `<button type="button" class="assignee-option" data-assignee="${esc(person.name)}"><span class="person-avatar">${esc(personInitials(person.name))}</span><span><b>${esc(person.name)}</b><small>${esc(person.role || "Teammate")}</small></span></button>`).join("")}<button type="button" class="assignee-option" data-assignee=""><span class="person-avatar person-avatar-empty">—</span><span><b>Unassigned</b><small>No owner yet</small></span></button></div></div></label>
     </div>
     <label class="field">Priority<select id="ePriority"><option value="low" ${post.priority === "low" ? "selected" : ""}>Low</option><option value="normal" ${post.priority === "normal" ? "selected" : ""}>Normal</option><option value="high" ${post.priority === "high" ? "selected" : ""}>High</option></select></label>
     <div class="two">
@@ -777,6 +790,18 @@ function renderInspector(hostSelector = "#inspector") {
     host.querySelectorAll("input, select, textarea").forEach(control => {
       control.addEventListener("input", () => { editorDirty = true; });
       control.addEventListener("change", () => { editorDirty = true; });
+    });
+  }
+  const assigneePicker = q(".assignee-picker");
+  if (assigneePicker) {
+    q("#assigneePickerButton").onclick = () => assigneePicker.classList.toggle("open");
+    qq(".assignee-option").forEach(option => option.onclick = () => {
+      const value = option.dataset.assignee || "";
+      q("#eAssignee").value = value;
+      q("#assigneePickerName").textContent = value || "Unassigned";
+      q("#assigneePickerButton .person-avatar").textContent = personInitials(value || "Unassigned");
+      assigneePicker.classList.remove("open");
+      editorDirty = true;
     });
   }
   qq("[data-ap]").forEach(button => {

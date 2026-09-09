@@ -15,7 +15,7 @@ function taskHelpers() {
     URL,
     Date
   };
-  vm.runInNewContext(`${helpers}\nthis.taskHelpers = { taskPosts, filterActivity, activityLabel };`, context);
+  vm.runInNewContext(`${helpers}\nthis.taskHelpers = { taskPosts, filterActivity, activityLabel, assigneePeople, personInitials };`, context);
   return context.taskHelpers;
 }
 
@@ -70,7 +70,7 @@ test("provides a readable label for each activity type", () => {
 
 test("builds a unique assignee list from the team and current user", () => {
   const { assigneePeople } = taskHelpers();
-  assert.deepEqual(assigneePeople({ name: "Brooke", role: "Manager" }, [{ name: "David", role: "Photographer" }, { name: "Brooke", role: "Manager" }], "Loren").map(person => person.name), ["Brooke", "David", "Loren"]);
+  assert.deepEqual([...assigneePeople({ name: "Brooke", role: "Manager" }, [{ name: "David", role: "Photographer" }, { name: "Brooke", role: "Manager" }], "Loren")].map(person => person.name), ["Brooke", "David", "Loren"]);
 });
 
 test("creates compact profile initials for assignee avatars", () => {
