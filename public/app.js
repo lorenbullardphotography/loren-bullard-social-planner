@@ -1,6 +1,6 @@
 const USER_KEY = "lb-content-planner-user-v1";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
-let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "grid", editorReturnView = "grid", calendarView = "month", libraryFilter = "all", librarySearch = "", librarySection = "assets", taskTab = "mine", approvalDetail = null, activityFilters = null, editorDirty = false, editorSaveInProgress = false;
+let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "tasks", editorReturnView = "tasks", calendarView = "month", libraryFilter = "all", librarySearch = "", librarySection = "assets", taskTab = "mine", approvalDetail = null, activityFilters = null, editorDirty = false, editorSaveInProgress = false;
 let settings = { pillars: [], formats: ["IMAGE", "REEL", "CAROUSEL"], goals: [], syncPhotoCount: 12, workflowAutomations: {} };
 let calCursor = new Date(); calCursor.setDate(1);
 
@@ -1428,7 +1428,7 @@ function renderCalendar() {
   const agendaPosts = calendarView === "week" ? calendarPosts().filter(post => post.date >= begin.toISOString().slice(0, 10) && post.date <= new Date(begin.getTime() + 6 * 86400000).toISOString().slice(0, 10)) : monthPosts;
   const grouped = agendaPosts.reduce((groups, post) => { (groups[post.date] ||= []).push(post); return groups; }, {});
   $("#calendarAgenda").innerHTML = Object.entries(grouped).map(([date, items]) => `<section class="agenda-day"><div class="agenda-date"><strong>${new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: "short" })}</strong><span>${new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span><small>${items.length} ${items.length === 1 ? "post" : "posts"}</small></div><div class="agenda-posts">${items.map(post => calendarPostMarkup(post)).join("")}</div></section>`).join("") || `<div class="empty">No planned posts this month.</div>`;
-  $("#calendarAgenda .cal-post").forEach(node => {
+  $$("#calendarAgenda .cal-post").forEach(node => {
     const post = posts.find(item => item.id === node.dataset.open);
     if (post?.status === "posted") {
       node.classList.add("instagram-post", "instagram-badge");
