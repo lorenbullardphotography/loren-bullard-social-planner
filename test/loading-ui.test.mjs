@@ -9,7 +9,7 @@ const loginHtml = fs.readFileSync(new URL("../public/login.html", import.meta.ur
 const loginJs = fs.readFileSync(new URL("../public/login.js", import.meta.url), "utf8");
 
 test("index.html contains the global page loading bar element", () => {
-  assert.match(html, /<div id="pageLoadingBar" class="page-loading-bar active"/);
+  assert.match(html, /<div id="pageLoadingBar" class="page-loading-bar"/);
 });
 
 test("styles.css defines page loading bar, animations, and skeleton shimmer styles", () => {

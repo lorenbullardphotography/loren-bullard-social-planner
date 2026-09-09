@@ -2129,13 +2129,15 @@ function renderSettings(extra = "") {
   $("#disconnectBtn").classList.toggle("hidden", !connected);
 }
 async function syncInstagram({silent = false} = {}) {
-  setPageLoading(true);
+  if (!silent) setPageLoading(true);
   const syncButtons = [$("#settingsSync"), $("#modalSync")].filter(Boolean);
-  syncButtons.forEach(btn => {
-    btn.disabled = true;
-    btn.dataset.prevText = btn.textContent;
-    btn.innerHTML = '<span class="button-spinner"></span>Syncing…';
-  });
+  if (!silent) {
+    syncButtons.forEach(btn => {
+      btn.disabled = true;
+      btn.dataset.prevText = btn.textContent;
+      btn.innerHTML = '<span class="button-spinner"></span>Syncing…';
+    });
+  }
   try {
     if (!silent) notify("Syncing Instagram…");
     const data = await api("/api/instagram/sync", {
@@ -2148,14 +2150,18 @@ async function syncInstagram({silent = false} = {}) {
     await checkInstagram();
     if (!silent) notify(`Synced ${data.mediaCount} Instagram posts`);
   } catch (error) {
-    notify(error.message);
-    $("#settingsModal").classList.remove("hidden");
+    if (!silent) {
+      notify(error.message);
+      $("#settingsModal").classList.remove("hidden");
+    }
   } finally {
-    setPageLoading(false);
-    syncButtons.forEach(btn => {
-      btn.disabled = false;
-      if (btn.dataset.prevText) btn.textContent = btn.dataset.prevText;
-    });
+    if (!silent) {
+      setPageLoading(false);
+      syncButtons.forEach(btn => {
+        btn.disabled = false;
+        if (btn.dataset.prevText) btn.textContent = btn.dataset.prevText;
+      });
+    }
   }
 }
 
@@ -2318,15 +2324,16 @@ async function init() {
     await loadAccount();
     await loadPlanner();
     renderAll();
-    await heartbeat();
-    await checkInstagram();
+  } finally {
+    setPageLoading(false);
+  }
+  heartbeat().catch(() => {});
+  checkInstagram().then(async () => {
     if (igStatus.connected && !initialInstagramSyncDone) {
       initialInstagramSyncDone = true;
       await syncInstagram({silent: true});
     }
-  } finally {
-    setPageLoading(false);
-  }
+  }).catch(() => {});
 }
 
 init().catch(error => {
