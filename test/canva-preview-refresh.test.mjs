@@ -15,7 +15,7 @@ function previewHelpers() {
     URL,
     Date
   };
-  vm.runInNewContext(`${helpers}\nthis.previewHelpers = { needsCanvaPreviewRefresh, assetPreview, configureGridVideo, workflowPill, WORKFLOW_LABELS, workflowOf, applyWorkflow };`, context);
+  vm.runInNewContext(`${helpers}\nthis.previewHelpers = { needsCanvaPreviewRefresh, assetPreview, configureGridVideo, workflowPill, WORKFLOW_LABELS, workflowOf, applyWorkflow, shouldRefreshPlanner, editorDestinationAfterSave, contentBriefMarkup };`, context);
   return context.previewHelpers;
 }
 
@@ -59,4 +59,28 @@ test("uses feedback as the middle approval state", () => {
   assert.equal(post.approval, "feedback");
   assert.equal(post.status, "draft");
   assert.equal(workflowOf(post), "feedback");
+});
+
+test("does not refresh away an active asset editor", () => {
+  const { shouldRefreshPlanner } = previewHelpers();
+  assert.equal(shouldRefreshPlanner({ currentView: "editor", editorDirty: true, editorSaveInProgress: false }), false);
+  assert.equal(shouldRefreshPlanner({ currentView: "editor", editorDirty: false, editorSaveInProgress: true }), false);
+  assert.equal(shouldRefreshPlanner({ currentView: "library", editorDirty: true, editorSaveInProgress: false }), true);
+});
+
+test("returns to the page that opened the asset editor after saving", () => {
+  const { editorDestinationAfterSave } = previewHelpers();
+  assert.equal(editorDestinationAfterSave("editor", "library"), "library");
+  assert.equal(editorDestinationAfterSave("editor", "grid"), "grid");
+});
+
+test("keeps only active content brief fields in the asset editor", () => {
+  const { contentBriefMarkup } = previewHelpers();
+  const markup = contentBriefMarkup({ audio: "Song", hashtags: "#family", tagNotes: "Vendors", altText: "Family portrait" });
+
+  assert.match(markup, /id="eAudio"/);
+  assert.match(markup, /id="eHashtags"/);
+  assert.match(markup, /id="eTagNotes"/);
+  assert.match(markup, /id="eAltText"/);
+  assert.doesNotMatch(markup, /eGoal|eHook|eCta|>Goal<|>Hook<|Call to action/);
 });

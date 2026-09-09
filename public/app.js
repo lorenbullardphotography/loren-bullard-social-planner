@@ -1,6 +1,6 @@
 const USER_KEY = "lb-content-planner-user-v1";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
-let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "grid", editorReturnView = "grid", libraryFilter = "all", librarySearch = "", librarySection = "assets", editorDirty = false, editorSaveInProgress = false;
+let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "grid", editorReturnView = "grid", libraryFilter = "all", librarySearch = "", librarySection = "assets", taskTab = "mine", editorDirty = false, editorSaveInProgress = false;
 let settings = { pillars: [], formats: ["IMAGE", "REEL", "CAROUSEL"], goals: [], syncPhotoCount: 12 };
 let calCursor = new Date(); calCursor.setDate(1);
 
@@ -133,6 +133,31 @@ function workflowPill(workflow) {
 function isOverdue(post) {
   return Boolean(post.dueDate && post.dueDate < new Date().toISOString().slice(0, 10) && !["published", "archived"].includes(workflowOf(post)));
 }
+function taskPosts(sourcePosts, user, tab = "mine", sort = "priority") {
+  return sourcePosts.filter(post => {
+    if (post.status === "posted" || workflowOf(post) === "archived") return false;
+    const actionable = isOverdue(post) || workflowOf(post) === "needs-review" || workflowOf(post) === "ready-meta" || Boolean(post.assignee);
+    return actionable && (tab === "team" || post.assignee === user?.name);
+  }).sort((a, b) => {
+    if (sort === "activity") return (b.updatedAt || "").localeCompare(a.updatedAt || "");
+    if (sort === "due") return (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
+    const rank = post => isOverdue(post) ? 0 : workflowOf(post) === "needs-review" ? 1 : workflowOf(post) === "ready-meta" ? 2 : 3;
+    return rank(a) - rank(b) || (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
+  });
+}
+function activityType(item) {
+  if (item.type) return item.type;
+  const text = String(item.text || "").toLowerCase();
+  if (/approv|review/.test(text)) return "approval";
+  if (/sync/.test(text)) return "sync";
+  if (/comment/.test(text)) return "comment";
+  if (/setting|profile/.test(text)) return "settings";
+  if (/upload|asset|content|post/.test(text)) return "content";
+  return "update";
+}
+function filterActivity(items, type = "all") {
+  return items.filter(item => type === "all" || activityType(item) === type).sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+}
 function setPlanner(data) {
   posts = (Array.isArray(data?.posts) ? data.posts : []).map(post => ({ ...post, assetKind: assetKindOf(post), assetSource: assetSourceOf(post) }));
   scratch = Array.isArray(data?.scratch) ? data.scratch : [];
@@ -258,9 +283,6 @@ function metaExportData(post) {
       location: post.location || post.locationTag?.name || "",
       altText: post.altText || "",
       notes: post.notes || "",
-      goal: post.goal || "",
-      hook: post.hook || "",
-      callToAction: post.cta || "",
       audio: post.audio || "",
       taggingNotes: post.tagNotes || "",
       tags: Array.isArray(post.tags) ? post.tags : [],
@@ -307,7 +329,7 @@ async function importBackup(file) {
 
 function renderAll() {
   renderStats();
-  renderAttention();
+  renderTasks();
   renderGrid();
   // Only render the editor that is currently visible. Rendering both produced
   // duplicate control IDs, so document-wide selectors could bind to the hidden
@@ -350,6 +372,14 @@ function cropFrameRatio(post) {
 }
 function locationSummary(post) {
   return post.location ? `<div class="location-summary">⌖ ${esc(post.location)}</div>` : "";
+}
+function contentBriefMarkup(post) {
+  return `<div class="field">Content brief
+      <label class="field nested">Audio<input id="eAudio" value="${esc(post.audio || "")}" placeholder="Audio or sound"></label>
+      <label class="field nested">Hashtags<textarea id="eHashtags" rows="2" placeholder="#northwestarkansas #newbornphotographer">${esc(post.hashtags || "")}</textarea></label>
+      <label class="field nested">Tagging notes<input id="eTagNotes" value="${esc(post.tagNotes || "")}" placeholder="People, vendors, collaborators"></label>
+      <label class="field nested">Alt text<textarea id="eAltText" rows="2" placeholder="Describe the image for accessibility">${esc(post.altText || "")}</textarea></label>
+    </div>`;
 }
 
 async function readExifGps(file) {
@@ -449,16 +479,25 @@ async function refreshStorageUsage() {
     refreshStorageUsage.running = false;
   }
 }
-function renderAttention() {
-  const items = future().filter(post => isOverdue(post) || workflowOf(post) === "needs-review" || workflowOf(post) === "ready-meta" || (post.assignee && post.assignee === currentUser.name)).sort((a, b) => {
-    const rank = post => isOverdue(post) ? 0 : workflowOf(post) === "needs-review" ? 1 : workflowOf(post) === "ready-meta" ? 2 : 3;
-    return rank(a) - rank(b) || (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
-  }).slice(0, 6);
-  $("#attentionList").innerHTML = items.length ? items.map(post => {
-    const reason = isOverdue(post) ? "Overdue" : workflowOf(post) === "needs-review" ? "Approval requested" : workflowOf(post) === "ready-meta" ? "Ready to hand off" : "Assigned to " + esc(post.assignee);
-    return '<button class="attention-card" data-open="' + post.id + '"><img src="' + post.image + '" alt=""><span><b>' + esc(post.notes || post.caption || "Untitled content") + '</b><small>' + reason + ' · ' + esc(post.dueDate || post.date || "No due date") + '</small></span><i>›</i></button>';
-  }).join("") : '<div class="empty">Nothing urgent right now. Your next tasks will appear here.</div>';
-  $$("#attentionList [data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open));
+function taskReason(post) {
+  return isOverdue(post) ? "Overdue" : workflowOf(post) === "needs-review" ? "Approval requested" : workflowOf(post) === "ready-meta" ? "Ready to hand off" : "Assigned to " + post.assignee;
+}
+function renderTasks() {
+  const host = $("#taskList");
+  if (!host) return;
+  const sort = $("#taskSort")?.value || "priority";
+  const items = taskPosts(posts, currentUser, taskTab, sort);
+  $("#taskList").classList.toggle("hidden", taskTab === "activity");
+  $("#activityPanel")?.classList.toggle("hidden", taskTab !== "activity");
+  $("#taskSort")?.closest(".task-sort")?.classList.toggle("hidden", taskTab === "activity");
+  $("#myTasksTab")?.classList.toggle("active", taskTab === "mine");
+  $("#teamTasksTab")?.classList.toggle("active", taskTab === "team");
+  $("#activityTab")?.classList.toggle("active", taskTab === "activity");
+  $("#myTasksTab")?.setAttribute("aria-selected", String(taskTab === "mine"));
+  $("#teamTasksTab")?.setAttribute("aria-selected", String(taskTab === "team"));
+  $("#activityTab")?.setAttribute("aria-selected", String(taskTab === "activity"));
+  host.innerHTML = items.length ? items.map(post => `<button class="attention-card task-card" data-open="${post.id}"><img src="${post.image}" alt=""><span><b>${esc(post.notes || post.caption || "Untitled content")}</b><small>${esc(taskReason(post))} · ${esc(post.dueDate || post.date || "No due date")}</small></span><strong class="task-assignee">${esc(post.assignee || "Unassigned")}</strong><i>›</i></button>`).join("") : `<div class="empty">No ${taskTab === "mine" ? "tasks assigned to you" : "team tasks"} right now.</div>`;
+  $$("#taskList [data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open, true));
 }
 function renderStats() {
   $("#plannedCount").textContent = future().length;
@@ -490,8 +529,11 @@ async function heartbeat() {
   } catch {}
 }
 function renderActivity() {
-  $("#activityList").innerHTML = activity.length
-    ? activity.map(item => {
+  const host = $("#activityList");
+  if (!host) return;
+  const items = filterActivity(activity, $("#activityFilter")?.value || "all");
+  host.innerHTML = items.length
+    ? items.map(item => {
       const at = new Date(item.at);
       return `<article class="activity-item"><time datetime="${esc(item.at)}">${at.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</time><strong>${esc(item.text)}</strong></article>`;
     }).join("")
@@ -698,15 +740,8 @@ function renderInspector(hostSelector = "#inspector") {
       <label class="field">Scheduling<select id="eScheduleState"><option value="draft" ${post.scheduleState === "draft" ? "selected" : ""}>Not ready</option><option value="ready" ${post.scheduleState === "ready" ? "selected" : ""}>Ready to schedule</option><option value="scheduled" ${post.scheduleState === "scheduled" ? "selected" : ""}>Scheduled</option></select></label>
     </div>
     <label class="field">Caption<textarea id="eCaption" rows="6" placeholder="Write or paste caption…">${esc(post.caption || "")}</textarea></label>
-    <label class="field">Notes<textarea id="eNotes" rows="3" placeholder="Audio, hook, CTA, manager notes…">${esc(post.notes || "")}</textarea></label>
-    <div class="field">Content brief
-      <label class="field nested">Goal<input id="eGoal" value="${esc(post.goal || "")}" placeholder="What should this post accomplish?"></label>
-      <label class="field nested">Hook<input id="eHook" value="${esc(post.hook || "")}" placeholder="Opening line or visual hook"></label>
-      <div class="two"><label class="field nested">Call to action<input id="eCta" value="${esc(post.cta || "")}" placeholder="Book, comment, save…"></label><label class="field nested">Audio<input id="eAudio" value="${esc(post.audio || "")}" placeholder="Audio or sound"></label></div>
-      <label class="field nested">Hashtags<textarea id="eHashtags" rows="2" placeholder="#northwestarkansas #newbornphotographer">${esc(post.hashtags || "")}</textarea></label>
-      <label class="field nested">Tagging notes<input id="eTagNotes" value="${esc(post.tagNotes || "")}" placeholder="People, vendors, collaborators"></label>
-      <label class="field nested">Alt text<textarea id="eAltText" rows="2" placeholder="Describe the image for accessibility">${esc(post.altText || "")}</textarea></label>
-    </div>
+    <label class="field">Notes<textarea id="eNotes" rows="3" placeholder="Audio and manager notes…">${esc(post.notes || "")}</textarea></label>
+    ${contentBriefMarkup(post)}
     <div class="field">Approval
       <div class="approval-pills">
         <button data-ap="needs-review" class="${post.approval === "needs-review" ? "active" : ""}">Review</button>
@@ -811,9 +846,6 @@ function renderInspector(hostSelector = "#inspector") {
     post.scheduleState = q("#eScheduleState").value;
     post.caption = q("#eCaption").value;
     post.notes = q("#eNotes").value;
-    post.goal = q("#eGoal").value.trim();
-    post.hook = q("#eHook").value.trim();
-    post.cta = q("#eCta").value.trim();
     post.audio = q("#eAudio").value.trim();
     post.hashtags = q("#eHashtags").value.trim();
     post.tagNotes = q("#eTagNotes").value.trim();
@@ -1028,7 +1060,7 @@ function renderLibrary() {
   const query = librarySearch.toLowerCase();
   const items = future().filter(post => {
     const matchesFilter = libraryFilter === "all" || post.status === libraryFilter || post.approval === libraryFilter || workflowOf(post) === libraryFilter;
-    const searchable = [post.caption, post.notes, post.pillar, post.client, post.assignee, post.goal, post.hook, post.location].join(" ").toLowerCase();
+    const searchable = [post.caption, post.notes, post.pillar, post.client, post.assignee, post.location].join(" ").toLowerCase();
     return matchesFilter && (!query || searchable.includes(query));
   });
   $("#library").innerHTML = items.length
@@ -1078,11 +1110,12 @@ function switchView(name) {
   $$(".view").forEach(view => view.classList.add("hidden"));
   $(`#view-${name}`).classList.remove("hidden");
   $$(".nav").forEach(nav => nav.classList.toggle("active", nav.dataset.view === name));
-  $("#pageTitle").textContent = { grid: "Grid Planner", calendar: "Calendar", library: "Library", approvals: "Approvals", activity: "Team Activity", editor: "Edit post", settings: "Settings" }[name];
+  $("#pageTitle").textContent = { grid: "Grid Planner", calendar: "Calendar", library: "Library", tasks: "Tasks", approvals: "Approvals", activity: "Team Activity", editor: "Edit post", settings: "Settings" }[name];
   if (name !== "grid") $("#inspector").innerHTML = "";
   if (name !== "editor") $("#postEditor").innerHTML = "";
   if (name === "settings") renderPlannerSettings();
   if (name === "activity") renderActivity();
+  if (name === "tasks") { renderTasks(); renderActivity(); }
   if (name === "library") { setLibrarySection(librarySection); renderLibrary(); }
   if (name === "grid") renderInspector();
   if (name === "editor") renderInspector("#postEditor");
@@ -1227,6 +1260,11 @@ $("#importInput").onchange = async event => {
   event.target.value = "";
 };
 $$(".nav").forEach(nav => nav.onclick = () => switchView(nav.dataset.view));
+$("#myTasksTab").onclick = () => { taskTab = "mine"; renderTasks(); };
+$("#teamTasksTab").onclick = () => { taskTab = "team"; renderTasks(); };
+$("#activityTab").onclick = () => { taskTab = "activity"; renderTasks(); renderActivity(); };
+$("#taskSort").onchange = () => renderTasks();
+$("#activityFilter").onchange = () => renderActivity();
 $("#prevMonth").onclick = () => { calCursor.setMonth(calCursor.getMonth() - 1); renderCalendar(); };
 $("#nextMonth").onclick = () => { calCursor.setMonth(calCursor.getMonth() + 1); renderCalendar(); };
 $$(".chip").forEach(chip => chip.onclick = () => {

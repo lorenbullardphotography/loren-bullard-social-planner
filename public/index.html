@@ -19,8 +19,8 @@
       <button class="nav active" data-view="grid"><span>▦</span> Grid Planner</button>
       <button class="nav" data-view="calendar"><span>□</span> Calendar</button>
       <button class="nav" data-view="library"><span>◫</span> Library</button>
+      <button class="nav" data-view="tasks"><span>☑</span> Tasks</button>
       <button class="nav" data-view="approvals"><span>✓</span> Approvals</button>
-      <button class="nav" data-view="activity"><span>◷</span> Team Activity</button>
       <button class="nav" data-view="settings"><span>⚙</span> Settings</button>
     </nav>
     <div class="side-bottom">
@@ -62,10 +62,6 @@
           <div><strong id="approvalCount">0</strong><span>Need approval</span></div>
         </div>
       </div>
-      <section class="attention-panel">
-        <div class="intro slim"><div><h3>Needs your attention</h3><p>Keep the next decision visible without digging through the calendar.</p></div></div>
-        <div id="attentionList" class="attention-list"></div>
-      </section>
       <div class="workspace">
         <section class="phone-card">
           <div class="profile-row">
@@ -78,6 +74,17 @@
         </section>
         <aside id="inspector" class="inspector"></aside>
       </div>
+    </section>
+
+    <section id="view-tasks" class="view hidden">
+      <div class="intro"><div><h3>Tasks</h3><p>Keep your next actions and the team's work in one place.</p></div></div>
+      <div class="task-toolbar"><div class="task-tabs" role="tablist" aria-label="Task views">
+        <button id="myTasksTab" class="task-tab active" type="button" role="tab" aria-selected="true">My Tasks</button>
+        <button id="teamTasksTab" class="task-tab" type="button" role="tab" aria-selected="false">Team Tasks</button>
+        <button id="activityTab" class="task-tab" type="button" role="tab" aria-selected="false">Activity</button>
+      </div><label class="task-sort">Sort tasks<select id="taskSort"><option value="priority">Priority</option><option value="activity">Recent activity</option><option value="due">Due date</option></select></label></div>
+      <div id="taskList" class="task-list"></div>
+      <div id="activityPanel" class="hidden"><div class="activity-tools"><h4>Team Activity</h4><label>Show<select id="activityFilter"><option value="all">All activity</option><option value="approval">Approvals</option><option value="content">Content</option><option value="sync">Syncs</option><option value="comment">Comments</option><option value="settings">Settings</option><option value="update">Updates</option></select></label></div><div id="activityList" class="activity-list activity-page-list"></div></div>
     </section>
 
     <section id="view-calendar" class="view hidden">
@@ -110,17 +117,6 @@
     <section id="view-approvals" class="view hidden">
       <div class="intro"><div><h3>Approvals</h3><p>A simple review queue for you and your social media manager.</p></div></div>
       <div id="approvalBoard" class="approval-board"></div>
-    </section>
-
-    <section id="view-activity" class="view hidden">
-      <div class="intro activity-heading">
-        <div>
-          <p class="eyebrow">SHARED WORKSPACE</p>
-          <h3>Team Activity</h3>
-          <p>Recent edits, approvals, and syncs for the shared planner.</p>
-        </div>
-      </div>
-      <div id="activityList" class="activity-list activity-page-list"></div>
     </section>
 
     <section id="view-editor" class="view hidden">
