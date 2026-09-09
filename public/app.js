@@ -1099,6 +1099,7 @@ function renderInspector(hostSelector = "#inspector") {
   if (cropPreview) cropPreview.onpointerdown = event => {
     if (cropLocked) return;
     if (!event.isPrimary || event.button !== 0) return;
+    if (Number(post.cropZoom || 1) <= 1) return;
     event.preventDefault();
     dragStart = { x: event.clientX, y: event.clientY, cropX: cropCoordinate(post.cropX), cropY: cropCoordinate(post.cropY) };
     cropPreview.classList.add("is-adjusting");
@@ -1448,7 +1449,7 @@ function renderCalendar() {
   $$("[data-drag-post]").forEach(node => {
     node.addEventListener("pointerdown", event => {
       if (!event.isPrimary || event.pointerType === "mouse" || event.button !== 0 || node.dataset.instagram === "true") return;
-      calendarTouch = { id: node.dataset.dragPost, node, timer: setTimeout(() => {
+      calendarTouch = { id: node.dataset.dragPost, node, x: event.clientX, y: event.clientY, timer: setTimeout(() => {
         if (!calendarTouch || calendarTouch.node !== node) return;
         calendarTouch.active = true;
         node.classList.add("dragging");
@@ -1456,7 +1457,12 @@ function renderCalendar() {
       }, 220) };
     });
     node.addEventListener("pointermove", event => {
-      if (!calendarTouch || calendarTouch.node !== node || !calendarTouch.active) return;
+      if (!calendarTouch || calendarTouch.node !== node) return;
+      if (!calendarTouch.active) {
+        const distance = Math.hypot(event.clientX - calendarTouch.x, event.clientY - calendarTouch.y);
+        if (distance > 10) clearTimeout(calendarTouch.timer);
+        return;
+      }
       event.preventDefault();
       $$(".day").forEach(day => day.classList.remove("target"));
       document.elementFromPoint(event.clientX, event.clientY)?.closest(".day")?.classList.add("target");
