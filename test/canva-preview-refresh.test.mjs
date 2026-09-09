@@ -15,7 +15,7 @@ function previewHelpers() {
     URL,
     Date
   };
-  vm.runInNewContext(`${helpers}\nthis.previewHelpers = { needsCanvaPreviewRefresh, assetPreview, configureGridVideo, workflowPill };`, context);
+  vm.runInNewContext(`${helpers}\nthis.previewHelpers = { needsCanvaPreviewRefresh, assetPreview, configureGridVideo, workflowPill, WORKFLOW_LABELS, workflowOf, applyWorkflow };`, context);
   return context.previewHelpers;
 }
 
@@ -48,4 +48,15 @@ test("keeps grid reels paused on their first frame", () => {
 test("renders a workflow pill with a state hook for consistent color", () => {
   const { workflowPill } = previewHelpers();
   assert.equal(workflowPill("needs-review"), '<span class="workflow-pill" data-workflow="needs-review">Needs review</span>');
+});
+
+test("uses feedback as the middle approval state", () => {
+  const { WORKFLOW_LABELS, workflowOf, applyWorkflow } = previewHelpers();
+  const post = { status: "planned", approval: "approved" };
+
+  assert.equal(WORKFLOW_LABELS.feedback, "Feedback");
+  applyWorkflow(post, "feedback");
+  assert.equal(post.approval, "feedback");
+  assert.equal(post.status, "draft");
+  assert.equal(workflowOf(post), "feedback");
 });

@@ -10,7 +10,7 @@ A Planoly/Planable-style local content planner customized for **@lorenbullardpho
 - **Sync already-published Instagram content through Meta's Instagram API**
 - Calendar view
 - Content library
-- Draft / Needs Review / Approved workflow
+- Review / Feedback / Approved workflow
 - Team feedback/comments on planned content
 - Post format: Image / Reel / Carousel
 - Caption, notes, and publish-date fields
