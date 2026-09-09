@@ -940,6 +940,30 @@ export async function handleRequest(req, res) {
       return sendJson(res, 200, { profile, mediaCount: media.length, planner: saved });
     }
 
+    if (url.pathname.startsWith("/api/assets/") && req.method === "PATCH") {
+      const planner = await readPlanner();
+      const assetId = url.pathname.split("/").pop();
+      const post = planner.posts.find(item => item.id === assetId);
+      if (!post) return sendJson(res, 404, { error: "This asset was removed by a teammate." });
+      const body = await readBody(req);
+      const changes = normalizeAssetChanges(body.changes);
+      if (!Object.keys(changes).length) return sendJson(res, 400, { error: "Choose at least one asset field to update." });
+      const submittedRevision = Number(body.revision) || 1;
+      const conflicts = assetConflicts(post, submittedRevision, changes);
+      const forceFields = Array.isArray(body.forceFields) ? body.forceFields : [];
+      const unforcedConflicts = Object.keys(conflicts).filter(field => !forceFields.includes(field));
+      if (unforcedConflicts.length > 0) {
+        return sendJson(res, 409, { error: "This asset changed while you were editing it.", asset: post, conflicts });
+      }
+      const updatedPost = applyAssetChanges(post, changes, body.actor || account, new Date().toISOString());
+      const postIndex = planner.posts.findIndex(item => item.id === post.id);
+      planner.posts[postIndex] = updatedPost;
+      upsertTeamMember(planner, body.actor || account);
+      addActivity(planner, body.reason ? `${body?.actor?.name || account?.name || "Team"} ${body.reason}` : `${body?.actor?.name || account?.name || "Team"} updated planned content`);
+      await writePlanner(planner);
+      return sendJson(res, 200, { asset: updatedPost, merged: submittedRevision !== post.revision });
+    }
+
     if (url.pathname === "/api/assets" && req.method === "POST") {
       const body = await readBody(req);
       const match = String(body?.data || "").match(/^data:([^;]+);base64,(.+)$/s);

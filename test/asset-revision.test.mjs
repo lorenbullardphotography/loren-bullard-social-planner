@@ -62,3 +62,150 @@ test("detects same-field conflicts when fieldUpdatedRevision is newer than submi
   assert.equal(conflicts.caption.updatedAt, "2026-09-08T20:00:00.000Z");
   assert.equal(conflicts.notes, undefined);
 });
+
+import { EventEmitter } from "node:events";
+import { handleRequest } from "../server.mjs";
+import { writeStored } from "../lib/store.mjs";
+
+function createMockReq({ method = "GET", url = "/", body = null, headers = {} }) {
+  const req = new EventEmitter();
+  req.method = method;
+  req.url = url;
+  req.headers = { host: "localhost:8787", ...headers };
+  process.nextTick(() => {
+    if (body != null) {
+      req.emit("data", Buffer.from(typeof body === "string" ? body : JSON.stringify(body)));
+    }
+    req.emit("end");
+  });
+  return req;
+}
+
+function createMockRes() {
+  return {
+    statusCode: 200,
+    headers: {},
+    body: "",
+    writeHead(code, headers) {
+      this.statusCode = code;
+      Object.assign(this.headers, headers);
+    },
+    setHeader(name, value) {
+      this.headers[name] = value;
+    },
+    end(data) {
+      if (data) this.body += data;
+      this.resolve?.({
+        status: this.statusCode,
+        headers: this.headers,
+        body: this.body ? JSON.parse(this.body) : null
+      });
+    }
+  };
+}
+
+async function makeRequest(options) {
+  const req = createMockReq(options);
+  const res = createMockRes();
+  const promise = new Promise(resolve => { res.resolve = resolve; });
+  await handleRequest(req, res);
+  return promise;
+}
+
+async function setupAuthenticatedPlanner() {
+  const loginRes = await makeRequest({ method: "POST", url: "/auth/login", body: { login: "Loren", password: "admin" } });
+  const cookie = (loginRes.headers["Set-Cookie"] || "").split(";")[0];
+
+  const post = normalizePost({
+    id: "asset-patch-test",
+    image: "/photo.jpg",
+    revision: 3,
+    caption: "Teammate caption",
+    notes: "Old notes",
+    fieldUpdatedRevision: { caption: 3, notes: 2 },
+    fieldUpdatedAt: { caption: "2026-09-08T19:00:00.000Z" },
+    fieldUpdatedBy: { caption: "Brooke" }
+  });
+
+  await writeStored("planner-data", {
+    version: 1,
+    posts: [post],
+    scratch: [],
+    team: [],
+    activity: [],
+    settings: { syncPhotoCount: 12, workflowAutomations: [] }
+  });
+
+  return { cookie, postId: post.id };
+}
+
+test("merges a stale edit to a different field", async () => {
+  const { cookie, postId } = await setupAuthenticatedPlanner();
+  const result = await makeRequest({
+    method: "PATCH",
+    url: `/api/assets/${postId}`,
+    headers: { cookie },
+    body: { revision: 2, changes: { notes: "New notes" }, actor: { name: "Loren" } }
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.merged, true);
+  assert.equal(result.body.asset.caption, "Teammate caption");
+  assert.equal(result.body.asset.notes, "New notes");
+  assert.equal(result.body.asset.revision, 4);
+});
+
+test("returns a structured conflict for a stale same-field edit", async () => {
+  const { cookie, postId } = await setupAuthenticatedPlanner();
+  const result = await makeRequest({
+    method: "PATCH",
+    url: `/api/assets/${postId}`,
+    headers: { cookie },
+    body: { revision: 2, changes: { caption: "My caption" }, actor: { name: "Loren" } }
+  });
+
+  assert.equal(result.status, 409);
+  assert.equal(result.body.conflicts.caption.currentValue, "Teammate caption");
+});
+
+test("applies an explicitly forced same-field edit", async () => {
+  const { cookie, postId } = await setupAuthenticatedPlanner();
+  const result = await makeRequest({
+    method: "PATCH",
+    url: `/api/assets/${postId}`,
+    headers: { cookie },
+    body: { revision: 2, changes: { caption: "My caption" }, forceFields: ["caption"], actor: { name: "Loren" } }
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.asset.caption, "My caption");
+  assert.equal(result.body.asset.revision, 4);
+});
+
+test("returns 404 if asset does not exist", async () => {
+  const { cookie } = await setupAuthenticatedPlanner();
+  const result = await makeRequest({
+    method: "PATCH",
+    url: "/api/assets/non-existent-id",
+    headers: { cookie },
+    body: { revision: 1, changes: { caption: "My caption" } }
+  });
+
+  assert.equal(result.status, 404);
+  assert.equal(result.body.error, "This asset was removed by a teammate.");
+});
+
+test("returns 400 if changes object contains no valid editable fields", async () => {
+  const { cookie, postId } = await setupAuthenticatedPlanner();
+  const result = await makeRequest({
+    method: "PATCH",
+    url: `/api/assets/${postId}`,
+    headers: { cookie },
+    body: { revision: 3, changes: { invalidField: "test" } }
+  });
+
+  assert.equal(result.status, 400);
+  assert.equal(result.body.error, "Choose at least one asset field to update.");
+});
+
+
