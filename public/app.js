@@ -1,6 +1,6 @@
 const USER_KEY = "lb-content-planner-user-v1";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
-let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "grid", editorReturnView = "grid", libraryFilter = "all", librarySearch = "";
+let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "grid", editorReturnView = "grid", libraryFilter = "all", librarySearch = "", librarySection = "assets";
 let settings = { pillars: [], formats: ["IMAGE", "REEL", "CAROUSEL"], goals: [], syncPhotoCount: 12 };
 let calCursor = new Date(); calCursor.setDate(1);
 
@@ -1022,7 +1022,17 @@ function renderScratch() {
   host.innerHTML = entries.length ? entries.map(entry => `<article class="scratch-card" data-scratch-id="${esc(entry.id)}"><div class="scratch-card-head"><div><span class="eyebrow">${esc(entry.createdBy || "Team")}</span><h4>${esc(entry.title || "Untitled idea")}</h4></div><button class="ghost scratch-archive" type="button">Archive</button></div>${entry.image ? `<img src="${esc(entry.image)}" alt="">` : ""}<p>${esc(entry.body || "")}</p><div class="scratch-tags">${(entry.tags || []).map(tag => `<span>#${esc(tag)}</span>`).join("")}</div><div class="scratch-card-actions"><button class="ghost scratch-edit" type="button">Edit</button><button class="danger scratch-delete" type="button">Delete</button></div></article>`).join("") : `<div class="empty">Your Scratch Book is empty. Capture the next idea before it gets away.</div>`;
   $$(".scratch-archive").forEach(button => button.onclick = async event => { const entry = scratch.find(item => item.id === event.currentTarget.closest("[data-scratch-id]").dataset.scratchId); if (!entry) return; entry.status = "archived"; entry.updatedBy = currentUser.name; entry.updatedAt = new Date().toISOString(); renderScratch(); await persistPlanner("archived a Scratch Book idea"); });
   $$(".scratch-delete").forEach(button => button.onclick = async event => { const id = event.currentTarget.closest("[data-scratch-id]").dataset.scratchId; scratch = scratch.filter(entry => entry.id !== id); renderScratch(); await persistPlanner("deleted a Scratch Book idea"); });
-  $$(".scratch-edit").forEach(button => button.onclick = () => { const card = button.closest("[data-scratch-id]"), entry = scratch.find(item => item.id === card.dataset.scratchId); if (!entry) return; $("#scratchTitle").value = entry.title; $("#scratchBody").value = entry.body; $("#scratchImage").value = entry.image; $("#scratchTags").value = (entry.tags || []).join(", "); $("#scratchForm").dataset.editing = entry.id; $("#scratchForm button[type=submit]").textContent = "Update Scratch Book idea"; window.scrollTo({ top: 0, behavior: "smooth" }); });
+  $$(".scratch-edit").forEach(button => button.onclick = () => { const card = button.closest("[data-scratch-id]"), entry = scratch.find(item => item.id === card.dataset.scratchId); if (!entry) return; $("#scratchTitle").value = entry.title; $("#scratchBody").value = entry.body; $("#scratchImage").value = entry.image; $("#scratchTags").value = (entry.tags || []).join(", "); $("#scratchForm").dataset.editing = entry.id; $("#scratchForm button[type=submit]").textContent = "Update idea"; setLibrarySection("ideas"); window.scrollTo({ top: 0, behavior: "smooth" }); });
+}
+function setLibrarySection(section) {
+  librarySection = section === "ideas" ? "ideas" : "assets";
+  $("#assetLibraryPanel").classList.toggle("hidden", librarySection !== "assets");
+  $("#ideasPanel").classList.toggle("hidden", librarySection !== "ideas");
+  $("#assetLibraryTab").classList.toggle("active", librarySection === "assets");
+  $("#ideasTab").classList.toggle("active", librarySection === "ideas");
+  $("#assetLibraryTab").setAttribute("aria-selected", String(librarySection === "assets"));
+  $("#ideasTab").setAttribute("aria-selected", String(librarySection === "ideas"));
+  if (librarySection === "ideas") renderScratch();
 }
 function renderApprovals() {
   const columns = [["drafting", "Drafting"], ["needs-review", "Needs Review"], ["feedback", "Feedback"], ["approved", "Approved"], ["ready-meta", "Ready for Meta"], ["meta-scheduled", "Scheduled in Meta"]];
@@ -1046,12 +1056,12 @@ function switchView(name) {
   $$(".view").forEach(view => view.classList.add("hidden"));
   $(`#view-${name}`).classList.remove("hidden");
   $$(".nav").forEach(nav => nav.classList.toggle("active", nav.dataset.view === name));
-  $("#pageTitle").textContent = { grid: "Grid Planner", calendar: "Calendar", library: "Content Library", scratch: "Scratch Book", approvals: "Approvals", activity: "Team Activity", editor: "Edit post", settings: "Settings" }[name];
+  $("#pageTitle").textContent = { grid: "Grid Planner", calendar: "Calendar", library: "Library", approvals: "Approvals", activity: "Team Activity", editor: "Edit post", settings: "Settings" }[name];
   if (name !== "grid") $("#inspector").innerHTML = "";
   if (name !== "editor") $("#postEditor").innerHTML = "";
   if (name === "settings") renderPlannerSettings();
   if (name === "activity") renderActivity();
-  if (name === "scratch") renderScratch();
+  if (name === "library") { setLibrarySection(librarySection); renderLibrary(); }
   if (name === "grid") renderInspector();
   if (name === "editor") renderInspector("#postEditor");
 }
@@ -1203,6 +1213,8 @@ $$(".chip").forEach(chip => chip.onclick = () => {
   renderLibrary();
 });
 $("#librarySearch").oninput = event => { librarySearch = event.target.value.trim(); renderLibrary(); };
+$("#assetLibraryTab").onclick = () => setLibrarySection("assets");
+$("#ideasTab").onclick = () => setLibrarySection("ideas");
 $("#scratchForm").onsubmit = async event => {
   event.preventDefault();
   const form = event.currentTarget;

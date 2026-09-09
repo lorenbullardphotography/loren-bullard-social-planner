@@ -18,8 +18,7 @@
     <nav>
       <button class="nav active" data-view="grid"><span>▦</span> Grid Planner</button>
       <button class="nav" data-view="calendar"><span>□</span> Calendar</button>
-      <button class="nav" data-view="library"><span>◫</span> Content Library</button>
-      <button class="nav" data-view="scratch"><span>✎</span> Scratch Book</button>
+      <button class="nav" data-view="library"><span>◫</span> Library</button>
       <button class="nav" data-view="approvals"><span>✓</span> Approvals</button>
       <button class="nav" data-view="activity"><span>◷</span> Team Activity</button>
       <button class="nav" data-view="settings"><span>⚙</span> Settings</button>
@@ -87,12 +86,13 @@
     </section>
 
     <section id="view-library" class="view hidden">
-      <div class="intro"><div><h3>Content Library</h3><p>All drafts and future posts in one place.</p></div><div class="library-tools"><input id="librarySearch" placeholder="Search content…"><div class="filters"><button class="chip active" data-filter="all">All</button><button class="chip" data-filter="draft">Drafts</button><button class="chip" data-filter="planned">Planned</button><button class="chip" data-filter="approved">Approved</button></div></div></div>
-      <div id="library" class="library"></div>
-    </section>
-
-    <section id="view-scratch" class="view hidden">
-      <div class="intro"><div><h3>Scratch Book</h3><p>Capture ideas, loose notes, and image concepts before they become planned content.</p></div></div>
+      <div class="intro"><div><h3>Library</h3><p>Keep planned assets and early-stage ideas together, with each in its own workspace.</p></div></div>
+      <div class="library-tabs" role="tablist" aria-label="Library sections"><button id="assetLibraryTab" class="library-tab active" type="button" role="tab" aria-selected="true">Asset Library</button><button id="ideasTab" class="library-tab" type="button" role="tab" aria-selected="false">Ideas</button></div>
+      <div id="assetLibraryPanel" role="tabpanel">
+        <div class="intro"><div><h3>Asset Library</h3><p>All drafts and future posts in one place.</p></div><div class="library-tools"><input id="librarySearch" placeholder="Search content…"><div class="filters"><button class="chip active" data-filter="all">All</button><button class="chip" data-filter="draft">Drafts</button><button class="chip" data-filter="planned">Planned</button><button class="chip" data-filter="approved">Approved</button></div></div></div>
+        <div id="library" class="library"></div>
+      </div>
+      <div id="ideasPanel" class="hidden" role="tabpanel">
       <div class="scratch-layout">
         <form id="scratchForm" class="scratch-composer">
           <p class="eyebrow">NEW IDEA</p><h4>Save a thought</h4>
@@ -100,9 +100,10 @@
           <label class="field">Notes<textarea id="scratchBody" rows="8" maxlength="6000" placeholder="Write the idea, story, or visual direction…"></textarea></label>
           <label class="field">Image URL<input id="scratchImage" maxlength="2000" type="url" placeholder="Optional reference image link"></label>
           <label class="field">Tags<input id="scratchTags" maxlength="300" placeholder="e.g. newborn, behind the scenes"></label>
-          <button class="primary" type="submit">Save to Scratch Book</button>
+          <button class="primary" type="submit">Save idea</button>
         </form>
         <div id="scratchList" class="scratch-list"></div>
+      </div>
       </div>
     </section>
 
