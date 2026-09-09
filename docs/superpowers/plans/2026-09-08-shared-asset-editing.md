@@ -30,7 +30,7 @@
 - Produces: `normalizePost(post)`, `normalizeAssetChanges(changes)`, `applyAssetChanges(post, changes, actor, now)`, and `assetConflicts(post, submittedRevision, changes)`.
 - Consumes: existing workflow validation, field limits, and `normalizePost` field rules.
 
-- [ ] **Step 1: Write failing tests for legacy revisions and field-level metadata**
+- [x] **Step 1: Write failing tests for legacy revisions and field-level metadata**
 
 ```js
 test("normalizes a legacy post with an initial revision", () => {
@@ -53,13 +53,13 @@ test("records metadata only for fields that changed", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to confirm it fails**
+- [x] **Step 2: Run the test to confirm it fails**
 
 Run: `node --test test/asset-revision.test.mjs`
 
 Expected: FAIL because the revision-aware helpers are not exported or implemented.
 
-- [ ] **Step 3: Implement normalized revision metadata and bounded editable fields**
+- [x] **Step 3: Implement normalized revision metadata and bounded editable fields**
 
 Add these exported constants and helpers near `normalizePost`:
 
@@ -80,13 +80,13 @@ export function normalizeAssetChanges(changes = {}) {
 
 Extend `normalizePost` to return `revision: Math.max(1, Number(post?.revision) || 1)` plus sanitized `fieldUpdatedRevision`, `fieldUpdatedAt`, and `fieldUpdatedBy` objects limited to `ASSET_EDITABLE_FIELDS`. Implement `applyAssetChanges` to copy only normalized changed fields, increment the asset revision once, record that new revision plus actor/timestamp metadata for each changed field, and update `updatedBy`/`updatedAt`.
 
-- [ ] **Step 4: Run the revision tests to confirm they pass**
+- [x] **Step 4: Run the revision tests to confirm they pass**
 
 Run: `node --test test/asset-revision.test.mjs`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the isolated data-model work**
+- [x] **Step 5: Commit the isolated data-model work**
 
 ```bash
 git add server.mjs test/asset-revision.test.mjs
@@ -103,7 +103,7 @@ git commit -m "Add revision metadata to planner assets"
 - Consumes: `PATCH /api/assets/:id` body `{ revision, changes, forceFields?, actor? }`.
 - Produces: `200 { asset, merged }`, `400 { error }`, `404 { error }`, or `409 { error, asset, conflicts }`.
 
-- [ ] **Step 1: Write failing endpoint tests for non-overlap, overlap, and a forced field**
+- [x] **Step 1: Write failing endpoint tests for non-overlap, overlap, and a forced field**
 
 ```js
 test("merges a stale edit to a different field", async () => {
@@ -127,13 +127,13 @@ test("applies an explicitly forced same-field edit", async () => {
 });
 ```
 
-- [ ] **Step 2: Run the endpoint tests to confirm they fail**
+- [x] **Step 2: Run the endpoint tests to confirm they fail**
 
 Run: `node --test test/asset-revision.test.mjs`
 
 Expected: FAIL because no PATCH route exists.
 
-- [ ] **Step 3: Implement `PATCH /api/assets/:id`**
+- [x] **Step 3: Implement `PATCH /api/assets/:id`**
 
 Insert the route before the existing `POST /api/assets` upload route. It must:
 
@@ -146,19 +146,19 @@ if (!Object.keys(changes).length) return sendJson(res, 400, { error: "Choose at 
 
 Compare `body.revision` to `post.revision`. For a stale request, create `conflicts` from fields whose `fieldUpdatedRevision[field] > body.revision`. Return `409` unless every conflicted field is included in `forceFields`. Otherwise call `applyAssetChanges`, replace only the matching post in `planner.posts`, add one activity entry, write the planner, and return the normalized saved asset with `merged: submittedRevision !== post.revision`.
 
-- [ ] **Step 4: Run endpoint tests to confirm they pass**
+- [x] **Step 4: Run endpoint tests to confirm they pass**
 
 Run: `node --test test/asset-revision.test.mjs`
 
 Expected: PASS.
 
-- [ ] **Step 5: Run the full server test suite**
+- [x] **Step 5: Run the full server test suite**
 
 Run: `node --test test/*.test.mjs`
 
 Expected: PASS with no test failures.
 
-- [ ] **Step 6: Commit the endpoint**
+- [x] **Step 6: Commit the endpoint**
 
 ```bash
 git add server.mjs test/asset-revision.test.mjs
@@ -175,7 +175,7 @@ git commit -m "Add conflict-aware asset patch endpoint"
 - Consumes: `PATCH /api/assets/:id` response described in Task 2.
 - Produces: `assetEditorBaseline(post)`, `assetEditorChanges(baseline, edited)`, and `replaceAsset(savedAsset)`.
 
-- [ ] **Step 1: Write failing browser-state tests**
+- [x] **Step 1: Write failing browser-state tests**
 
 ```js
 test("sends only fields changed in the asset editor", () => {
@@ -189,13 +189,13 @@ test("replaces only the saved asset in local planner state", () => {
 });
 ```
 
-- [ ] **Step 2: Run the browser-state tests to confirm they fail**
+- [x] **Step 2: Run the browser-state tests to confirm they fail**
 
 Run: `node --test test/asset-save-conflict.test.mjs`
 
 Expected: FAIL because the new helpers do not exist.
 
-- [ ] **Step 3: Implement asset-specific browser persistence**
+- [x] **Step 3: Implement asset-specific browser persistence**
 
 Add helpers before `renderGrid`:
 
@@ -213,13 +213,13 @@ function assetEditorChanges(baseline, edited) {
 
 Capture the baseline when the standalone editor opens. Replace the Save handler’s call to `persistPlanner("updated planned content")` with `api(`/api/assets/${post.id}`, { method: "PATCH", ... })`. On `200`, replace only the returned asset in `posts`, render views, notify, and return to `editorReturnView`. Delete the current full-planner conflict retry for this save path.
 
-- [ ] **Step 4: Run the browser-state tests to confirm they pass**
+- [x] **Step 4: Run the browser-state tests to confirm they pass**
 
 Run: `node --test test/asset-save-conflict.test.mjs`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the client save-path change**
+- [x] **Step 5: Commit the client save-path change**
 
 ```bash
 git add public/app.js test/asset-save-conflict.test.mjs
@@ -237,7 +237,7 @@ git commit -m "Save asset edits through revision-aware patches"
 - Consumes: `409 { asset, conflicts }` from Task 2 and the local pending `changes` object.
 - Produces: inline controls with `data-conflict-field`, Keep mine, and Use latest actions.
 
-- [ ] **Step 1: Write failing tests for conflict choices**
+- [x] **Step 1: Write failing tests for conflict choices**
 
 ```js
 test("keeps only conflicted fields pending after choosing the latest value", () => {
@@ -249,13 +249,13 @@ test("adds a selected field to the explicit force list", () => {
 });
 ```
 
-- [ ] **Step 2: Run the conflict-choice tests to confirm they fail**
+- [x] **Step 2: Run the conflict-choice tests to confirm they fail**
 
 Run: `node --test test/asset-save-conflict.test.mjs`
 
 Expected: FAIL because the conflict helpers do not exist.
 
-- [ ] **Step 3: Implement the inline conflict panel and choices**
+- [x] **Step 3: Implement the inline conflict panel and choices**
 
 When the asset patch returns `409`, retain all editor form values, store `{ asset, conflicts, changes }` in editor-local state, and insert a panel above the Save action. For each conflict, show the field label, the teammate’s current value, their name/time, and two buttons:
 
@@ -268,13 +268,13 @@ Keep mine includes the field in `forceFields`; Use latest replaces that field in
 
 Add concise styles for the panel, field values, and buttons using the planner’s existing error and ghost-button palette.
 
-- [ ] **Step 4: Run the conflict-choice tests to confirm they pass**
+- [x] **Step 4: Run the conflict-choice tests to confirm they pass**
 
 Run: `node --test test/asset-save-conflict.test.mjs`
 
 Expected: PASS.
 
-- [ ] **Step 5: Run complete verification and commit**
+- [x] **Step 5: Run complete verification and commit**
 
 Run: `node --check public/app.js && node --check server.mjs && node --test test/*.test.mjs && git diff --check`
 
@@ -294,7 +294,7 @@ git commit -m "Resolve same-field asset edit conflicts"
 - Consumes: the revised `public/app.js` asset bundle.
 - Produces: a cache-busted production script URL.
 
-- [ ] **Step 1: Bump the `app.js` query version**
+- [x] **Step 1: Bump the `app.js` query version**
 
 Change the only application script tag to a new dated version string, for example:
 
@@ -302,13 +302,13 @@ Change the only application script tag to a new dated version string, for exampl
 <script src="/app.js?v=20260908-asset-revisions"></script>
 ```
 
-- [ ] **Step 2: Re-run complete verification**
+- [x] **Step 2: Re-run complete verification**
 
 Run: `node --check public/app.js && node --check server.mjs && node --test test/*.test.mjs && git diff --check`
 
 Expected: all checks pass.
 
-- [ ] **Step 3: Commit and push only the shared-editing work**
+- [x] **Step 3: Commit and push only the shared-editing work**
 
 ```bash
 git add public/index.html
