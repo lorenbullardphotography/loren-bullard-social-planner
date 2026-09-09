@@ -340,20 +340,23 @@ async function getInstagramProfile(token) {
   url.searchParams.set("access_token", token);
   return fetchJson(url);
 }
-async function getInstagramMedia(token, limit = 12) {
+async function getInstagramMedia(token, limit = null) {
   const all = [];
   let url = new URL(`https://graph.instagram.com/${API_VERSION}/me/media`);
   url.searchParams.set("fields", "id,caption,media_type,media_url,thumbnail_url,permalink,timestamp");
-  url.searchParams.set("limit", String(Math.min(100, Math.max(3, Number(limit) || 12))));
+  url.searchParams.set("limit", "100");
   url.searchParams.set("access_token", token);
 
-  for (let page = 0; page < 10 && url; page++) {
+  for (let page = 0; page < 50 && url; page++) {
     const result = await fetchJson(url);
     all.push(...(result.data || []));
     const next = result.paging?.next;
     url = next ? new URL(next) : null;
   }
-  return all.slice(0, Math.min(100, Math.max(3, Number(limit) || 12)));
+  if (limit !== null && limit !== undefined) {
+    return all.slice(0, Math.min(100, Math.max(3, Number(limit) || 12)));
+  }
+  return all;
 }
 async function exchangeCodeForToken(code) {
   const body = new URLSearchParams({
@@ -946,7 +949,7 @@ export async function handleRequest(req, res) {
       const planner = await readPlanner();
       const [profile, media] = await Promise.all([
         getInstagramProfile(session.access_token),
-        getInstagramMedia(session.access_token, planner.settings.syncPhotoCount)
+        getInstagramMedia(session.access_token)
       ]);
       upsertTeamMember(planner, body.actor);
       mergeInstagramPosts(planner, media, body?.actor?.name || "Instagram sync");

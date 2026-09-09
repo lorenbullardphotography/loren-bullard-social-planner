@@ -64,7 +64,7 @@ function visiblePosted() {
     .slice(0, Number(settings.syncPhotoCount) || 12);
 }
 function calendarPosts() {
-  return calendarShowInstagram ? [...future(), ...visiblePosted()] : future();
+  return calendarShowInstagram ? [...future(), ...posted()] : future();
 }
 function ordered() { return [...future(), ...visiblePosted()]; }
 function esc(s = "") { return s.replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m])); }
@@ -1418,6 +1418,7 @@ function renderCalendar() {
       node.classList.add("instagram-post", "instagram-badge");
       node.dataset.instagram = "true";
       node.draggable = false;
+      node.setAttribute("aria-label", `Open ${esc(post.caption || "Instagram post")} on Instagram`);
     }
   });
   const today = new Date();
@@ -1429,15 +1430,41 @@ function renderCalendar() {
   $("#calendarAgenda").innerHTML = Object.entries(grouped).map(([date, items]) => `<section class="agenda-day"><div class="agenda-date"><strong>${new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: "short" })}</strong><span>${new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span><small>${items.length} ${items.length === 1 ? "post" : "posts"}</small></div><div class="agenda-posts">${items.map(post => calendarPostMarkup(post)).join("")}</div></section>`).join("") || `<div class="empty">No planned posts this month.</div>`;
   $("#calendarAgenda .cal-post").forEach(node => {
     const post = posts.find(item => item.id === node.dataset.open);
-    if (post?.status === "posted") { node.classList.add("instagram-post", "instagram-badge"); node.dataset.instagram = "true"; node.draggable = false; }
+    if (post?.status === "posted") {
+      node.classList.add("instagram-post", "instagram-badge");
+      node.dataset.instagram = "true";
+      node.draggable = false;
+      node.setAttribute("aria-label", `Open ${esc(post.caption || "Instagram post")} on Instagram`);
+    }
   });
-  $("#calendar").querySelectorAll("[data-open]").forEach(node => node.onclick = () => {
-    if (Date.now() < suppressCalendarClickUntil) return;
-    openPost(node.dataset.open, true);
+  const handleCalendarPostClick = id => {
+    const post = posts.find(item => item.id === id);
+    if (post?.status === "posted") {
+      window.open(post.permalink || "https://www.instagram.com/", "_blank", "noopener,noreferrer");
+      return;
+    }
+    openPost(id, true);
+  };
+  $("#calendar").querySelectorAll("[data-open]").forEach(node => {
+    node.onclick = () => {
+      if (Date.now() < suppressCalendarClickUntil) return;
+      handleCalendarPostClick(node.dataset.open);
+    };
+    node.onkeydown = event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        handleCalendarPostClick(node.dataset.open);
+      }
+    };
   });
   $("#calendarAgenda").querySelectorAll("[data-open]").forEach(node => {
-    node.onclick = () => openPost(node.dataset.open, true);
-    node.onkeydown = event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openPost(node.dataset.open, true); } };
+    node.onclick = () => handleCalendarPostClick(node.dataset.open);
+    node.onkeydown = event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        handleCalendarPostClick(node.dataset.open);
+      }
+    };
   });
   $$('[data-calendar-more]').forEach(button => button.onclick = event => {
     event.stopPropagation();
@@ -1764,6 +1791,8 @@ $("#importInput").onchange = async event => {
 $$(".nav").forEach(nav => nav.onclick = () => switchView(nav.dataset.view));
 $("#mobileMenuBtn").onclick = toggleMobileMenu;
 $("#mobileMenuBackdrop").onclick = closeMobileMenu;
+const mobileDrawerClose = $("#mobileDrawerClose");
+if (mobileDrawerClose) mobileDrawerClose.onclick = closeMobileMenu;
 document.addEventListener("keydown", event => { if (event.key === "Escape") closeMobileMenu(); });
 $("#myTasksTab").onclick = () => { taskTab = "mine"; approvalDetail = null; renderTasks(); };
 $("#teamTasksTab").onclick = () => { taskTab = "team"; approvalDetail = null; renderTasks(); };

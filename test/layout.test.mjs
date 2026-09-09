@@ -119,3 +119,23 @@ test("supports showing and hiding synced Instagram posts on the calendar", () =>
   assert.match(app, /instagram-badge/);
   assert.match(app, /status === "posted"/);
 });
+
+test("pulls all synced posts in calendar view while grid view respects settings sync count", () => {
+  const app = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(app, /function calendarPosts\(\)\s*\{[\s\S]*?calendarShowInstagram \? \[\.\.\.future\(\), \.\.\.posted\(\)\] : future\(\)/);
+  assert.match(app, /function visiblePosted\(\)\s*\{[\s\S]*?\.slice\(0, Number\(settings\.syncPhotoCount\) \|\| 12\)/);
+  assert.match(app, /function ordered\(\)\s*\{ return \[\.\.\.future\(\), \.\.\.visiblePosted\(\)\]; \}/);
+});
+
+test("opens instagram post in a separate tab when clicked in calendar view", () => {
+  const app = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(app, /window\.open\(post\.permalink \|\| "https:\/\/www\.instagram\.com\/", "_blank", "noopener,noreferrer"\)/);
+  assert.match(app, /node\.setAttribute\("aria-label", `Open \$\{esc\(post\.caption \|\| "Instagram post"\)\} on Instagram`\)/);
+});
+
+test("server syncs all instagram media without restricting by syncPhotoCount", () => {
+  const server = fs.readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(server, /async function getInstagramMedia\(token, limit = null\)/);
+  assert.match(server, /getInstagramMedia\(session\.access_token\)/);
+});
+
