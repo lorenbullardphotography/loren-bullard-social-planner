@@ -1,6 +1,6 @@
 const USER_KEY = "lb-content-planner-user-v1";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
-let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "grid", editorReturnView = "grid", libraryFilter = "all", librarySearch = "", librarySection = "assets";
+let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "grid", editorReturnView = "grid", libraryFilter = "all", librarySearch = "", librarySection = "assets", editorDirty = false, editorSaveInProgress = false;
 let settings = { pillars: [], formats: ["IMAGE", "REEL", "CAROUSEL"], goals: [], syncPhotoCount: 12 };
 let calCursor = new Date(); calCursor.setDate(1);
 
@@ -190,7 +190,14 @@ async function loadPlanner() {
     body: JSON.stringify({ actor: currentUser })
   }).then(setPlanner).catch(() => {});
 }
+function shouldRefreshPlanner({ currentView, editorDirty, editorSaveInProgress }) {
+  return currentView !== "editor" || (!editorDirty && !editorSaveInProgress);
+}
+function editorDestinationAfterSave(currentView, editorReturnView) {
+  return currentView === "editor" ? editorReturnView : currentView;
+}
 async function refreshSharedPlanner() {
+  if (!shouldRefreshPlanner({ currentView, editorDirty, editorSaveInProgress })) return;
   try {
     const latest = await api("/api/planner");
     if (Number(latest?.version || 0) > plannerVersion) {
@@ -484,7 +491,10 @@ async function heartbeat() {
 }
 function renderActivity() {
   $("#activityList").innerHTML = activity.length
-    ? activity.map(item => `<article class="activity-item"><strong>${esc(item.text)}</strong><span>${new Date(item.at).toLocaleString()}</span></article>`).join("")
+    ? activity.map(item => {
+      const at = new Date(item.at);
+      return `<article class="activity-item"><time datetime="${esc(item.at)}">${at.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</time><strong>${esc(item.text)}</strong></article>`;
+    }).join("")
     : `<div class="empty">Shared activity will appear here as the team edits, approves, and syncs content.</div>`;
 }
 function renderGrid() {
@@ -712,6 +722,12 @@ function renderInspector(hostSelector = "#inspector") {
     </div>
     <div class="actions"><button id="saveEdit" class="primary">Save</button><button id="deleteEdit" class="danger">Delete</button></div>
   </div>`;
+  if (hostSelector === "#postEditor") {
+    host.querySelectorAll("input, select, textarea").forEach(control => {
+      control.addEventListener("input", () => { editorDirty = true; });
+      control.addEventListener("change", () => { editorDirty = true; });
+    });
+  }
   qq("[data-ap]").forEach(button => {
     button.onclick = async () => {
       applyWorkflow(post, button.dataset.ap);
@@ -783,6 +799,7 @@ function renderInspector(hostSelector = "#inspector") {
   q("#saveEdit").onclick = async () => {
     const previousPost = { ...post };
     const saveButton = q("#saveEdit");
+    editorSaveInProgress = true;
     saveButton.disabled = true;
     saveButton.textContent = "Saving…";
     post.type = q("#eType").value;
@@ -807,12 +824,16 @@ function renderInspector(hostSelector = "#inspector") {
     post.updatedAt = new Date().toISOString();
     try {
       await persistPlanner("updated planned content");
+      editorDirty = false;
       renderAll();
+      switchView(editorDestinationAfterSave(currentView, editorReturnView));
       notify("Post updated");
     } catch (error) {
       if (error.status !== 409) Object.assign(post, previousPost);
       renderAll();
       notify(error.message || "The post could not be saved");
+    } finally {
+      editorSaveInProgress = false;
     }
   };
   q("#deleteEdit").onclick = async () => {
@@ -1042,6 +1063,7 @@ function renderApprovals() {
 function openPost(id, openEditor = false) {
   selected = id;
   if (openEditor) {
+    editorDirty = false;
     editorReturnView = currentView;
     switchView("editor");
   } else {
@@ -1312,7 +1334,10 @@ $("#settingsDisconnect").onclick = async () => {
   await checkInstagram();
   notify("Instagram disconnected");
 };
-$("#backToGrid").onclick = () => switchView(editorReturnView);
+$("#backToGrid").onclick = () => {
+  if (editorSaveInProgress) return notify("Saving your changes…");
+  switchView(editorReturnView);
+};
 $("#closeSettings").onclick = () => $("#settingsModal").classList.add("hidden");
 $("#settingsModal").onclick = event => { if (event.target.id === "settingsModal") $("#settingsModal").classList.add("hidden"); };
 $("#disconnectBtn").onclick = async () => {
