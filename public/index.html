@@ -103,22 +103,34 @@
         <div id="library" class="library"></div>
       </div>
       <div id="ideasPanel" class="hidden" role="tabpanel">
-      <div class="scratch-layout">
-        <form id="scratchForm" class="scratch-composer">
-          <p class="eyebrow">NEW IDEA</p><h4>Save a thought</h4>
-          <label class="field">Title<input id="scratchTitle" maxlength="160" placeholder="A thought to come back to…" required></label>
-          <label class="field">Notes<textarea id="scratchBody" rows="8" maxlength="6000" placeholder="Write the idea, story, or visual direction…"></textarea></label>
-          <div class="field">Content brief
-            <label class="field nested">Goal<input id="scratchGoal" maxlength="240" placeholder="What should this idea accomplish?"></label>
-            <label class="field nested">Hook<input id="scratchHook" maxlength="300" placeholder="Opening line or visual hook"></label>
-            <label class="field nested">Call to action<input id="scratchCta" maxlength="240" placeholder="Book, comment, save…"></label>
-          </div>
-          <label class="field">Image URL<input id="scratchImage" maxlength="2000" type="url" placeholder="Optional reference image link"></label>
-          <label class="field">Tags<input id="scratchTags" maxlength="300" placeholder="e.g. newborn, behind the scenes"></label>
-          <button class="primary" type="submit">Save idea</button>
-        </form>
-        <div id="scratchList" class="scratch-list"></div>
-      </div>
+        <div class="scratch-layout">
+          <form id="scratchForm" class="scratch-composer">
+            <div class="scratch-composer-head"><p class="eyebrow">NEW IDEA</p><h4>Save a thought</h4></div>
+            <label class="field">Title<input id="scratchTitle" maxlength="160" placeholder="A thought to come back to…" required></label>
+            <div class="two">
+              <label class="field">Format<select id="scratchFormat"><option value="">Choose a format</option></select></label>
+              <label class="field">Content pillar<select id="scratchPillar"><option value="">Choose a pillar</option></select></label>
+            </div>
+            <label class="field">Notes<textarea id="scratchBody" rows="5" maxlength="6000" placeholder="Write the idea, story, or visual direction…"></textarea></label>
+            <div class="field scratch-brief-field">
+              <span>Content brief</span>
+              <div class="scratch-brief-inputs">
+                <label class="field nested">Goal<input id="scratchGoal" maxlength="240" placeholder="What should this idea accomplish?"></label>
+                <label class="field nested">Hook<input id="scratchHook" maxlength="300" placeholder="Opening line or visual hook"></label>
+                <label class="field nested">Call to action<input id="scratchCta" maxlength="240" placeholder="Book, comment, save…"></label>
+              </div>
+            </div>
+            <div class="two">
+              <label class="field">Image URL<input id="scratchImage" maxlength="2000" type="url" placeholder="Optional reference image link"></label>
+              <label class="field">Tags<input id="scratchTags" maxlength="300" placeholder="e.g. newborn, behind the scenes"></label>
+            </div>
+            <div class="scratch-form-actions">
+              <button class="primary" type="submit">Save idea</button>
+              <button id="scratchCancelEdit" class="ghost hidden" type="button">Cancel</button>
+            </div>
+          </form>
+          <div id="scratchList" class="scratch-list"></div>
+        </div>
       </div>
     </section>
 

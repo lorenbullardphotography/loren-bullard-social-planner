@@ -183,7 +183,7 @@ function activityType(item) {
   if (/sync/.test(text)) return "sync";
   if (/comment/.test(text)) return "comment";
   if (/setting|profile/.test(text)) return "settings";
-  if (/upload|asset|content|post/.test(text)) return "content";
+  if (/upload|asset|content|post|idea/.test(text)) return "content";
   return "update";
 }
 function filterActivity(items, type = "all") {
@@ -220,11 +220,29 @@ function scratchIdeaPayload(values) {
     title: String(values.title || "").trim(),
     body: String(values.body || "").trim(),
     image: String(values.image || "").trim(),
+    format: String(values.format || "").trim(),
+    pillar: String(values.pillar || "").trim(),
     tags: String(values.tags || "").split(",").map(tag => tag.trim().replace(/^#/, "")).filter(Boolean),
     goal: String(values.goal || "").trim(),
     hook: String(values.hook || "").trim(),
     cta: String(values.cta || "").trim()
   };
+}
+function populateScratchSelects() {
+  const formatEl = $("#scratchFormat");
+  const pillarEl = $("#scratchPillar");
+  if (formatEl) {
+    const currentVal = formatEl.value;
+    const formats = (settings?.formats && settings.formats.length) ? settings.formats : ["IMAGE", "REEL", "CAROUSEL"];
+    formatEl.innerHTML = '<option value="">Choose a format</option>' + formats.map(f => `<option value="${esc(f)}">${esc(f)}</option>`).join("");
+    if (currentVal) formatEl.value = currentVal;
+  }
+  if (pillarEl) {
+    const currentVal = pillarEl.value;
+    const pillars = (settings?.pillars && settings.pillars.length) ? settings.pillars : DEFAULT_PILLARS;
+    pillarEl.innerHTML = '<option value="">Choose a pillar</option>' + pillars.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+    if (currentVal) pillarEl.value = currentVal;
+  }
 }
 function setPlanner(data) {
   posts = (Array.isArray(data?.posts) ? data.posts : []).map(post => ({ ...post, assetKind: assetKindOf(post), assetSource: assetSourceOf(post) }));
@@ -235,6 +253,7 @@ function setPlanner(data) {
   settings = { pillars: DEFAULT_PILLARS, formats: ["IMAGE", "REEL", "CAROUSEL"], goals: ["Educate", "Connect", "Showcase work", "Book sessions", "Build trust"], syncPhotoCount: 12, workflowAutomations: {}, ...(data?.settings || {}) };
   plannerVersion = Number(data?.version || 0);
   if (selected && !posts.find(post => post.id === selected)) selected = null;
+  populateScratchSelects();
 }
 
 async function api(path, options) {
@@ -1476,11 +1495,31 @@ function renderLibrary() {
 function renderScratch() {
   const host = $("#scratchList");
   if (!host) return;
+  populateScratchSelects();
   const entries = scratch.filter(entry => entry.status !== "archived");
-  host.innerHTML = entries.length ? entries.map(entry => `<article class="scratch-card" data-scratch-id="${esc(entry.id)}"><div class="scratch-card-head"><div><span class="eyebrow">${esc(entry.createdBy || "Team")}</span><h4>${esc(entry.title || "Untitled idea")}</h4></div><button class="ghost scratch-archive" type="button">Archive</button></div>${entry.image ? `<img src="${esc(entry.image)}" alt="">` : ""}<p>${esc(entry.body || "")}</p>${entry.goal || entry.hook || entry.cta ? `<div class="scratch-brief">${entry.goal ? `<span><b>Goal</b>${esc(entry.goal)}</span>` : ""}${entry.hook ? `<span><b>Hook</b>${esc(entry.hook)}</span>` : ""}${entry.cta ? `<span><b>CTA</b>${esc(entry.cta)}</span>` : ""}</div>` : ""}<div class="scratch-tags">${(entry.tags || []).map(tag => `<span>#${esc(tag)}</span>`).join("")}</div><div class="scratch-card-actions"><button class="ghost scratch-edit" type="button">Edit</button><button class="danger scratch-delete" type="button">Delete</button></div></article>`).join("") : `<div class="empty">Your Scratch Book is empty. Capture the next idea before it gets away.</div>`;
-  $$(".scratch-archive").forEach(button => button.onclick = async event => { const entry = scratch.find(item => item.id === event.currentTarget.closest("[data-scratch-id]").dataset.scratchId); if (!entry) return; entry.status = "archived"; entry.updatedBy = currentUser.name; entry.updatedAt = new Date().toISOString(); renderScratch(); await persistPlanner("archived a Scratch Book idea"); });
-  $$(".scratch-delete").forEach(button => button.onclick = async event => { const id = event.currentTarget.closest("[data-scratch-id]").dataset.scratchId; scratch = scratch.filter(entry => entry.id !== id); renderScratch(); await persistPlanner("deleted a Scratch Book idea"); });
-  $$(".scratch-edit").forEach(button => button.onclick = () => { const card = button.closest("[data-scratch-id]"), entry = scratch.find(item => item.id === card.dataset.scratchId); if (!entry) return; $("#scratchTitle").value = entry.title; $("#scratchBody").value = entry.body; $("#scratchGoal").value = entry.goal || ""; $("#scratchHook").value = entry.hook || ""; $("#scratchCta").value = entry.cta || ""; $("#scratchImage").value = entry.image; $("#scratchTags").value = (entry.tags || []).join(", "); $("#scratchForm").dataset.editing = entry.id; $("#scratchForm button[type=submit]").textContent = "Update idea"; setLibrarySection("ideas"); window.scrollTo({ top: 0, behavior: "smooth" }); });
+  host.innerHTML = entries.length ? entries.map(entry => `<article class="scratch-card" data-scratch-id="${esc(entry.id)}"><div class="scratch-card-head"><div><div class="scratch-card-meta"><span class="eyebrow">${esc(entry.createdBy || "Team")}</span>${entry.format ? `<span class="scratch-badge scratch-badge-format">${esc(entry.format)}</span>` : ""}${entry.pillar ? `<span class="scratch-badge scratch-badge-pillar">${esc(entry.pillar)}</span>` : ""}</div><h4>${esc(entry.title || "Untitled idea")}</h4></div><button class="ghost scratch-archive" type="button">Archive</button></div>${entry.image ? `<img src="${esc(entry.image)}" alt="">` : ""}${entry.body ? `<p>${esc(entry.body)}</p>` : ""}${entry.goal || entry.hook || entry.cta ? `<div class="scratch-brief">${entry.goal ? `<span><b>Goal</b>${esc(entry.goal)}</span>` : ""}${entry.hook ? `<span><b>Hook</b>${esc(entry.hook)}</span>` : ""}${entry.cta ? `<span><b>CTA</b>${esc(entry.cta)}</span>` : ""}</div>` : ""}${(entry.tags && entry.tags.length) ? `<div class="scratch-tags">${entry.tags.map(tag => `<span>#${esc(tag)}</span>`).join("")}</div>` : ""}<div class="scratch-card-actions"><button class="ghost scratch-edit" type="button">Edit</button><button class="danger scratch-delete" type="button">Delete</button></div></article>`).join("") : `<div class="empty">No ideas saved yet. Capture the next idea before it gets away.</div>`;
+  $$(".scratch-archive").forEach(button => button.onclick = async event => { const entry = scratch.find(item => item.id === event.currentTarget.closest("[data-scratch-id]").dataset.scratchId); if (!entry) return; entry.status = "archived"; entry.updatedBy = currentUser.name; entry.updatedAt = new Date().toISOString(); renderScratch(); await persistPlanner("archived an idea"); });
+  $$(".scratch-delete").forEach(button => button.onclick = async event => { const id = event.currentTarget.closest("[data-scratch-id]").dataset.scratchId; scratch = scratch.filter(entry => entry.id !== id); renderScratch(); await persistPlanner("deleted an idea"); });
+  $$(".scratch-edit").forEach(button => button.onclick = () => {
+    const card = button.closest("[data-scratch-id]"), entry = scratch.find(item => item.id === card.dataset.scratchId);
+    if (!entry) return;
+    populateScratchSelects();
+    $("#scratchTitle").value = entry.title || "";
+    $("#scratchFormat").value = entry.format || "";
+    $("#scratchPillar").value = entry.pillar || "";
+    $("#scratchBody").value = entry.body || "";
+    $("#scratchGoal").value = entry.goal || "";
+    $("#scratchHook").value = entry.hook || "";
+    $("#scratchCta").value = entry.cta || "";
+    $("#scratchImage").value = entry.image || "";
+    $("#scratchTags").value = (entry.tags || []).join(", ");
+    $("#scratchForm").dataset.editing = entry.id;
+    $("#scratchForm button[type=submit]").textContent = "Update idea";
+    const cancelBtn = $("#scratchCancelEdit");
+    if (cancelBtn) cancelBtn.classList.remove("hidden");
+    setLibrarySection("ideas");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
 }
 function setLibrarySection(section) {
   librarySection = section === "ideas" ? "ideas" : "assets";
@@ -1734,7 +1773,17 @@ $("#ideasTab").onclick = () => setLibrarySection("ideas");
 $("#scratchForm").onsubmit = async event => {
   event.preventDefault();
   const form = event.currentTarget;
-  const idea = scratchIdeaPayload({ title: $("#scratchTitle").value, body: $("#scratchBody").value, image: $("#scratchImage").value, tags: $("#scratchTags").value, goal: $("#scratchGoal").value, hook: $("#scratchHook").value, cta: $("#scratchCta").value });
+  const idea = scratchIdeaPayload({
+    title: $("#scratchTitle").value,
+    format: $("#scratchFormat") ? $("#scratchFormat").value : "",
+    pillar: $("#scratchPillar") ? $("#scratchPillar").value : "",
+    body: $("#scratchBody").value,
+    image: $("#scratchImage").value,
+    tags: $("#scratchTags").value,
+    goal: $("#scratchGoal").value,
+    hook: $("#scratchHook").value,
+    cta: $("#scratchCta").value
+  });
   const title = idea.title;
   if (!title) return;
   const now = new Date().toISOString();
@@ -1746,11 +1795,23 @@ $("#scratchForm").onsubmit = async event => {
   }
   form.reset();
   delete form.dataset.editing;
-  form.querySelector('button[type="submit"]').textContent = "Save to Scratch Book";
+  form.querySelector('button[type="submit"]').textContent = "Save idea";
+  const cancelBtn = $("#scratchCancelEdit");
+  if (cancelBtn) cancelBtn.classList.add("hidden");
   renderScratch();
-  await persistPlanner(existing ? "updated a Scratch Book idea" : "added a Scratch Book idea");
-  notify(existing ? "Scratch Book idea updated" : "Idea saved to Scratch Book");
+  await persistPlanner(existing ? "updated an idea" : "added an idea");
+  notify(existing ? "Idea updated" : "Idea saved");
 };
+const cancelEditBtn = $("#scratchCancelEdit");
+if (cancelEditBtn) {
+  cancelEditBtn.onclick = () => {
+    const form = $("#scratchForm");
+    form.reset();
+    delete form.dataset.editing;
+    form.querySelector('button[type="submit"]').textContent = "Save idea";
+    cancelEditBtn.classList.add("hidden");
+  };
+}
 
 async function checkInstagram() {
   try {
