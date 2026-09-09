@@ -22,6 +22,7 @@ test("mobile drawer restores brand title, team presence, and identity actions", 
 
 test("mobile header stays sticky when scrolling and hides action buttons when drawer is open", () => {
   assert.match(css, /@media\(max-width:700px\)\{[\s\S]*?\.top\{[^}]*position:sticky;top:0/);
+  assert.match(css, /@media\(max-width:700px\)\{[\s\S]*?\.top\{[^}]*height:auto/);
   assert.match(css, /body\.mobile-menu-open \.top-actions\{display:none!important\}/);
 });
 
@@ -32,7 +33,7 @@ test("tablet viewport maintains a 2-column workspace and collapsed icon navigati
 
 test("mobile viewport provides clean stacked workspace and flexible top actions", () => {
   assert.match(css, /@media\(max-width:700px\)\{[\s\S]*?\.workspace\{display:block;grid-template-columns:1fr\}/);
-  assert.match(css, /@media\(max-width:700px\)\{[\s\S]*?\.top-actions\{grid-column:1 \/ -1;width:100%;display:flex;gap:8px;flex-wrap:wrap\}/);
+  assert.match(css, /@media\(max-width:700px\)\{[\s\S]*?\.top-actions\{grid-column:1 \/ -1;width:100%;display:flex;gap:8px;flex-wrap:wrap/);
   assert.match(css, /\.top-actions \.upload-status\{flex:1 0 100%;text-align:center/);
 });
 
