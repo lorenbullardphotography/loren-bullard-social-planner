@@ -7,11 +7,12 @@ let calCursor = new Date(); calCursor.setDate(1);
 const demo = (text, bg, fg = "#fff") => `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000"><rect width="100%" height="100%" fill="${bg}"/><circle cx="500" cy="390" r="165" fill="rgba(255,255,255,.15)"/><text x="500" y="585" text-anchor="middle" font-family="Georgia" font-size="57" fill="${fg}">${text}</text></svg>`)}`;
 const seed = [
   { id: crypto.randomUUID(), image: "/assets/family-films.jpg", assetSource: "uploaded", assetKind: "image", status: "planned", approval: "needs-review", type: "REEL", date: "2026-09-08", time: "09:00", scheduleState: "ready", caption: "", notes: "Use emotional family hook.", comments: [] },
-  { id: crypto.randomUUID(), image: "/assets/brand-cover.jpg", assetSource: "uploaded", assetKind: "image", status: "draft", approval: "draft", type: "IMAGE", date: "2026-09-11", time: "11:00", scheduleState: "draft", caption: "", notes: "Carousel idea: studio vs. in-home.", comments: [] },
+  { id: crypto.randomUUID(), image: "/assets/brand-cover.jpg", assetSource: "uploaded", assetKind: "image", status: "draft", approval: "feedback", type: "IMAGE", date: "2026-09-11", time: "11:00", scheduleState: "draft", caption: "", notes: "Carousel idea: studio vs. in-home.", comments: [] },
   { id: crypto.randomUUID(), image: "/assets/couple-mug.png", assetSource: "uploaded", assetKind: "image", status: "planned", approval: "approved", type: "IMAGE", date: "2026-09-15", time: "08:30", scheduleState: "scheduled", caption: "", notes: "Sentimental motherhood caption.", comments: [] }
 ];
 
 let posts = [];
+let scratch = [];
 let team = [];
 let activity = [];
 let presence = [];
@@ -109,7 +110,7 @@ function formatSchedule(post) {
 }
 const WORKFLOW_LABELS = {
   idea: "Idea", drafting: "Drafting", "needs-assets": "Needs assets", "needs-caption": "Needs caption",
-  "needs-review": "Needs review", approved: "Approved", "ready-meta": "Ready for Meta",
+  "needs-review": "Needs review", feedback: "Feedback", approved: "Approved", "ready-meta": "Ready for Meta",
   "meta-scheduled": "Scheduled in Meta", published: "Published", archived: "Archived"
 };
 const DEFAULT_PILLARS = ["Newborn education", "Family sessions", "Motherhood", "Behind the scenes", "Client stories", "Photographer education", "Personal connection", "Offers and availability"];
@@ -117,13 +118,14 @@ function workflowOf(post) {
   if (post.status === "posted") return "published";
   if (WORKFLOW_LABELS[post.workflow]) return post.workflow;
   if (post.approval === "needs-review") return "needs-review";
+  if (post.approval === "feedback") return "feedback";
   if (post.approval === "approved") return "approved";
   return post.status === "draft" ? "drafting" : "idea";
 }
 function applyWorkflow(post, workflow) {
   post.workflow = workflow;
   post.status = workflow === "published" ? "posted" : ["approved", "ready-meta", "meta-scheduled"].includes(workflow) ? "planned" : "draft";
-  post.approval = workflow === "needs-review" ? "needs-review" : workflow === "approved" || workflow === "ready-meta" || workflow === "meta-scheduled" || workflow === "published" ? "approved" : "draft";
+  post.approval = workflow === "needs-review" ? "needs-review" : workflow === "feedback" ? "feedback" : workflow === "approved" || workflow === "ready-meta" || workflow === "meta-scheduled" || workflow === "published" ? "approved" : "feedback";
 }
 function workflowPill(workflow) {
   return `<span class="workflow-pill" data-workflow="${esc(workflow)}">${esc(WORKFLOW_LABELS[workflow] || workflow)}</span>`;
@@ -133,6 +135,7 @@ function isOverdue(post) {
 }
 function setPlanner(data) {
   posts = (Array.isArray(data?.posts) ? data.posts : []).map(post => ({ ...post, assetKind: assetKindOf(post), assetSource: assetSourceOf(post) }));
+  scratch = Array.isArray(data?.scratch) ? data.scratch : [];
   team = Array.isArray(data?.team) ? data.team : [];
   activity = Array.isArray(data?.activity) ? data.activity : [];
   presence = Array.isArray(data?.presence) ? data.presence : [];
@@ -204,7 +207,7 @@ async function persistPlanner(reason) {
     const saved = await api("/api/planner", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ version: plannerVersion, posts, settings, actor: currentUser, reason })
+      body: JSON.stringify({ version: plannerVersion, posts, scratch, settings, actor: currentUser, reason })
     });
     setPlanner(saved);
   } catch (error) {
@@ -226,7 +229,7 @@ function downloadFile(name, content, type) {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 function exportBackup() {
-  downloadFile('loren-content-planner-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify({ exportedAt: new Date().toISOString(), posts }, null, 2), "application/json");
+  downloadFile('loren-content-planner-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify({ exportedAt: new Date().toISOString(), posts, scratch }, null, 2), "application/json");
   notify("Backup exported");
 }
 function approvedForMeta(post) {
@@ -289,6 +292,7 @@ async function importBackup(file) {
   const confirmed = window.confirm('Replace the current planner with ' + imported.length + ' posts from this backup?');
   if (!confirmed) return;
   posts = imported;
+  if (!Array.isArray(data)) scratch = Array.isArray(data.scratch) ? data.scratch : scratch;
   renderAll();
   await persistPlanner("restored a planner backup");
   notify("Backup restored");
@@ -307,6 +311,7 @@ function renderAll() {
   else $("#postEditor").innerHTML = "";
   renderCalendar();
   renderLibrary();
+  renderScratch();
   renderApprovals();
   renderTeam();
   renderActivity();
@@ -694,8 +699,8 @@ function renderInspector(hostSelector = "#inspector") {
     </div>
     <div class="field">Approval
       <div class="approval-pills">
-        <button data-ap="draft" class="${post.approval === "draft" ? "active" : ""}">Draft</button>
         <button data-ap="needs-review" class="${post.approval === "needs-review" ? "active" : ""}">Review</button>
+        <button data-ap="feedback" class="${post.approval === "feedback" ? "active" : ""}">Feedback</button>
         <button data-ap="approved" class="${post.approval === "approved" ? "active" : ""}">Approved</button>
       </div>
     </div>
@@ -709,7 +714,7 @@ function renderInspector(hostSelector = "#inspector") {
   </div>`;
   qq("[data-ap]").forEach(button => {
     button.onclick = async () => {
-      applyWorkflow(post, button.dataset.ap === "draft" ? "drafting" : button.dataset.ap);
+      applyWorkflow(post, button.dataset.ap);
       post.updatedBy = currentUser.name;
       post.updatedAt = new Date().toISOString();
       renderAll();
@@ -1010,8 +1015,17 @@ function renderLibrary() {
     : `<div class="empty">No content in this view yet.</div>`;
   $$("[data-open-editor]").forEach(node => node.onclick = () => openPost(node.dataset.openEditor, true));
 }
+function renderScratch() {
+  const host = $("#scratchList");
+  if (!host) return;
+  const entries = scratch.filter(entry => entry.status !== "archived");
+  host.innerHTML = entries.length ? entries.map(entry => `<article class="scratch-card" data-scratch-id="${esc(entry.id)}"><div class="scratch-card-head"><div><span class="eyebrow">${esc(entry.createdBy || "Team")}</span><h4>${esc(entry.title || "Untitled idea")}</h4></div><button class="ghost scratch-archive" type="button">Archive</button></div>${entry.image ? `<img src="${esc(entry.image)}" alt="">` : ""}<p>${esc(entry.body || "")}</p><div class="scratch-tags">${(entry.tags || []).map(tag => `<span>#${esc(tag)}</span>`).join("")}</div><div class="scratch-card-actions"><button class="ghost scratch-edit" type="button">Edit</button><button class="danger scratch-delete" type="button">Delete</button></div></article>`).join("") : `<div class="empty">Your Scratch Book is empty. Capture the next idea before it gets away.</div>`;
+  $$(".scratch-archive").forEach(button => button.onclick = async event => { const entry = scratch.find(item => item.id === event.currentTarget.closest("[data-scratch-id]").dataset.scratchId); if (!entry) return; entry.status = "archived"; entry.updatedBy = currentUser.name; entry.updatedAt = new Date().toISOString(); renderScratch(); await persistPlanner("archived a Scratch Book idea"); });
+  $$(".scratch-delete").forEach(button => button.onclick = async event => { const id = event.currentTarget.closest("[data-scratch-id]").dataset.scratchId; scratch = scratch.filter(entry => entry.id !== id); renderScratch(); await persistPlanner("deleted a Scratch Book idea"); });
+  $$(".scratch-edit").forEach(button => button.onclick = () => { const card = button.closest("[data-scratch-id]"), entry = scratch.find(item => item.id === card.dataset.scratchId); if (!entry) return; $("#scratchTitle").value = entry.title; $("#scratchBody").value = entry.body; $("#scratchImage").value = entry.image; $("#scratchTags").value = (entry.tags || []).join(", "); $("#scratchForm").dataset.editing = entry.id; $("#scratchForm button[type=submit]").textContent = "Update Scratch Book idea"; window.scrollTo({ top: 0, behavior: "smooth" }); });
+}
 function renderApprovals() {
-  const columns = [["drafting", "Drafting"], ["needs-review", "Needs Review"], ["approved", "Approved"], ["ready-meta", "Ready for Meta"], ["meta-scheduled", "Scheduled in Meta"]];
+  const columns = [["drafting", "Drafting"], ["needs-review", "Needs Review"], ["feedback", "Feedback"], ["approved", "Approved"], ["ready-meta", "Ready for Meta"], ["meta-scheduled", "Scheduled in Meta"]];
   $("#approvalBoard").innerHTML = columns.map(([key, label]) => `<section class="approval-col" data-workflow="${key}"><h4>${label}</h4>${future().filter(post => workflowOf(post) === key).map(post => `<article class="approval-card" data-open="${post.id}"><img src="${post.image}">${workflowPill(key)}<b>${esc(post.notes || post.caption || post.type)}</b><span>${esc(formatSchedule(post))}</span></article>`).join("") || `<div class="empty">Nothing here.</div>`}</section>`).join("");
   $$("[data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open));
 }
@@ -1032,11 +1046,12 @@ function switchView(name) {
   $$(".view").forEach(view => view.classList.add("hidden"));
   $(`#view-${name}`).classList.remove("hidden");
   $$(".nav").forEach(nav => nav.classList.toggle("active", nav.dataset.view === name));
-  $("#pageTitle").textContent = { grid: "Grid Planner", calendar: "Calendar", library: "Content Library", approvals: "Approvals", activity: "Team Activity", editor: "Edit post", settings: "Settings" }[name];
+  $("#pageTitle").textContent = { grid: "Grid Planner", calendar: "Calendar", library: "Content Library", scratch: "Scratch Book", approvals: "Approvals", activity: "Team Activity", editor: "Edit post", settings: "Settings" }[name];
   if (name !== "grid") $("#inspector").innerHTML = "";
   if (name !== "editor") $("#postEditor").innerHTML = "";
   if (name === "settings") renderPlannerSettings();
   if (name === "activity") renderActivity();
+  if (name === "scratch") renderScratch();
   if (name === "grid") renderInspector();
   if (name === "editor") renderInspector("#postEditor");
 }
@@ -1097,7 +1112,7 @@ $("#upload").onchange = async event => {
         assetSource: "uploaded",
         cropRatio: uploaded.kind === "video" ? "9:16" : "4:5",
         status: "draft",
-        approval: "draft",
+        approval: "feedback",
         type: uploaded.kind === "video" ? "REEL" : "IMAGE",
         date: "",
         time: "",
@@ -1161,7 +1176,7 @@ async function addCanvaDesign(design) {
     return notify(error.message || "Canva design could not be imported");
   }
   const isCanvaVideo = contentType === "video";
-  const post = { id, image: images[0] || mediaUrl, images, assetSource: "canva", canvaUrl: design.editUrl || design.viewUrl, canvaDesignId: design.id, canvaDoctypeName: design.doctypeName || "", canvaDesignTypes: design.designTypes || [], canvaAssetType: isCanvaVideo ? "video" : "image", canvaPageCount: design.pageCount || 0, assetKind: isCanvaVideo ? "video" : "image", cropRatio: "4:5", status: "draft", approval: "draft", type: contentType === "carousel" ? "CAROUSEL" : isCanvaVideo ? "REEL" : "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: design.title, comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
+  const post = { id, image: images[0] || mediaUrl, images, assetSource: "canva", canvaUrl: design.editUrl || design.viewUrl, canvaDesignId: design.id, canvaDoctypeName: design.doctypeName || "", canvaDesignTypes: design.designTypes || [], canvaAssetType: isCanvaVideo ? "video" : "image", canvaPageCount: design.pageCount || 0, assetKind: isCanvaVideo ? "video" : "image", cropRatio: "4:5", status: "draft", approval: "feedback", type: contentType === "carousel" ? "CAROUSEL" : isCanvaVideo ? "REEL" : "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: design.title, comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
   posts.unshift(post); selected = id; $("#canvaModal").classList.add("hidden"); renderAll();
   persistPlanner("added a Canva working draft").then(() => notify("Canva draft added")).catch(error => { posts = posts.filter(item => item.id !== id); renderAll(); notify(error.message || "Canva draft could not be added"); });
 }
@@ -1188,6 +1203,26 @@ $$(".chip").forEach(chip => chip.onclick = () => {
   renderLibrary();
 });
 $("#librarySearch").oninput = event => { librarySearch = event.target.value.trim(); renderLibrary(); };
+$("#scratchForm").onsubmit = async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const title = $("#scratchTitle").value.trim();
+  if (!title) return;
+  const now = new Date().toISOString();
+  const tags = $("#scratchTags").value.split(",").map(tag => tag.trim().replace(/^#/, "")).filter(Boolean);
+  const existing = scratch.find(entry => entry.id === form.dataset.editing);
+  if (existing) {
+    Object.assign(existing, { title, body: $("#scratchBody").value.trim(), image: $("#scratchImage").value.trim(), tags, updatedBy: currentUser.name, updatedAt: now });
+  } else {
+    scratch.unshift({ id: crypto.randomUUID(), title, body: $("#scratchBody").value.trim(), image: $("#scratchImage").value.trim(), tags, status: "active", createdBy: currentUser.name, updatedBy: currentUser.name, createdAt: now, updatedAt: now });
+  }
+  form.reset();
+  delete form.dataset.editing;
+  form.querySelector('button[type="submit"]').textContent = "Save to Scratch Book";
+  renderScratch();
+  await persistPlanner(existing ? "updated a Scratch Book idea" : "added a Scratch Book idea");
+  notify(existing ? "Scratch Book idea updated" : "Idea saved to Scratch Book");
+};
 
 async function checkInstagram() {
   try {

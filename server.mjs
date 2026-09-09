@@ -444,13 +444,15 @@ function normalizeComment(comment) {
 }
 
 function normalizePost(post) {
-  const workflowValues = ["idea", "drafting", "needs-assets", "needs-caption", "needs-review", "approved", "ready-meta", "meta-scheduled", "published", "archived"];
+  const workflowValues = ["idea", "drafting", "needs-assets", "needs-caption", "needs-review", "feedback", "approved", "ready-meta", "meta-scheduled", "published", "archived"];
   const workflow = workflowValues.includes(post?.workflow)
     ? post.workflow
     : post?.status === "posted"
       ? "published"
       : post?.approval === "needs-review"
         ? "needs-review"
+        : post?.approval === "feedback"
+          ? "feedback"
         : post?.approval === "approved"
           ? "approved"
           : post?.status === "draft" ? "drafting" : "idea";
@@ -475,7 +477,7 @@ function normalizePost(post) {
     cropX: post?.cropX == null ? 50 : (Number.isFinite(Number(post.cropX)) ? Math.min(100, Math.max(0, Number(post.cropX))) : 50),
     cropY: post?.cropY == null ? 50 : (Number.isFinite(Number(post.cropY)) ? Math.min(100, Math.max(0, Number(post.cropY))) : 50),
     status: post?.status === "posted" ? "posted" : (post?.status === "draft" ? "draft" : "planned"),
-    approval: ["draft", "needs-review", "approved"].includes(post?.approval) ? post.approval : "draft",
+    approval: ["needs-review", "feedback", "approved"].includes(post?.approval) ? post.approval : "feedback",
     type: String(post?.type || "IMAGE").trim().toUpperCase().slice(0, 30) || "IMAGE",
     date: String(post?.date || ""),
     time: String(post?.time || ""),
@@ -515,9 +517,24 @@ function normalizePost(post) {
     updatedAt: post?.updatedAt || new Date().toISOString()
   };
 }
+function normalizeScratchEntry(entry) {
+  const status = entry?.status === "archived" ? "archived" : "active";
+  return {
+    id: String(entry?.id || crypto.randomUUID()),
+    title: String(entry?.title || "").slice(0, 160),
+    body: String(entry?.body || "").slice(0, 6000),
+    image: String(entry?.image || "").slice(0, 2000),
+    tags: Array.isArray(entry?.tags) ? [...new Set(entry.tags.map(tag => String(tag).trim().replace(/^#/, "")).filter(Boolean))].slice(0, 20) : [],
+    status,
+    createdBy: String(entry?.createdBy || "").slice(0, 80),
+    updatedBy: String(entry?.updatedBy || "").slice(0, 80),
+    createdAt: String(entry?.createdAt || new Date().toISOString()),
+    updatedAt: String(entry?.updatedAt || new Date().toISOString())
+  };
+}
 
 function defaultPlanner() {
-  return { version: 0, posts: [], team: [], activity: [], settings: defaultSettings(), updatedAt: null };
+  return { version: 0, posts: [], scratch: [], team: [], activity: [], settings: defaultSettings(), updatedAt: null };
 }
 function defaultSettings() {
   return {
@@ -542,6 +559,7 @@ async function readPlanner() {
   return {
     version: Number(planner?.version || 0),
     posts: Array.isArray(planner?.posts) ? planner.posts.map(normalizePost) : [],
+    scratch: Array.isArray(planner?.scratch) ? planner.scratch.map(normalizeScratchEntry).slice(0, 500) : [],
     team: Array.isArray(planner?.team) ? planner.team : [],
     activity: Array.isArray(planner?.activity) ? planner.activity.slice(0, 40) : [],
     settings: normalizeSettings(planner?.settings),
@@ -573,6 +591,7 @@ async function writePlanner(nextPlanner) {
   const normalized = {
     version: Number(nextPlanner?.version || 0) + 1,
     posts: Array.isArray(nextPlanner?.posts) ? nextPlanner.posts.map(normalizePost) : [],
+    scratch: Array.isArray(nextPlanner?.scratch) ? nextPlanner.scratch.map(normalizeScratchEntry).slice(0, 500) : [],
     team: Array.isArray(nextPlanner?.team) ? nextPlanner.team : [],
     activity: Array.isArray(nextPlanner?.activity) ? nextPlanner.activity.slice(0, 40) : [],
     settings: normalizeSettings(nextPlanner?.settings),
@@ -724,6 +743,7 @@ export async function handleRequest(req, res) {
       }
       const previousUrls = new Set(planner.posts.map(post => post.image).filter(Boolean));
       planner.posts = Array.isArray(body.posts) ? body.posts.map(post => normalizePost({ ...post, updatedBy: body?.actor?.name || post.updatedBy })) : planner.posts;
+      planner.scratch = Array.isArray(body.scratch) ? body.scratch.map(entry => normalizeScratchEntry({ ...entry, updatedBy: body?.actor?.name || entry.updatedBy })) : planner.scratch;
       const nextUrls = new Set(planner.posts.map(post => post.image).filter(Boolean));
       await Promise.all([...previousUrls].filter(url => !nextUrls.has(url)).map(deleteBlobUrl));
       planner.settings = normalizeSettings(body.settings || planner.settings);
