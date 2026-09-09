@@ -84,9 +84,9 @@ test("keeps the open assignee menu floating above the editor fields", () => {
   assert.match(css, /\.assignee-picker\.open \.assignee-picker-menu\{position:fixed/);
 });
 
-test("places Tasks directly below Grid Planner in the sidebar", () => {
+test("places Tasks before Grid Planner in the sidebar", () => {
   const html = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
   const nav = html.slice(html.indexOf("<nav>"), html.indexOf("</nav>"));
-  assert.ok(nav.indexOf('data-view="grid"') < nav.indexOf('data-view="tasks"'));
+  assert.ok(nav.indexOf('data-view="tasks"') < nav.indexOf('data-view="grid"'));
   assert.ok(nav.indexOf('data-view="tasks"') < nav.indexOf('data-view="calendar"'));
 });

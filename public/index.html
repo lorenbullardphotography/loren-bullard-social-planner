@@ -13,11 +13,11 @@
   <aside class="side">
     <div class="brand">
       <div class="monogram"><img src="/assets/lbp-mark-white.png" alt="LB monogram"></div>
-      <div><h1>Studio Planner</h1><p>Loren Bullard Photography</p></div>
+      <div><div class="brand-title">Studio Planner</div><p>Loren Bullard Photography</p></div>
     </div>
     <nav>
-      <button class="nav active" data-view="grid"><span>▦</span> Grid Planner</button>
       <button class="nav" data-view="tasks"><span>☑</span> Tasks</button>
+      <button class="nav active" data-view="grid"><span>▦</span> Grid Planner</button>
       <button class="nav" data-view="calendar"><span>□</span> Calendar</button>
       <button class="nav" data-view="library"><span>◫</span> Library</button>
       <button class="nav" data-view="approvals"><span>✓</span> Approvals</button>
@@ -39,7 +39,7 @@
     <header class="top">
       <div>
         <p class="eyebrow">LOREN BULLARD PHOTOGRAPHY</p>
-        <h2 id="pageTitle">Grid Planner</h2>
+        <h1 id="pageTitle">Grid Planner</h1>
         <p class="top-tagline">Timeless, joy-filled imagery that tells your story.</p>
       </div>
       <div class="top-actions">
@@ -50,10 +50,6 @@
     </header>
 
     <section id="view-grid" class="view">
-      <div class="brand-banner">
-        <div class="brand-banner-logo"><img src="/assets/lbp-banner-logo.png" alt="Loren Bullard Family Photography and Films"></div>
-        <span class="brand-banner-note">Plan with intention · create with heart</span>
-      </div>
       <div class="intro">
         <div><h3>Feed Preview</h3><p>Plan new content above your live Instagram posts. Drag planned posts into the order you want.</p><small class="grid-gesture-hint">Tap to edit · Press and hold to move</small></div>
         <div class="stats">
@@ -77,7 +73,11 @@
     </section>
 
     <section id="view-tasks" class="view hidden">
-      <div class="intro"><div><h3>Tasks</h3><p>Keep your next actions and the team's work in one place.</p></div></div>
+      <div class="brand-banner">
+        <div class="brand-banner-logo"><img src="/assets/lbp-banner-logo.png" alt="Loren Bullard Family Photography and Films"></div>
+        <span class="brand-banner-note">Plan with intention · create with heart</span>
+      </div>
+      <div class="intro"><div><p>Keep your next actions and the team's work in one place.</p></div></div>
       <div class="task-toolbar"><div class="task-tabs" role="tablist" aria-label="Task views">
         <button id="myTasksTab" class="task-tab active" type="button" role="tab" aria-selected="true">My Tasks</button>
         <button id="teamTasksTab" class="task-tab" type="button" role="tab" aria-selected="false">Team Tasks</button>
@@ -88,12 +88,12 @@
     </section>
 
     <section id="view-calendar" class="view hidden">
-      <div class="intro"><div><h3>Content Calendar</h3><p>See planned publishing dates at a glance.</p></div><div class="month-nav"><button id="prevMonth">‹</button><strong id="monthLabel"></strong><button id="nextMonth">›</button></div></div>
+      <div class="intro"><div><p>See planned publishing dates at a glance.</p></div><div class="month-nav"><button id="prevMonth">‹</button><strong id="monthLabel"></strong><button id="nextMonth">›</button></div></div>
       <div id="calendar" class="calendar"></div>
     </section>
 
     <section id="view-library" class="view hidden">
-      <div class="intro"><div><h3>Library</h3><p>Keep planned assets and early-stage ideas together, with each in its own workspace.</p></div></div>
+      <div class="intro"><div><p>Keep planned assets and early-stage ideas together, with each in its own workspace.</p></div></div>
       <div class="library-tabs" role="tablist" aria-label="Library sections"><button id="assetLibraryTab" class="library-tab active" type="button" role="tab" aria-selected="true">Asset Library</button><button id="ideasTab" class="library-tab" type="button" role="tab" aria-selected="false">Ideas</button></div>
       <div id="assetLibraryPanel" role="tabpanel">
         <div class="intro"><div><h3>Asset Library</h3><p>All drafts and future posts in one place.</p></div><div class="library-tools"><input id="librarySearch" placeholder="Search content…"><div class="filters"><button class="chip active" data-filter="all">All</button><button class="chip" data-filter="draft">Drafts</button><button class="chip" data-filter="planned">Planned</button><button class="chip" data-filter="approved">Approved</button></div></div></div>
@@ -120,17 +120,17 @@
     </section>
 
     <section id="view-approvals" class="view hidden">
-      <div class="intro"><div><h3>Approvals</h3><p>A simple review queue for you and your social media manager.</p></div></div>
+      <div class="intro"><div><p>A simple review queue for you and your social media manager.</p></div></div>
       <div id="approvalBoard" class="approval-board"></div>
     </section>
 
     <section id="view-editor" class="view hidden">
-      <div class="intro"><div><p class="eyebrow">ASSET WORKSPACE</p><h3>Edit asset</h3><p>Edit this content outside the grid, then save it back to the shared planner.</p></div><button id="backToGrid" class="ghost">← Back</button></div>
+      <div class="intro"><div><p class="eyebrow">ASSET WORKSPACE</p><p>Edit this content outside the grid, then save it back to the shared planner.</p></div><button id="backToGrid" class="ghost">← Back</button></div>
       <div id="postEditor" class="standalone-editor"></div>
     </section>
 
     <section id="view-settings" class="view hidden">
-      <div class="intro"><div><h3>Planner settings</h3><p>Shape the choices your team uses while planning content.</p></div><button id="saveSettings" class="primary">Save settings</button></div>
+      <div class="intro"><div><p>Shape the choices your team uses while planning content.</p></div><button id="saveSettings" class="primary">Save settings</button></div>
       <div class="settings-grid">
         <section class="settings-card"><p class="eyebrow">CONTENT SYSTEM</p><h4>Content pillars</h4><p class="settings-help">One per line. These appear on every planned post.</p><textarea id="settingsPillars" rows="9"></textarea></section>
         <section class="settings-card"><p class="eyebrow">CONTENT SYSTEM</p><h4>Formats</h4><p class="settings-help">One per line. Add any format your team uses.</p><textarea id="settingsFormats" rows="6"></textarea><h4 class="settings-subhead">Content goals</h4><textarea id="settingsGoals" rows="6"></textarea></section>
