@@ -1,7 +1,7 @@
 const USER_KEY = "lb-content-planner-user-v1";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "grid", editorReturnView = "grid", libraryFilter = "all", librarySearch = "", librarySection = "assets", taskTab = "mine", editorDirty = false, editorSaveInProgress = false;
-let settings = { pillars: [], formats: ["IMAGE", "REEL", "CAROUSEL"], goals: [], syncPhotoCount: 12 };
+let settings = { pillars: [], formats: ["IMAGE", "REEL", "CAROUSEL"], goals: [], syncPhotoCount: 12, workflowAutomations: {} };
 let calCursor = new Date(); calCursor.setDate(1);
 
 const demo = (text, bg, fg = "#fff") => `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000"><rect width="100%" height="100%" fill="${bg}"/><circle cx="500" cy="390" r="165" fill="rgba(255,255,255,.15)"/><text x="500" y="585" text-anchor="middle" font-family="Georgia" font-size="57" fill="${fg}">${text}</text></svg>`)}`;
@@ -126,6 +126,8 @@ function applyWorkflow(post, workflow) {
   post.workflow = workflow;
   post.status = workflow === "published" ? "posted" : ["approved", "ready-meta", "meta-scheduled"].includes(workflow) ? "planned" : "draft";
   post.approval = workflow === "needs-review" ? "needs-review" : workflow === "feedback" ? "feedback" : workflow === "approved" || workflow === "ready-meta" || workflow === "meta-scheduled" || workflow === "published" ? "approved" : "feedback";
+  const automaticAssignee = settings.workflowAutomations?.[workflow];
+  if (automaticAssignee) post.assignee = automaticAssignee;
 }
 function workflowPill(workflow) {
   return `<span class="workflow-pill" data-workflow="${esc(workflow)}">${esc(WORKFLOW_LABELS[workflow] || workflow)}</span>`;
@@ -191,7 +193,7 @@ function setPlanner(data) {
   team = Array.isArray(data?.team) ? data.team : [];
   activity = Array.isArray(data?.activity) ? data.activity : [];
   presence = Array.isArray(data?.presence) ? data.presence : [];
-  settings = { pillars: DEFAULT_PILLARS, formats: ["IMAGE", "REEL", "CAROUSEL"], goals: ["Educate", "Connect", "Showcase work", "Book sessions", "Build trust"], syncPhotoCount: 12, ...(data?.settings || {}) };
+  settings = { pillars: DEFAULT_PILLARS, formats: ["IMAGE", "REEL", "CAROUSEL"], goals: ["Educate", "Connect", "Showcase work", "Book sessions", "Build trust"], syncPhotoCount: 12, workflowAutomations: {}, ...(data?.settings || {}) };
   plannerVersion = Number(data?.version || 0);
   if (selected && !posts.find(post => post.id === selected)) selected = null;
 }
@@ -459,6 +461,11 @@ function renderPlannerSettings() {
   $("#settingsGoals").value = settings.goals.join("\n");
   $("#settingsSyncCount").value = settings.syncPhotoCount;
   $("#settingsFormats").value = settings.formats.join("\n");
+  const automationHost = $("#workflowAutomations");
+  if (automationHost) {
+    const people = assigneePeople(currentUser, team);
+    automationHost.innerHTML = Object.entries(WORKFLOW_LABELS).filter(([workflow]) => !["published", "archived"].includes(workflow)).map(([workflow, label]) => `<label class="automation-row"><span><b>${esc(label)}</b><small>Automatically assign when a post enters this workflow.</small></span><select data-automation-workflow="${workflow}"><option value="">No automatic assignment</option>${people.map(person => `<option value="${esc(person.name)}" ${settings.workflowAutomations?.[workflow] === person.name ? "selected" : ""}>${esc(person.name)}</option>`).join("")}</select></label>`).join("");
+  }
   const connected = igStatus.connected;
   $("#settingsConnection").innerHTML = connected ? "<b>Connected ✓</b><br>@" + esc(igStatus.profile?.username || "lorenbullardphotography") + " · " + (igStatus.profile?.media_count ?? "—") + " published items" : "<b>Instagram not connected</b><br>Connect it to sync live posts into the shared planner.";
   $("#settingsConnectLink").classList.toggle("hidden", connected);
@@ -1401,7 +1408,8 @@ $("#saveSettings").onclick = async () => {
   const goals = $("#settingsGoals").value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
   const formats = $("#settingsFormats").value.split(/\r?\n/).map(value => value.trim().toUpperCase()).filter(Boolean);
   if (!pillars.length || !formats.length) return notify("Add at least one pillar and one format");
-  settings = { pillars, formats, goals, syncPhotoCount: Math.min(100, Math.max(3, Number($("#settingsSyncCount").value) || 12)) };
+  const workflowAutomations = Object.fromEntries($$("[data-automation-workflow]").map(select => [select.dataset.automationWorkflow, select.value]));
+  settings = { pillars, formats, goals, syncPhotoCount: Math.min(100, Math.max(3, Number($("#settingsSyncCount").value) || 12)), workflowAutomations };
   await persistPlanner("updated planner settings");
   renderAll();
   notify("Settings saved for the whole team");

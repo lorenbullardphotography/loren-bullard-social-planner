@@ -4,6 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { deleteStored, readStored, storageMode, writeStored } from "./lib/store.mjs";
+import { applyWorkflowAutomations, normalizeWorkflowAutomations } from "./lib/workflow-automations.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
@@ -541,7 +542,8 @@ function defaultSettings() {
     pillars: ["Newborn education", "Family sessions", "Motherhood", "Behind the scenes", "Client stories", "Photographer education", "Personal connection", "Offers and availability"],
     formats: ["IMAGE", "REEL", "CAROUSEL"],
     goals: ["Educate", "Connect", "Showcase work", "Book sessions", "Build trust"],
-    syncPhotoCount: 12
+    syncPhotoCount: 12,
+    workflowAutomations: normalizeWorkflowAutomations()
   };
 }
 function normalizeSettings(settings) {
@@ -550,7 +552,8 @@ function normalizeSettings(settings) {
     pillars: Array.isArray(settings?.pillars) && settings.pillars.length ? settings.pillars.map(item => String(item).trim()).filter(Boolean).slice(0, 40) : base.pillars,
     formats: Array.isArray(settings?.formats) && settings.formats.length ? settings.formats.map(item => String(item).trim().toUpperCase()).filter(Boolean).slice(0, 20) : base.formats,
     goals: Array.isArray(settings?.goals) && settings.goals.length ? settings.goals.map(item => String(item).trim()).filter(Boolean).slice(0, 30) : base.goals,
-    syncPhotoCount: Math.min(100, Math.max(3, Number(settings?.syncPhotoCount) || base.syncPhotoCount))
+    syncPhotoCount: Math.min(100, Math.max(3, Number(settings?.syncPhotoCount) || base.syncPhotoCount)),
+    workflowAutomations: normalizeWorkflowAutomations(settings?.workflowAutomations)
   };
 }
 
@@ -747,8 +750,10 @@ export async function handleRequest(req, res) {
       const nextUrls = new Set(planner.posts.map(post => post.image).filter(Boolean));
       await Promise.all([...previousUrls].filter(url => !nextUrls.has(url)).map(deleteBlobUrl));
       planner.settings = normalizeSettings(body.settings || planner.settings);
+      const automationChanges = applyWorkflowAutomations(planner, planner.settings.workflowAutomations);
       upsertTeamMember(planner, body.actor);
       addActivity(planner, body.reason ? `${body?.actor?.name || "Team"} ${body.reason}` : "");
+      if (automationChanges) addActivity(planner, `${body?.actor?.name || "Team"} automatically assigned ${automationChanges} workflow ${automationChanges === 1 ? "task" : "tasks"}`);
       return sendJson(res, 200, await writePlanner(planner));
     }
 
