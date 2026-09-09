@@ -244,11 +244,20 @@ function populateScratchSelects() {
     if (currentVal) pillarEl.value = currentVal;
   }
 }
+function normalizeActivityText(text = "") {
+  return String(text || "")
+    .replace(/a\s+Scratch\s+Book\s+idea/gi, "an idea")
+    .replace(/Scratch\s+Book\s+idea/gi, "idea")
+    .replace(/saved\s+to\s+Scratch\s+Book/gi, "saved an idea")
+    .replace(/Scratch\s+Book/gi, "idea")
+    .replace(/\b(?:a|an)\s+(?:idea\s+idea|Idea\s+idea)\b/gi, "an idea")
+    .replace(/\ba\s+idea\b/gi, "an idea");
+}
 function setPlanner(data) {
   posts = (Array.isArray(data?.posts) ? data.posts : []).map(post => ({ ...post, assetKind: assetKindOf(post), assetSource: assetSourceOf(post) }));
   scratch = Array.isArray(data?.scratch) ? data.scratch : [];
   team = Array.isArray(data?.team) ? data.team : [];
-  activity = Array.isArray(data?.activity) ? data.activity : [];
+  activity = (Array.isArray(data?.activity) ? data.activity : []).map(item => ({ ...item, text: normalizeActivityText(item?.text) }));
   presence = Array.isArray(data?.presence) ? data.presence : [];
   settings = { pillars: DEFAULT_PILLARS, formats: ["IMAGE", "REEL", "CAROUSEL"], goals: ["Educate", "Connect", "Showcase work", "Book sessions", "Build trust"], syncPhotoCount: 12, workflowAutomations: {}, ...(data?.settings || {}) };
   plannerVersion = Number(data?.version || 0);
@@ -688,7 +697,7 @@ function renderActivity() {
     ? items.map(item => {
       const at = new Date(item.at);
       const type = activityType(item);
-      return `<article class="activity-item activity-${esc(type)}"><time datetime="${esc(item.at)}">${at.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</time><div><span class="activity-type activity-type-${esc(type)}">${esc(activityLabel(type))}</span><strong>${esc(item.text)}</strong></div></article>`;
+      return `<article class="activity-item activity-${esc(type)}"><time datetime="${esc(item.at)}">${at.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</time><div><span class="activity-type activity-type-${esc(type)}">${esc(activityLabel(type))}</span><strong>${esc(normalizeActivityText(item.text))}</strong></div></article>`;
     }).join("")
     : `<div class="empty">Shared activity will appear here as the team edits, approves, and syncs content.</div>`;
 }

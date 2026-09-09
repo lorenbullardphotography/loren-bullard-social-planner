@@ -15,7 +15,7 @@ function ideaHelpers() {
     URL,
     Date
   };
-  vm.runInNewContext(`${helpers}\nthis.ideaHelpers = { scratchIdeaPayload };`, context);
+  vm.runInNewContext(`${helpers}\nthis.ideaHelpers = { scratchIdeaPayload, normalizeActivityText };`, context);
   return context.ideaHelpers;
 }
 
@@ -62,5 +62,15 @@ test("does not mention Scratch Book in client-facing copy or activity reasons", 
   assert.match(app, /persistPlanner\("archived an idea"\)/);
   assert.match(app, /persistPlanner\("deleted an idea"\)/);
   assert.match(app, /persistPlanner\(existing \? "updated an idea" : "added an idea"\)/);
+});
+
+test("sanitizes legacy Scratch Book activity text into natural idea descriptions", () => {
+  const { normalizeActivityText } = ideaHelpers();
+  assert.equal(normalizeActivityText("Loren updated a Scratch Book idea"), "Loren updated an idea");
+  assert.equal(normalizeActivityText("Loren added a Scratch Book idea"), "Loren added an idea");
+  assert.equal(normalizeActivityText("Loren archived a Scratch Book idea"), "Loren archived an idea");
+  assert.equal(normalizeActivityText("Loren deleted a Scratch Book idea"), "Loren deleted an idea");
+  assert.equal(normalizeActivityText("Loren updated a Idea idea"), "Loren updated an idea");
+  assert.equal(normalizeActivityText("Loren added a idea"), "Loren added an idea");
 });
 

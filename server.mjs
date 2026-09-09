@@ -653,6 +653,17 @@ function normalizeSettings(settings) {
   };
 }
 
+function normalizeActivityText(text) {
+  return String(text || "")
+    .replace(/a\s+Scratch\s+Book\s+idea/gi, "an idea")
+    .replace(/Scratch\s+Book\s+idea/gi, "idea")
+    .replace(/saved\s+to\s+Scratch\s+Book/gi, "saved an idea")
+    .replace(/Scratch\s+Book/gi, "idea")
+    .replace(/\b(?:a|an)\s+(?:idea\s+idea|Idea\s+idea)\b/gi, "an idea")
+    .replace(/\ba\s+idea\b/gi, "an idea")
+    .slice(0, 180);
+}
+
 async function readPlanner() {
   const planner = await readStored("planner-data", defaultPlanner());
   return {
@@ -660,7 +671,7 @@ async function readPlanner() {
     posts: Array.isArray(planner?.posts) ? planner.posts.map(normalizePost) : [],
     scratch: Array.isArray(planner?.scratch) ? planner.scratch.map(normalizeScratchEntry).slice(0, 500) : [],
     team: Array.isArray(planner?.team) ? planner.team : [],
-    activity: Array.isArray(planner?.activity) ? planner.activity.slice(0, 40) : [],
+    activity: Array.isArray(planner?.activity) ? planner.activity.map(item => ({ ...item, text: normalizeActivityText(item?.text) })).slice(0, 40) : [],
     settings: normalizeSettings(planner?.settings),
     updatedAt: planner?.updatedAt || null
   };
@@ -682,7 +693,7 @@ function upsertTeamMember(planner, actor = {}) {
 
 function addActivity(planner, text) {
   if (!text) return;
-  planner.activity.unshift({ text: String(text).slice(0, 180), at: new Date().toISOString() });
+  planner.activity.unshift({ text: normalizeActivityText(text), at: new Date().toISOString() });
   planner.activity = planner.activity.slice(0, 40);
 }
 
@@ -692,7 +703,7 @@ async function writePlanner(nextPlanner) {
     posts: Array.isArray(nextPlanner?.posts) ? nextPlanner.posts.map(normalizePost) : [],
     scratch: Array.isArray(nextPlanner?.scratch) ? nextPlanner.scratch.map(normalizeScratchEntry).slice(0, 500) : [],
     team: Array.isArray(nextPlanner?.team) ? nextPlanner.team : [],
-    activity: Array.isArray(nextPlanner?.activity) ? nextPlanner.activity.slice(0, 40) : [],
+    activity: Array.isArray(nextPlanner?.activity) ? nextPlanner.activity.map(item => ({ ...item, text: normalizeActivityText(item?.text) })).slice(0, 40) : [],
     settings: normalizeSettings(nextPlanner?.settings),
     updatedAt: new Date().toISOString()
   };
