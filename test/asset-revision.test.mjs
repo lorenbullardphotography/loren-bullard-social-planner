@@ -64,8 +64,25 @@ test("detects same-field conflicts when fieldUpdatedRevision is newer than submi
 });
 
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import path from "node:path";
 import { handleRequest } from "../server.mjs";
 import { writeStored } from "../lib/store.mjs";
+
+const plannerDataFile = path.join(process.cwd(), ".data", "planner-data.json");
+let originalPlannerData = null;
+
+test.before(() => {
+  if (fs.existsSync(plannerDataFile)) {
+    originalPlannerData = fs.readFileSync(plannerDataFile, "utf8");
+  }
+});
+
+test.after(() => {
+  if (originalPlannerData != null) {
+    fs.writeFileSync(plannerDataFile, originalPlannerData, "utf8");
+  }
+});
 
 function createMockReq({ method = "GET", url = "/", body = null, headers = {} }) {
   const req = new EventEmitter();
