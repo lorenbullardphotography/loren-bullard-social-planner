@@ -115,6 +115,13 @@ test("supports week, month, and year calendar views with an independent Today ac
   assert.match(app, /is-today/);
 });
 
+test("week view on calendar always shows current week instead of first week of month", () => {
+  const app = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(app, /let calCursor = new Date\(\);/);
+  assert.doesNotMatch(app, /let calCursor = new Date\(\);\s*calCursor\.setDate\(1\);/);
+  assert.match(app, /if\s*\(calendarView === "week"\)\s*calCursor = new Date\(\);/);
+});
+
 test("lets the yearly calendar overview span the full calendar surface", () => {
   const css = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.calendar-year\{[^}]*grid-column:1 \/ -1/);

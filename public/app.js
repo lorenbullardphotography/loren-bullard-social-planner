@@ -2,7 +2,7 @@ const USER_KEY = "lb-content-planner-user-v1";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "tasks", editorReturnView = "tasks", calendarView = "month", libraryFilter = "all", librarySearch = "", librarySection = "assets", taskTab = "mine", approvalDetail = null, activityFilters = null, editorDirty = false, editorSaveInProgress = false;
 let settings = { pillars: [], formats: ["IMAGE", "REEL", "CAROUSEL"], goals: [], syncPhotoCount: 12, workflowAutomations: {} };
-let calCursor = new Date(); calCursor.setDate(1);
+let calCursor = new Date();
 
 const demo = (text, bg, fg = "#fff") => `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000"><rect width="100%" height="100%" fill="${bg}"/><circle cx="500" cy="390" r="165" fill="rgba(255,255,255,.15)"/><text x="500" y="585" text-anchor="middle" font-family="Georgia" font-size="57" fill="${fg}">${text}</text></svg>`)}`;
 const seed = [
@@ -1545,11 +1545,11 @@ function renderCalendarYear(year) {
 }
 function renderCalendar() {
   const year = calCursor.getFullYear(), month = calCursor.getMonth();
-  const weekEnd = new Date(calCursor); weekEnd.setDate(calCursor.getDate() + 6);
-  $("#monthLabel").textContent = calendarView === "year" ? String(year) : calendarView === "week" ? calCursor.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " – " + weekEnd.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : calCursor.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const begin = calendarView === "week" ? new Date(calCursor.getFullYear(), calCursor.getMonth(), calCursor.getDate() - calCursor.getDay()) : new Date(year, month, 1 - new Date(year, month, 1).getDay());
+  const weekEnd = new Date(begin); weekEnd.setDate(begin.getDate() + 6);
+  $("#monthLabel").textContent = calendarView === "year" ? String(year) : calendarView === "week" ? begin.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " – " + weekEnd.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : calCursor.toLocaleDateString(undefined, { month: "long", year: "numeric" });
   $$("#calendarViewSwitcher [data-calendar-view]").forEach(button => button.classList.toggle("active", button.dataset.calendarView === calendarView));
   if (calendarView === "year") return renderCalendarYear(year);
-  const begin = calendarView === "week" ? new Date(calCursor.getFullYear(), calCursor.getMonth(), calCursor.getDate() - calCursor.getDay()) : new Date(year, month, 1 - new Date(year, month, 1).getDay());
   const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const calendarPostMarkup = (post, extraClass = "") => `<div class="cal-post ${extraClass}" data-workflow="${workflowOf(post)}" draggable="true" data-open="${post.id}" data-drag-post="${post.id}" role="button" tabindex="0" aria-label="Edit ${esc(post.notes || post.caption || post.type || "post")}"><img src="${esc(gridImageOf(post))}" alt=""><span>${esc((post.caption || post.notes || post.type || "Post").slice(0, 28))}<small>${esc(post.time || scheduleLabel(post))}</small></span></div>`;
   let html = names.map(name => `<div class="cal-head">${name}</div>`).join("");
@@ -1960,9 +1960,9 @@ $("#activityTab").onclick = () => { taskTab = "activity"; approvalDetail = null;
 $("#taskSort").onchange = () => renderTasks();
 $("#activityFilters").onchange = () => { activityFilters = $$("#activityFilters input:checked").map(input => input.value); saveActivityFilters(currentUser, activityFilters); renderActivity(); };
 $("#prevMonth").onclick = () => { if (calendarView === "week") calCursor.setDate(calCursor.getDate() - 7); else if (calendarView === "year") calCursor.setFullYear(calCursor.getFullYear() - 1); else calCursor.setMonth(calCursor.getMonth() - 1); renderCalendar(); };
-$("#todayMonth").onclick = () => { const today = new Date(); calCursor = new Date(today.getFullYear(), today.getMonth(), calendarView === "week" ? today.getDate() : 1); renderCalendar(); };
+$("#todayMonth").onclick = () => { calCursor = new Date(); renderCalendar(); };
 $("#nextMonth").onclick = () => { if (calendarView === "week") calCursor.setDate(calCursor.getDate() + 7); else if (calendarView === "year") calCursor.setFullYear(calCursor.getFullYear() + 1); else calCursor.setMonth(calCursor.getMonth() + 1); renderCalendar(); };
-$$("[data-calendar-view]").forEach(button => button.onclick = () => { calendarView = button.dataset.calendarView; renderCalendar(); });
+$$("[data-calendar-view]").forEach(button => button.onclick = () => { calendarView = button.dataset.calendarView; if (calendarView === "week") calCursor = new Date(); renderCalendar(); });
 $("#calendarInstagramToggle").checked = calendarShowInstagram;
 $("#calendarInstagramToggle").onchange = event => { calendarShowInstagram = event.target.checked; saveCalendarInstagramPreference(currentUser, calendarShowInstagram); renderCalendar(); };
 $$(".chip").forEach(chip => chip.onclick = () => {
