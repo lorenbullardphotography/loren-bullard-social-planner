@@ -1289,6 +1289,7 @@ export async function handleRequest(req, res) {
       const body = await readBody(req);
       if (!body?.asset || typeof body.asset !== "object") return sendJson(res, 400, { error: "An asset payload is required." });
       const result = await plannerService.createAsset({ asset: body.asset, actor: body.actor || account, reason: body.reason });
+      if (result.error === "id-in-use") return sendJson(res, 409, { error: "An asset with that id already exists." });
       return sendJson(res, 201, { asset: result.asset });
     }
 
@@ -1358,6 +1359,18 @@ export async function handleRequest(req, res) {
       const result = await plannerService.patchSettings({ revision: body.revision, changes: body.changes || {}, actor: body.actor || account });
       if (result.error === "conflict") return sendJson(res, 409, { error: "Settings changed in another browser.", code: "SETTINGS_CONFLICT", settings: result.settings, revision: result.revision });
       return sendJson(res, 200, { settings: result.settings, revision: result.revision });
+    }
+
+    if (url.pathname.startsWith("/api/activity/") && url.pathname.endsWith("/undo") && req.method === "POST") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      const plannerService = await getPlannerService();
+      if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
+      const activityId = url.pathname.split("/")[3];
+      const result = await plannerService.undoActivity({ id: activityId, actor: account });
+      if (result.error === "not-found") return sendJson(res, 404, { error: "That activity could no longer be found." });
+      if (result.error === "not-reversible") return sendJson(res, 400, { error: "This activity can no longer be undone.", code: "UNDO_NOT_REVERSIBLE" });
+      if (result.error === "stale") return sendJson(res, 409, { error: "This item changed after that action and can no longer be safely undone.", code: "UNDO_STALE" });
+      return sendJson(res, 200, result);
     }
 
     if (url.pathname === "/api/assets" && req.method === "POST") {

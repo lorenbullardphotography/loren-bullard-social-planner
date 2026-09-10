@@ -1,3 +1,15 @@
+// Needed only by the undo scenarios below, to look up a planner_activity
+// row's id directly — there's no client-facing "list row-storage activity"
+// endpoint yet (out of scope for Task 8), so tests reach into the database
+// the same way a future activity-feed endpoint eventually would.
+async function latestActivityId(databaseUrl, entityId) {
+  const { default: postgres } = await import("postgres");
+  const sql = postgres(databaseUrl, { ssl: false });
+  const [row] = await sql`SELECT id FROM planner_activity WHERE entity_id = ${entityId} ORDER BY created_at DESC LIMIT 1`;
+  await sql.end({ timeout: 1 });
+  return row?.id;
+}
+
 // Spawned as a fresh child process by planner-collaboration.test.mjs — see
 // fixtures/planner-api-server.mjs for why (PLANNER_ROW_STORAGE_ENABLED and
 // DATABASE_URL must be real env vars before server.mjs first imports
@@ -98,6 +110,60 @@ if (scenario === "reorder-does-not-block-concurrent-edit") {
     bData: bChange?.data,
     noChangeStatus: noChange.status
   }));
+} else if (scenario === "undo-delete-restores-asset") {
+  const a = await createAsset("undo me");
+  const del = await call("DELETE", `/api/assets/${a.id}`, { actor: { name: "Loren" } }, cookie);
+  const activityId = await latestActivityId(process.env.DATABASE_URL, a.id);
+  const undo = await call("POST", `/api/activity/${activityId}/undo`, { actor: { name: "Brooke" } }, cookie);
+  const patchAfterUndo = await call("PATCH", `/api/assets/${a.id}`, { revision: a.revision, changes: { caption: "still here" }, actor: { name: "Loren" } }, cookie);
+  console.log(JSON.stringify({
+    deleted: del.status, undo: { status: undo.status, entityId: undo.json?.entityId },
+    patchAfterUndo: { status: patchAfterUndo.status }
+  }));
+} else if (scenario === "undo-stale-after-recreate") {
+  // Task 8's literal scenario: delete asset A, then a teammate re-creates
+  // an asset reusing the same id (e.g. a retried client-side create) before
+  // the undo is attempted — undo must detect the id is no longer in the
+  // exact deleted state it left it in and refuse, not blindly restore.
+  const a = await createAsset("original");
+  await call("DELETE", `/api/assets/${a.id}`, { actor: { name: "Loren" } }, cookie);
+  const activityId = await latestActivityId(process.env.DATABASE_URL, a.id);
+  const recreated = await call("POST", "/api/planner/assets", { asset: { id: a.id, image: "/new.jpg", caption: "recreated by teammate" }, actor: { name: "Brooke" } }, cookie);
+  const undo = await call("POST", `/api/activity/${activityId}/undo`, { actor: { name: "Loren" } }, cookie);
+  const stillRecreated = await call("GET", "/api/planner", undefined, cookie);
+  console.log(JSON.stringify({
+    recreatedStatus: recreated.status,
+    undo: { status: undo.status, code: undo.json?.code },
+    // Confirm the recreated asset's data survived untouched (undo did not
+    // silently overwrite it with the old pre-delete state).
+    survivedCaption: recreated.json?.asset?.caption
+  }));
+} else if (scenario === "undo-create-stale-after-edit") {
+  const a = await createAsset("brand new");
+  const activityId = await latestActivityId(process.env.DATABASE_URL, a.id);
+  await call("PATCH", `/api/assets/${a.id}`, { revision: a.revision, changes: { caption: "edited before undo" }, actor: { name: "Brooke" } }, cookie);
+  const undo = await call("POST", `/api/activity/${activityId}/undo`, { actor: { name: "Loren" } }, cookie);
+  console.log(JSON.stringify({ undo: { status: undo.status, code: undo.json?.code } }));
+} else if (scenario === "undo-twice-second-is-not-reversible") {
+  const a = await createAsset("undo twice");
+  await call("DELETE", `/api/assets/${a.id}`, { actor: { name: "Loren" } }, cookie);
+  const activityId = await latestActivityId(process.env.DATABASE_URL, a.id);
+  const first = await call("POST", `/api/activity/${activityId}/undo`, { actor: { name: "Loren" } }, cookie);
+  const second = await call("POST", `/api/activity/${activityId}/undo`, { actor: { name: "Loren" } }, cookie);
+  console.log(JSON.stringify({ first: { status: first.status }, second: { status: second.status, code: second.json?.code } }));
+} else if (scenario === "undo-reorder-restores-position") {
+  const a = await createAsset("a");
+  const b = await createAsset("b");
+  const c = await createAsset("c");
+  const reorder = await call("POST", `/api/assets/${c.id}/reorder`, { beforeId: null, afterId: a.id, actor: { name: "Loren" } }, cookie);
+  const activityId = await latestActivityId(process.env.DATABASE_URL, c.id);
+  const undo = await call("POST", `/api/activity/${activityId}/undo`, { actor: { name: "Brooke" } }, cookie);
+  console.log(JSON.stringify({ reorder: reorder.status, undo: { status: undo.status, sortKeyRestored: undo.json?.asset != null } }));
+} else if (scenario === "undo-settings-not-reversible") {
+  const settingsPatch = await call("PATCH", "/api/settings", { revision: 1, changes: { syncPhotoCount: 20 }, actor: { name: "Loren" } }, cookie);
+  const activityId = await latestActivityId(process.env.DATABASE_URL, "settings");
+  const undo = await call("POST", `/api/activity/${activityId}/undo`, { actor: { name: "Loren" } }, cookie);
+  console.log(JSON.stringify({ settingsPatch: settingsPatch.status, undo: { status: undo.status, code: undo.json?.code } }));
 }
 
 server.close();

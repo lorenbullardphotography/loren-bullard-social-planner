@@ -467,6 +467,7 @@ async function api(path, options) {
   if (!response.ok) {
     const error = new Error(data.error || "Request failed");
     error.status = response.status;
+    error.code = data.code;
     error.planner = data.planner;
     error.asset = data.asset;
     error.conflicts = data.conflicts;
@@ -2412,18 +2413,42 @@ async function undoActivity(activityId, button = null) {
   if (!activityId) return;
   if (button) button.disabled = true;
   try {
-    const data = await api(`/api/planner/rollback/${encodeURIComponent(activityId)}`, {
+    const result = await narrowOrFallback(() => api(`/api/activity/${encodeURIComponent(activityId)}/undo`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ version: plannerVersion })
-    });
-    setPlanner(data.planner);
+      body: JSON.stringify({ actor: currentUser })
+    }));
+    if (result.fallback) {
+      // Row storage isn't enabled — same legacy whole-document rollback as
+      // before Task 8.
+      const data = await api(`/api/planner/rollback/${encodeURIComponent(activityId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version: plannerVersion })
+      });
+      setPlanner(data.planner);
+      renderAll();
+      notify("Activity undone");
+      return;
+    }
+    // Row-storage undo only ever touches the one entity it's undoing —
+    // never replace the whole local planner from this response.
+    if (result.data.entityType === "asset") {
+      posts = result.data.asset ? replaceAsset(posts, result.data.asset) : posts.filter(post => post.id !== result.data.entityId);
+    } else if (result.data.entityType === "idea") {
+      scratch = scratch.filter(entry => entry.id !== result.data.entityId);
+    }
     renderAll();
     notify("Activity undone");
   } catch (error) {
-    if (error.planner) setPlanner(error.planner);
+    if (error.status === 409 && error.code === "UNDO_STALE") {
+      notify("This item changed after that action and can no longer be safely undone.");
+    } else {
+      if (error.planner) setPlanner(error.planner);
+      notify(error.message || "That activity could not be undone");
+    }
     renderActivity();
-    notify(error.message || "That activity could not be undone");
+  } finally {
     if (button) button.disabled = false;
   }
 }

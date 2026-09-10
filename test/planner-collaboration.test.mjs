@@ -68,3 +68,51 @@ test("GET /api/planner/changes returns only entities changed since the given tok
   assert.equal(result.bData, null, "a deleted entity should come back as a tombstone with no data");
   assert.equal(result.noChangeStatus, 304, "polling again at the token just returned should report no new changes");
 });
+
+test("undoing a delete restores the asset, and it's editable again afterward", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema();
+  const result = runScenario("undo-delete-restores-asset");
+  assert.equal(result.deleted, 200);
+  assert.equal(result.undo.status, 200);
+  assert.equal(result.patchAfterUndo.status, 200, "the restored asset should be a normal, editable row again");
+});
+
+test("undo returns UNDO_STALE when a teammate recreated the same id after the delete, and does not restore old state", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema();
+  const result = runScenario("undo-stale-after-recreate");
+  assert.equal(result.recreatedStatus, 201);
+  assert.equal(result.undo.status, 409);
+  assert.equal(result.undo.code, "UNDO_STALE");
+  assert.equal(result.survivedCaption, "recreated by teammate", "the teammate's recreated asset must survive untouched, not get overwritten by the old pre-delete data");
+});
+
+test("undo returns UNDO_STALE for a create when the asset was edited before the undo", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema();
+  const result = runScenario("undo-create-stale-after-edit");
+  assert.equal(result.undo.status, 409);
+  assert.equal(result.undo.code, "UNDO_STALE");
+});
+
+test("undo is one-shot: a second undo of the same activity is rejected as not reversible", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema();
+  const result = runScenario("undo-twice-second-is-not-reversible");
+  assert.equal(result.first.status, 200);
+  assert.equal(result.second.status, 400);
+  assert.equal(result.second.code, "UNDO_NOT_REVERSIBLE");
+});
+
+test("undoing a reorder restores the asset's prior position", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema();
+  const result = runScenario("undo-reorder-restores-position");
+  assert.equal(result.reorder, 200);
+  assert.equal(result.undo.status, 200);
+  assert.equal(result.undo.sortKeyRestored, true);
+});
+
+test("a settings change is not reversible", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema();
+  const result = runScenario("undo-settings-not-reversible");
+  assert.equal(result.settingsPatch, 200);
+  assert.equal(result.undo.status, 400);
+  assert.equal(result.undo.code, "UNDO_NOT_REVERSIBLE");
+});

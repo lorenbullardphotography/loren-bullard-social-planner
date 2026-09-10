@@ -212,7 +212,13 @@ test("POST /api/admin/planner-row-migration succeeds end-to-end against a real P
     env: { ...process.env, DATABASE_URL: testDatabaseUrl },
     encoding: "utf8"
   });
-  const result = JSON.parse(output);
+  // Parse only the last line: ensureSchema()'s CREATE TABLE/INDEX IF NOT
+  // EXISTS statements print a harmless Postgres NOTICE to stdout whenever
+  // the schema already exists from an earlier run (nothing drops
+  // planner_assets et al. between arbitrary local/manual runs of this
+  // file), which would otherwise corrupt a parse of the full captured
+  // output.
+  const result = JSON.parse(output.trim().split("\n").pop());
   assert.equal(result.statusCode, 200, `expected 200, got ${result.statusCode}: ${result.body}`);
   const data = JSON.parse(result.body);
   assert.equal(data.migration.alreadyMigrated, false);
