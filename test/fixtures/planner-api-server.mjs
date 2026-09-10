@@ -80,6 +80,43 @@ if (scenario === "concurrent-different-assets") {
   const planner = await call("GET", "/api/planner", undefined, cookie);
   const put = await call("PUT", "/api/planner", { version: planner.json.version, posts: planner.json.posts, scratch: planner.json.scratch, settings: planner.json.settings, actor: { name: "Loren" }, reason: "test" }, cookie);
   console.log(JSON.stringify({ status: put.status }));
+} else if (scenario === "settings-save-does-not-block-asset-edit") {
+  const created = await call("POST", "/api/planner/assets", { asset: { image: "/f.jpg", caption: "settings test asset" }, actor: { name: "Loren" } }, cookie);
+  const asset = created.json.asset;
+  const settingsPatch = await call("PATCH", "/api/settings", { revision: 1, changes: { syncPhotoCount: 20 }, actor: { name: "Loren" } }, cookie);
+  const assetPatch = await call("PATCH", `/api/assets/${asset.id}`, { revision: asset.revision, changes: { caption: "edited during settings save" }, actor: { name: "Brooke" } }, cookie);
+  console.log(JSON.stringify({
+    settings: { status: settingsPatch.status, syncPhotoCount: settingsPatch.json?.settings?.syncPhotoCount },
+    asset: { status: assetPatch.status, caption: assetPatch.json?.asset?.caption }
+  }));
+} else if (scenario === "settings-stale-conflict") {
+  // The table is empty at the start of this scenario, so the very first
+  // write has no prior revision to be stale against — it always succeeds
+  // and establishes revision 1. Only the second write can be genuinely
+  // stale relative to a third one that also submits revision 1.
+  await call("PATCH", "/api/settings", { revision: 1, changes: { syncPhotoCount: 10 }, actor: { name: "Loren" } }, cookie);
+  const first = await call("PATCH", "/api/settings", { revision: 1, changes: { syncPhotoCount: 15 }, actor: { name: "Loren" } }, cookie);
+  const stale = await call("PATCH", "/api/settings", { revision: 1, changes: { syncPhotoCount: 30 }, actor: { name: "Brooke" } }, cookie);
+  console.log(JSON.stringify({ first: { status: first.status }, stale: { status: stale.status, code: stale.json?.code } }));
+} else if (scenario === "idea-create-patch-delete") {
+  const created = await call("POST", "/api/ideas", { idea: { title: "idea one", body: "body text" }, actor: { name: "Loren" } }, cookie);
+  const id = created.json?.idea?.id;
+  const patched = await call("PATCH", `/api/ideas/${id}`, { revision: created.json.idea.revision, changes: { title: "idea one updated" }, actor: { name: "Loren" } }, cookie);
+  const del = await call("DELETE", `/api/ideas/${id}`, { actor: { name: "Loren" } }, cookie);
+  const patchAfterDelete = await call("PATCH", `/api/ideas/${id}`, { revision: 1, changes: { title: "should fail" }, actor: { name: "Loren" } }, cookie);
+  console.log(JSON.stringify({
+    created: { status: created.status, title: created.json?.idea?.title },
+    patched: { status: patched.status, title: patched.json?.idea?.title },
+    deleted: { status: del.status, ok: del.json?.ok },
+    patchAfterDelete: { status: patchAfterDelete.status }
+  }));
+} else if (scenario === "idea-stale-conflict") {
+  const created = await call("POST", "/api/ideas", { idea: { title: "original" }, actor: { name: "Loren" } }, cookie);
+  const id = created.json.idea.id;
+  const baseRevision = created.json.idea.revision;
+  const first = await call("PATCH", `/api/ideas/${id}`, { revision: baseRevision, changes: { title: "first writer" }, actor: { name: "Loren" } }, cookie);
+  const stale = await call("PATCH", `/api/ideas/${id}`, { revision: baseRevision, changes: { title: "stale writer" }, actor: { name: "Brooke" } }, cookie);
+  console.log(JSON.stringify({ first: { status: first.status }, stale: { status: stale.status, code: stale.json?.code } }));
 }
 
 server.close();

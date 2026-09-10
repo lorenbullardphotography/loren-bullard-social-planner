@@ -640,7 +640,7 @@ export function assetConflicts(post, submittedRevision, changes = {}) {
 
   return conflicts;
 }
-function normalizeScratchEntry(entry) {
+export function normalizeScratchEntry(entry) {
   const status = entry?.status === "archived" ? "archived" : "active";
   const rawImage = String(entry?.image || "").slice(0, 2000);
   const images = Array.isArray(entry?.images)
@@ -680,7 +680,7 @@ function defaultSettings() {
     workflowAutomations: normalizeWorkflowAutomations()
   };
 }
-function normalizeSettings(settings) {
+export function normalizeSettings(settings) {
   const base = defaultSettings();
   return {
     pillars: Array.isArray(settings?.pillars) && settings.pillars.length ? settings.pillars.map(item => String(item).trim()).filter(Boolean).slice(0, 40) : base.pillars,
@@ -1346,6 +1346,49 @@ export async function handleRequest(req, res) {
       if (result.error === "not-found") return sendJson(res, 404, { error: "This asset was removed by a teammate." });
       if (result.error === "neighbor-not-found") return sendJson(res, 409, { error: "The grid changed while you were dragging. Refresh to see the latest order." });
       return sendJson(res, 200, { asset: result.asset, affected: result.affected, changeToken: result.changeToken });
+    }
+
+    if (url.pathname === "/api/ideas" && req.method === "POST") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      const plannerService = await getPlannerService();
+      if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
+      const body = await readBody(req);
+      if (!body?.idea || typeof body.idea !== "object") return sendJson(res, 400, { error: "An idea payload is required." });
+      const result = await plannerService.createIdea({ idea: body.idea, actor: body.actor || account, reason: body.reason });
+      return sendJson(res, 201, { idea: result.idea, revision: result.revision });
+    }
+
+    if (url.pathname.startsWith("/api/ideas/") && req.method === "PATCH") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      const plannerService = await getPlannerService();
+      if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
+      const ideaId = url.pathname.slice("/api/ideas/".length);
+      const body = await readBody(req);
+      const result = await plannerService.patchIdea({ id: ideaId, revision: body.revision, changes: body.changes || {}, actor: body.actor || account, reason: body.reason });
+      if (result.error === "not-found") return sendJson(res, 404, { error: "This idea was removed by a teammate." });
+      if (result.error === "conflict") return sendJson(res, 409, { error: "This idea changed while you were editing it.", code: "IDEA_CONFLICT", idea: result.idea, revision: result.revision });
+      return sendJson(res, 200, { idea: result.idea, revision: result.revision });
+    }
+
+    if (url.pathname.startsWith("/api/ideas/") && req.method === "DELETE") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      const plannerService = await getPlannerService();
+      if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
+      const ideaId = url.pathname.slice("/api/ideas/".length);
+      const body = await readBody(req);
+      const result = await plannerService.deleteIdea({ id: ideaId, actor: body.actor || account, reason: body.reason });
+      if (result.error === "not-found") return sendJson(res, 404, { error: "This idea was already removed." });
+      return sendJson(res, 200, { ok: true, id: result.id });
+    }
+
+    if (url.pathname === "/api/settings" && req.method === "PATCH") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      const plannerService = await getPlannerService();
+      if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
+      const body = await readBody(req);
+      const result = await plannerService.patchSettings({ revision: body.revision, changes: body.changes || {}, actor: body.actor || account });
+      if (result.error === "conflict") return sendJson(res, 409, { error: "Settings changed in another browser.", code: "SETTINGS_CONFLICT", settings: result.settings, revision: result.revision });
+      return sendJson(res, 200, { settings: result.settings, revision: result.revision });
     }
 
     if (url.pathname === "/api/assets" && req.method === "POST") {

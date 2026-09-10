@@ -68,9 +68,10 @@ test("provides format, pillar, photo upload, and collaboration controls in the i
 test("does not mention Scratch Book in client-facing copy or activity reasons", () => {
   const app = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
   assert.doesNotMatch(app, /Scratch Book/i);
-  assert.match(app, /persistPlanner\("archived an idea"\)/);
-  assert.match(app, /persistPlanner\("deleted an idea"\)/);
-  assert.match(app, /persistPlanner\(existing \? "updated an idea" : "added an idea"\)/);
+  assert.match(app, /"archived an idea"/);
+  assert.match(app, /"deleted an idea"/);
+  assert.match(app, /"updated an idea"/);
+  assert.match(app, /"added an idea"/);
 });
 
 test("sanitizes legacy Scratch Book activity text into natural idea descriptions", () => {

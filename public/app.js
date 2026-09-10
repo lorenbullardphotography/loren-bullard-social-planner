@@ -653,6 +653,42 @@ async function refreshSharedPlanner() {
     }
   } catch {}
 }
+// Row storage (assets/ideas/settings as independent rows instead of one
+// whole-document save) is opt-in server-side via PLANNER_ROW_STORAGE_ENABLED.
+// Every narrow-endpoint call site below tries the narrow endpoint first and
+// falls back to the legacy persistPlanner() whole-document save on a 503
+// (the response when the flag is off, which is production's state until
+// Task 9 activates it) — so this keeps working unchanged today and needs no
+// further client changes once the flag flips on. Any other failure is
+// re-thrown for the caller's existing try/catch to revert optimistic state
+// and notify, exactly as it already does for persistPlanner failures.
+async function narrowOrFallback(action) {
+  try {
+    return { fallback: false, data: await action() };
+  } catch (error) {
+    if (error.status === 503) return { fallback: true };
+    throw error;
+  }
+}
+
+async function saveIdea(entry, changes, reason) {
+  const result = await narrowOrFallback(() => api(`/api/ideas/${encodeURIComponent(entry.id)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ revision: entry.revision || 1, changes, actor: currentUser, reason })
+  }));
+  if (result.fallback) return persistPlanner(reason);
+  Object.assign(entry, result.data.idea);
+  entry.revision = result.data.revision;
+}
+
+async function deleteIdeaNarrow(id, reason) {
+  const result = await narrowOrFallback(() => api(`/api/ideas/${encodeURIComponent(id)}`, {
+    method: "DELETE", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor: currentUser, reason })
+  }));
+  if (result.fallback) await persistPlanner(reason);
+}
+
 async function persistPlanner(reason) {
   try {
     const saved = await api("/api/planner", {
@@ -1106,7 +1142,12 @@ function renderGrid() {
       posts = posts.filter(item => item.id !== post.id);
       if (selected === post.id) selected = null;
       try {
-        await persistPlanner("removed a post");
+        const result = await narrowOrFallback(() => api(`/api/assets/${encodeURIComponent(post.id)}`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ actor: currentUser, reason: "removed a post" })
+        }));
+        if (result.fallback) await persistPlanner("removed a post");
         renderAll();
         notify("Post deleted from the shared planner");
       } catch (error) {
@@ -1700,7 +1741,12 @@ function renderInspector(hostSelector = "#inspector") {
     posts = posts.filter(item => item.id !== post.id);
     selected = null;
     try {
-      await persistPlanner("removed a post");
+      const result = await narrowOrFallback(() => api(`/api/assets/${encodeURIComponent(post.id)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actor: currentUser, reason: "removed a post" })
+      }));
+      if (result.fallback) await persistPlanner("removed a post");
       if (currentView === "editor") switchView("grid");
       renderAll();
       notify("Post deleted from the shared planner");
@@ -2024,14 +2070,14 @@ function renderScratch() {
     entry.updatedBy = currentUser.name;
     entry.updatedAt = new Date().toISOString();
     renderScratch();
-    await persistPlanner("archived an idea");
+    await saveIdea(entry, { status: "archived" }, "archived an idea");
   });
 
   $$(".scratch-delete").forEach(button => button.onclick = async event => {
     const id = event.currentTarget.closest("[data-scratch-id]").dataset.scratchId;
     scratch = scratch.filter(entry => entry.id !== id);
     renderScratch();
-    await persistPlanner("deleted an idea");
+    await deleteIdeaNarrow(id, "deleted an idea");
   });
 
   $$(".scratch-comment-form").forEach(form => {
@@ -2054,7 +2100,7 @@ function renderScratch() {
       entry.updatedBy = currentUser.name;
       entry.updatedAt = new Date().toISOString();
       renderScratch();
-      await persistPlanner("commented on an idea");
+      await saveIdea(entry, { comments: entry.comments }, "commented on an idea");
       notify("Feedback posted");
     };
   });
@@ -2069,7 +2115,7 @@ function renderScratch() {
       entry.updatedBy = currentUser.name;
       entry.updatedAt = new Date().toISOString();
       renderScratch();
-      await persistPlanner("removed a comment from an idea");
+      await saveIdea(entry, { comments: entry.comments }, "removed a comment from an idea");
       notify("Comment removed");
     };
   });
@@ -2237,6 +2283,7 @@ $("#upload").onchange = async event => {
   addAssetLabel.classList.add("disabled");
   let firstId = null;
   const uploadedPosts = [];
+  let usedRowStorageFallback = false;
   try {
     for (const [index, file] of validFiles.entries()) {
       uploadStatus.textContent = "Uploading " + (index + 1) + " of " + validFiles.length + "…";
@@ -2269,17 +2316,30 @@ $("#upload").onchange = async event => {
       };
       uploadedPosts.push(uploadedPost);
       posts.unshift(uploadedPost);
+      // Create the planner row right after this upload's Blob step succeeds,
+      // independent of the other files in this batch. Falls back to a
+      // legacy whole-document save (below, once) only if row storage isn't
+      // enabled — the flag doesn't change mid-batch, so this only ever
+      // triggers once, on the first file.
+      const created = await narrowOrFallback(() => api("/api/planner/assets", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asset: uploadedPost, actor: currentUser, reason: "uploaded new content" })
+      }));
+      if (created.fallback) usedRowStorageFallback = true;
+      else posts = replaceAsset(posts, created.data.asset);
     }
     selected = firstId;
     renderAll();
-    try {
-      await persistPlanner("uploaded new content");
-    } catch (error) {
-      if (error.status !== 409 || !error.planner) throw error;
-      const uploadedIds = new Set(uploadedPosts.map(post => post.id));
-      setPlanner(error.planner);
-      posts = [...uploadedPosts, ...posts.filter(post => !uploadedIds.has(post.id))];
-      await persistPlanner("uploaded new content after a shared planner refresh");
+    if (usedRowStorageFallback) {
+      try {
+        await persistPlanner("uploaded new content");
+      } catch (error) {
+        if (error.status !== 409 || !error.planner) throw error;
+        const uploadedIds = new Set(uploadedPosts.map(post => post.id));
+        setPlanner(error.planner);
+        posts = [...uploadedPosts, ...posts.filter(post => !uploadedIds.has(post.id))];
+        await persistPlanner("uploaded new content after a shared planner refresh");
+      }
     }
     switchView("editor");
     notify(validFiles.length === 1 ? "Asset uploaded — finish editing the post" : validFiles.length + " assets uploaded — editing the first post");
@@ -2319,7 +2379,16 @@ async function addCanvaDesign(design) {
   const isCanvaVideo = contentType === "video";
   const post = { id, image: images[0] || mediaUrl, images, assetSource: "canva", canvaUrl: design.editUrl || design.viewUrl, canvaDesignId: design.id, canvaDoctypeName: design.doctypeName || "", canvaDesignTypes: design.designTypes || [], canvaAssetType: isCanvaVideo ? "video" : "image", canvaPageCount: design.pageCount || 0, assetKind: isCanvaVideo ? "video" : "image", cropRatio: "4:5", status: "draft", approval: "feedback", type: contentType === "carousel" ? "CAROUSEL" : isCanvaVideo ? "REEL" : "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: design.title, comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
   posts.unshift(post); selected = id; $("#canvaModal").classList.add("hidden"); renderAll();
-  persistPlanner("added a Canva working draft").then(() => notify("Canva draft added")).catch(error => { posts = posts.filter(item => item.id !== id); renderAll(); notify(error.message || "Canva draft could not be added"); });
+  narrowOrFallback(() => api("/api/planner/assets", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ asset: post, actor: currentUser, reason: "added a Canva working draft" })
+  }))
+    .then(async result => {
+      if (result.fallback) await persistPlanner("added a Canva working draft");
+      else posts = replaceAsset(posts, result.data.asset);
+      notify("Canva draft added");
+    })
+    .catch(error => { posts = posts.filter(item => item.id !== id); renderAll(); notify(error.message || "Canva draft could not be added"); });
 }
 $("#addCanvaBtn").onclick = async () => {
   $("#canvaModal").classList.remove("hidden");
@@ -2434,10 +2503,12 @@ $("#scratchForm").onsubmit = async event => {
   const title = idea.title;
   if (!title) return;
   const now = new Date().toISOString();
+  let newEntry = null;
   if (existing) {
     Object.assign(existing, { ...idea, updatedBy: currentUser.name, updatedAt: now });
   } else {
-    scratch.unshift({ id: crypto.randomUUID(), ...idea, status: "active", createdBy: currentUser.name, updatedBy: currentUser.name, createdAt: now, updatedAt: now });
+    newEntry = { id: crypto.randomUUID(), ...idea, status: "active", createdBy: currentUser.name, updatedBy: currentUser.name, createdAt: now, updatedAt: now };
+    scratch.unshift(newEntry);
   }
   form.reset();
   scratchAttachedImages = [];
@@ -2447,7 +2518,16 @@ $("#scratchForm").onsubmit = async event => {
   const cancelBtn = $("#scratchCancelEdit");
   if (cancelBtn) cancelBtn.classList.add("hidden");
   renderScratch();
-  await persistPlanner(existing ? "updated an idea" : "added an idea");
+  if (existing) {
+    await saveIdea(existing, idea, "updated an idea");
+  } else {
+    const result = await narrowOrFallback(() => api("/api/ideas", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idea: newEntry, actor: currentUser, reason: "added an idea" })
+    }));
+    if (result.fallback) await persistPlanner("added an idea");
+    else { Object.assign(newEntry, result.data.idea); newEntry.revision = result.data.revision; }
+  }
   notify(existing ? "Idea updated" : "Idea saved");
 };
 const cancelEditBtn = $("#scratchCancelEdit");
@@ -2592,8 +2672,19 @@ $("#saveSettings").onclick = async () => {
   const formats = $("#settingsFormats").value.split(/\r?\n/).map(value => value.trim().toUpperCase()).filter(Boolean);
   if (!pillars.length || !formats.length) return notify("Add at least one pillar and one format");
   const workflowAutomations = Object.fromEntries($$("[data-automation-workflow]").map(select => [select.dataset.automationWorkflow, select.value]));
-  settings = { pillars, formats, goals, syncPhotoCount: Math.min(100, Math.max(3, Number($("#settingsSyncCount").value) || 12)), workflowAutomations };
-  await persistPlanner("updated planner settings");
+  const nextSettings = { pillars, formats, goals, syncPhotoCount: Math.min(100, Math.max(3, Number($("#settingsSyncCount").value) || 12)), workflowAutomations };
+  const previousRevision = settings.revision || 1;
+  settings = nextSettings;
+  const result = await narrowOrFallback(() => api("/api/settings", {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ revision: previousRevision, changes: nextSettings, actor: currentUser })
+  }));
+  if (result.fallback) {
+    await persistPlanner("updated planner settings");
+  } else {
+    settings = result.data.settings;
+    settings.revision = result.data.revision;
+  }
   renderAll();
   notify("Settings saved for the whole team");
 };

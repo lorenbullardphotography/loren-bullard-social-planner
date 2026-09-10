@@ -67,3 +67,40 @@ test("row storage flag on: the legacy whole-document PUT /api/planner endpoint i
   const result = runScenario("legacy-planner-put-still-works");
   assert.equal(result.status, 200);
 });
+
+test("row storage: saving settings does not block a concurrent asset edit", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema();
+  const result = runScenario("settings-save-does-not-block-asset-edit");
+  assert.equal(result.settings.status, 200);
+  assert.equal(result.settings.syncPhotoCount, 20);
+  assert.equal(result.asset.status, 200);
+  assert.equal(result.asset.caption, "edited during settings save");
+});
+
+test("row storage: a stale settings save returns SETTINGS_CONFLICT", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema();
+  const result = runScenario("settings-stale-conflict");
+  assert.equal(result.first.status, 200);
+  assert.equal(result.stale.status, 409);
+  assert.equal(result.stale.code, "SETTINGS_CONFLICT");
+});
+
+test("row storage: an idea can be created, patched, and deleted independently", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema();
+  const result = runScenario("idea-create-patch-delete");
+  assert.equal(result.created.status, 201);
+  assert.equal(result.created.title, "idea one");
+  assert.equal(result.patched.status, 200);
+  assert.equal(result.patched.title, "idea one updated");
+  assert.equal(result.deleted.status, 200);
+  assert.equal(result.deleted.ok, true);
+  assert.equal(result.patchAfterDelete.status, 404);
+});
+
+test("row storage: a stale idea edit returns IDEA_CONFLICT", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema();
+  const result = runScenario("idea-stale-conflict");
+  assert.equal(result.first.status, 200);
+  assert.equal(result.stale.status, 409);
+  assert.equal(result.stale.code, "IDEA_CONFLICT");
+});
