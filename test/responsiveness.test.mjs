@@ -70,6 +70,13 @@ test("mobile tab bars and calendar controls can shrink without clipping", () => 
   assert.match(css, /\.calendar-view-switcher\{[^}]*min-width:0/);
 });
 
+test("calendar cells keep long post captions inside their columns", () => {
+  assert.match(css, /\.calendar\{[^}]*grid-template-columns:repeat\(7,minmax\(0,1fr\)\)/);
+  assert.match(css, /\.day\{[^}]*min-width:0[^}]*overflow:hidden/);
+  assert.match(css, /\.cal-post\{[^}]*min-width:0/);
+  assert.match(css, /\.cal-post span\{[^}]*min-width:0[^}]*white-space:nowrap[^}]*overflow:hidden/);
+});
+
 test("login page scales padding and typography for narrow mobile devices", () => {
   assert.match(loginHtml, /@media\(max-width:380px\)\{\.card\{padding:22px 18px\}/);
 });
