@@ -5,7 +5,8 @@ import {
   normalizeAssetChanges,
   applyAssetChanges,
   assetConflicts,
-  ASSET_EDITABLE_FIELDS
+  ASSET_EDITABLE_FIELDS,
+  optionalPresence
 } from "../server.mjs";
 
 test("normalizes a legacy post with an initial revision", () => {
@@ -14,6 +15,14 @@ test("normalizes a legacy post with an initial revision", () => {
   assert.deepEqual(normalized.fieldUpdatedRevision, {});
   assert.deepEqual(normalized.fieldUpdatedAt, {});
   assert.deepEqual(normalized.fieldUpdatedBy, {});
+});
+
+test("keeps the planner available when optional presence storage fails", async () => {
+  const presence = await optionalPresence(async () => {
+    throw new Error("Supabase storage request failed (500)");
+  });
+
+  assert.deepEqual(presence, []);
 });
 
 test("records metadata only for fields that changed", () => {

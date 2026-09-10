@@ -2540,7 +2540,9 @@ async function syncInstagram({silent = false} = {}) {
 // browser session or relying on browser storage.
 setInterval(refreshSharedPlanner, 10000);
 setInterval(checkInstagram, 30000);
-setInterval(heartbeat, 5000);
+setInterval(() => {
+  if (editingPresence.assetId) heartbeat();
+}, 5000);
 window.addEventListener("focus", () => { refreshSharedPlanner(); checkInstagram(); });
 
 $("#modalSync").onclick = syncInstagram;

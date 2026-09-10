@@ -45,6 +45,7 @@ const ROLLBACK_HISTORY_LIMIT = 40;
 const ROLE_VALUES = ["Admin", "Photographer", "Social Media Manager", "Assistant", "Editor"];
 let plannerMutationQueue = Promise.resolve();
 const PRESENCE_TTL_MS = 45 * 1000;
+let lastPresenceErrorAt = 0;
 const DEFAULT_ACCOUNTS = [
   { name: "Loren", role: "Admin" },
   { name: "Brooke", role: "Admin" }
@@ -802,6 +803,17 @@ async function readPresence() {
   const cutoff = Date.now() - PRESENCE_TTL_MS;
   return Object.values(stored && typeof stored === "object" ? stored : {}).filter(person => Date.parse(person.lastSeenAt || "") > cutoff);
 }
+export async function optionalPresence(load = readPresence) {
+  try {
+    return await load();
+  } catch (error) {
+    if (Date.now() - lastPresenceErrorAt > 60 * 1000) {
+      lastPresenceErrorAt = Date.now();
+      console.error("Presence is temporarily unavailable:", error.message);
+    }
+    return [];
+  }
+}
 async function writePresence(actor = {}) {
   if (!actor?.name) return readPresence();
   const stored = await readStored("planner-presence", {});
@@ -1021,7 +1033,7 @@ export async function handleRequest(req, res) {
         ...item,
         reversible: Boolean(item.reversible && rollbackHistory.some(record => record.id === item.rollbackId))
       }));
-      return sendJson(res, 200, { ...planner, presence: await readPresence() });
+      return sendJson(res, 200, { ...planner, presence: await optionalPresence() });
     }
 
     if (url.pathname.startsWith("/api/planner/rollback/") && req.method === "POST") {
@@ -1049,7 +1061,7 @@ export async function handleRequest(req, res) {
 
     if (url.pathname === "/api/planner/presence" && req.method === "POST") {
       const body = await readBody(req);
-      return sendJson(res, 200, { presence: await writePresence(body.actor) });
+      return sendJson(res, 200, { presence: await optionalPresence(() => writePresence(body.actor)) });
     }
 
     if (url.pathname === "/api/planner/bootstrap" && req.method === "POST") {
