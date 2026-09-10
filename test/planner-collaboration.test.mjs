@@ -55,3 +55,16 @@ test("reordering next to a neighbor removed by a teammate returns a retryable co
   const result = runScenario("reorder-missing-neighbor-conflict");
   assert.equal(result.status, 409);
 });
+
+test("GET /api/planner/changes returns only entities changed since the given token, then 304s at the new token", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema();
+  const result = runScenario("change-feed");
+  assert.equal(result.initialStatus, 304, "an empty planner has no changes yet, so the very first poll should 304");
+  assert.equal(result.afterMutationsStatus, 200);
+  assert.equal(result.changeCount, 2, "only the two touched assets should be reported, not unrelated state");
+  assert.equal(result.aDeleted, false);
+  assert.equal(result.aCaption, "a edited");
+  assert.equal(result.bDeleted, true);
+  assert.equal(result.bData, null, "a deleted entity should come back as a tombstone with no data");
+  assert.equal(result.noChangeStatus, 304, "polling again at the token just returned should report no new changes");
+});

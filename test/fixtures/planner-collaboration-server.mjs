@@ -75,6 +75,29 @@ if (scenario === "reorder-does-not-block-concurrent-edit") {
   await call("DELETE", `/api/assets/${b.id}`, { actor: { name: "Loren" } }, cookie);
   const result = await call("POST", `/api/assets/${a.id}/reorder`, { beforeId: b.id, afterId: null, actor: { name: "Loren" } }, cookie);
   console.log(JSON.stringify({ status: result.status }));
+} else if (scenario === "change-feed") {
+  const initial = await call("GET", "/api/planner/changes?since=0", undefined, cookie);
+  const a = await createAsset("feed asset a");
+  const b = await createAsset("feed asset b");
+  await call("PATCH", `/api/assets/${a.id}`, { revision: a.revision, changes: { caption: "a edited" }, actor: { name: "Loren" } }, cookie);
+  await call("DELETE", `/api/assets/${b.id}`, { actor: { name: "Loren" } }, cookie);
+
+  const afterMutations = await call("GET", "/api/planner/changes?since=0", undefined, cookie);
+  const noChange = await call("GET", `/api/planner/changes?since=${afterMutations.json.nextToken}`, undefined, cookie);
+
+  const aChange = afterMutations.json.changes.find(c => c.entityId === a.id);
+  const bChange = afterMutations.json.changes.find(c => c.entityId === b.id);
+
+  console.log(JSON.stringify({
+    initialStatus: initial.status,
+    afterMutationsStatus: afterMutations.status,
+    changeCount: afterMutations.json.changes.length,
+    aDeleted: aChange?.deleted,
+    aCaption: aChange?.data?.caption,
+    bDeleted: bChange?.deleted,
+    bData: bChange?.data,
+    noChangeStatus: noChange.status
+  }));
 }
 
 server.close();

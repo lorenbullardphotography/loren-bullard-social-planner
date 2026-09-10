@@ -14,7 +14,7 @@ function assetEditorHelpers() {
     URL,
     Date
   };
-  vm.runInNewContext(`${helpers}\nthis.helpers = { mergeAssetEdit, assetEditorBaseline, assetEditorChanges, replaceAsset, removeConflictField, forceConflictField, mergeFreshAssets, assetEditorsFor };`, context);
+  vm.runInNewContext(`${helpers}\nthis.helpers = { mergeAssetEdit, assetEditorBaseline, assetEditorChanges, replaceAsset, removeConflictField, forceConflictField, mergeFreshAssets };`, context);
   return context.helpers;
 }
 
@@ -80,17 +80,4 @@ test("removes an asset missing from a newer planner snapshot", () => {
   const latest = [{ id: "a", revision: 3 }];
 
   assert.deepEqual(JSON.parse(JSON.stringify(mergeFreshAssets(local, latest, { preserveMissing: false }))), [{ id: "a", revision: 3 }]);
-});
-
-test("identifies another browser editing the selected asset even when it uses the same account", () => {
-  const { assetEditorsFor } = assetEditorHelpers();
-  const people = [
-    { name: "Loren", sessionId: "browser-a", editing: { assetId: "post-a", field: "caption" } },
-    { name: "Loren", sessionId: "browser-b", editing: { assetId: "post-a", field: "notes" } },
-    { name: "Maya", editing: { assetId: "post-b", field: "approval" } }
-  ];
-
-  assert.deepEqual(JSON.parse(JSON.stringify(assetEditorsFor("post-a", people, "Loren", "browser-a"))), [
-    { name: "Loren", sessionId: "browser-b", editing: { assetId: "post-a", field: "notes" } }
-  ]);
 });

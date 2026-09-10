@@ -52,8 +52,6 @@ const ROLLBACK_HISTORY_LIMIT = 40;
 
 const ROLE_VALUES = ["Admin", "Photographer", "Social Media Manager", "Assistant", "Editor"];
 let plannerMutationQueue = Promise.resolve();
-const PRESENCE_TTL_MS = 45 * 1000;
-let lastPresenceErrorAt = 0;
 const DEFAULT_ACCOUNTS = [
   { name: "Loren", role: "Admin" },
   { name: "Brooke", role: "Admin" }
@@ -810,46 +808,6 @@ async function writePlanner(nextPlanner, { incrementVersion = true, rollbackSnap
   if (rollbackSnapshot && rollbackActivity) await saveRollbackSnapshot(rollbackSnapshot, rollbackActivity, saved.version, saved.updatedAt);
   return saved;
 }
-async function readPresence() {
-  const stored = await readStored("planner-presence", {});
-  const cutoff = Date.now() - PRESENCE_TTL_MS;
-  return Object.values(stored && typeof stored === "object" ? stored : {}).filter(person => Date.parse(person.lastSeenAt || "") > cutoff);
-}
-export async function optionalPresence(load = readPresence) {
-  try {
-    return await load();
-  } catch (error) {
-    if (Date.now() - lastPresenceErrorAt > 60 * 1000) {
-      lastPresenceErrorAt = Date.now();
-      console.error("Presence is temporarily unavailable:", error.message);
-    }
-    return [];
-  }
-}
-async function writePresence(actor = {}) {
-  if (!actor?.name) return readPresence();
-  const stored = await readStored("planner-presence", {});
-  const current = stored && typeof stored === "object" ? stored : {};
-  const sessionId = String(actor?.sessionId || "").trim().slice(0, 160);
-  const key = sessionId || String(actor.name).trim().toLowerCase();
-  if (!key) return readPresence();
-  const editingAssetId = String(actor?.editing?.assetId || "").trim().slice(0, 200);
-  const editingField = String(actor?.editing?.field || "").trim().slice(0, 80);
-  current[key] = {
-    name: String(actor.name).slice(0, 80),
-    role: String(actor.role || "Admin").slice(0, 40),
-    sessionId: sessionId || null,
-    editing: editingAssetId ? { assetId: editingAssetId, field: editingField } : null,
-    lastSeenAt: new Date().toISOString()
-  };
-  const cutoff = Date.now() - PRESENCE_TTL_MS;
-  for (const [name, person] of Object.entries(current)) {
-    if (Date.parse(person.lastSeenAt || "") <= cutoff) delete current[name];
-  }
-  await writeStored("planner-presence", current);
-  return Object.values(current);
-}
-
 function mergeInstagramPosts(planner, media, actorName = "Instagram sync") {
   const byMeta = new Map(planner.posts.filter(post => post.metaId).map(post => [post.metaId, post]));
   for (const item of media) {
@@ -1114,7 +1072,23 @@ export async function handleRequest(req, res) {
         ...item,
         reversible: Boolean(item.reversible && rollbackHistory.some(record => record.id === item.rollbackId))
       }));
-      return sendJson(res, 200, { ...planner, presence: await optionalPresence() });
+      return sendJson(res, 200, planner);
+    }
+
+    if (url.pathname === "/api/planner/changes" && req.method === "GET") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      const plannerService = await getPlannerService();
+      if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
+      const since = Number(url.searchParams.get("since")) || 0;
+      const latest = await plannerService.latestChangeToken();
+      if (since >= latest) {
+        res.setHeader("ETag", `"seq-${latest}"`);
+        res.writeHead(304);
+        return res.end();
+      }
+      const { changes, nextToken } = await plannerService.changesSince(since);
+      res.setHeader("ETag", `"seq-${nextToken}"`);
+      return sendJson(res, 200, { changes, nextToken });
     }
 
     if (url.pathname.startsWith("/api/planner/rollback/") && req.method === "POST") {
@@ -1138,11 +1112,6 @@ export async function handleRequest(req, res) {
       const saved = await writePlanner(restored);
       await writeRollbackHistory(history.filter(item => item.id !== activityId));
       return sendJson(res, 200, { ok: true, planner: saved, activity: rollbackActivity });
-    }
-
-    if (url.pathname === "/api/planner/presence" && req.method === "POST") {
-      const body = await readBody(req);
-      return sendJson(res, 200, { presence: await optionalPresence(() => writePresence(body.actor)) });
     }
 
     if (url.pathname === "/api/planner/bootstrap" && req.method === "POST") {
