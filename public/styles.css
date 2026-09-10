@@ -272,3 +272,7 @@ body{font-family:Poppins,Arial,sans-serif;background:radial-gradient(circle at 9
 .activity-page-list .activity-undo{grid-column:3;grid-row:1;margin-left:0}
 @media(max-width:700px){.activity-page-list .activity-item{grid-template-columns:1fr}.activity-page-list .activity-undo{grid-column:auto;grid-row:auto;justify-self:start}}
 @media(hover:none){.crop-hint{opacity:1}}
+.tile.is-being-edited,.cal-post.is-being-edited{outline:3px solid #788ca5;outline-offset:2px}
+.asset-editing-badge{position:absolute;top:7px;right:7px;z-index:4;min-width:25px;height:25px;padding:0 6px;border-radius:999px;display:grid;place-items:center;background:#343437;color:#fff;border:2px solid #fffefa;font-size:9px;font-weight:800;letter-spacing:-.08em;box-shadow:0 2px 8px rgba(0,0,0,.22)}
+.cal-post .asset-editing-badge{top:4px;right:4px;transform:scale(.8);transform-origin:top right}
+.editor-presence{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 12px;padding:9px 11px;border:1px solid #bdc8d3;border-radius:12px;background:#eef3f6;color:#4c6174;font-size:11px}.presence-avatar{width:22px;height:22px;display:grid;place-items:center;border-radius:50%;background:#788ca5;color:#fff;font-size:8px;font-weight:800}.presence-separator{color:#8b9aa8}

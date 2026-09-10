@@ -16,6 +16,7 @@ let scratch = [];
 let team = [];
 let activity = [];
 let presence = [];
+let editingPresence = { assetId: "", field: "" };
 let igStatus = { connected: false };
 let plannerVersion = 0;
 let currentUser = loadUser();
@@ -539,6 +540,48 @@ function mergeFreshAssets(localPosts = [], latestPosts = [], { preserveMissing =
   return preserveMissing ? [...merged, ...localPosts.filter(post => !latestIds.has(post.id))] : merged;
 }
 
+function assetEditorsFor(assetId, people = presence, currentName = currentUser?.name) {
+  return people.filter(person => person?.editing?.assetId === assetId && person.name !== currentName);
+}
+
+function presenceFieldLabel(field = "") {
+  const labels = {
+    eType: "format", eWorkflow: "workflow", eAssignee: "assignee", ePriority: "priority", ePillar: "pillar",
+    eScheduleDate: "schedule date", eScheduleState: "scheduling", eCaption: "caption", eNotes: "notes",
+    eAudio: "audio", eHashtags: "hashtags", eTagNotes: "tagging notes", eAltText: "alt text", eLocation: "location",
+    eCropZoom: "crop", commentText: "comments"
+  };
+  return labels[field] || "this asset";
+}
+
+function editingPresenceMarkup(assetId) {
+  const editors = assetEditorsFor(assetId);
+  if (!editors.length) return "";
+  return `<span class="asset-editing-badge" title="${esc(editors.map(person => `${person.name} is editing ${presenceFieldLabel(person.editing?.field)}`).join(" · "))}">${editors.map(person => esc(personInitials(person.name))).join("")}</span>`;
+}
+
+function editorPresenceMarkup(assetId) {
+  const editors = assetEditorsFor(assetId);
+  return editors.length ? `<div class="editor-presence" role="status">${editors.map(person => `<span class="presence-avatar">${esc(personInitials(person.name))}</span><span><b>${esc(person.name)}</b> is editing ${esc(presenceFieldLabel(person.editing?.field))}</span>`).join("<span class=\"presence-separator\">·</span>")}</div>` : "";
+}
+
+function renderPresenceIndicators() {
+  document.querySelectorAll("[data-presence-asset-id]").forEach(node => {
+    const editors = assetEditorsFor(node.dataset.presenceAssetId);
+    node.classList.toggle("is-being-edited", editors.length > 0);
+    node.querySelector(".asset-editing-badge")?.remove();
+    if (editors.length) node.insertAdjacentHTML("beforeend", editingPresenceMarkup(node.dataset.presenceAssetId));
+  });
+  const editorPresence = $("#editorPresence");
+  if (editorPresence) editorPresence.innerHTML = selected ? editorPresenceMarkup(selected) : "";
+  renderTeam();
+}
+
+function updateEditingPresence(assetId = "", field = "") {
+  editingPresence = { assetId, field };
+  heartbeat().catch(() => {});
+}
+
 async function saveQuickAssetChanges(post, changes, reason) {
   try {
     const result = await api(`/api/assets/${post.id}`, {
@@ -983,10 +1026,10 @@ async function heartbeat() {
     const data = await api("/api/planner/presence", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actor: currentUser })
+      body: JSON.stringify({ actor: { ...currentUser, editing: editingPresence } })
     });
     presence = Array.isArray(data.presence) ? data.presence : presence;
-    renderTeam();
+    renderPresenceIndicators();
   } catch {}
 }
 function renderActivity() {
@@ -1012,6 +1055,7 @@ function renderGrid() {
   for (const post of ordered()) {
     const node = $("#tileTpl").content.firstElementChild.cloneNode(true);
     node.dataset.id = post.id;
+    node.dataset.presenceAssetId = post.id;
     node.dataset.status = post.status;
     node.dataset.workflow = workflowOf(post);
     // Use the pointer interaction below for consistent mouse, trackpad, and
@@ -1034,6 +1078,11 @@ function renderGrid() {
     node.querySelector(".location-icon").classList.toggle("hidden", !post.location);
     node.querySelector(".type-icon").textContent = post.type === "REEL" ? "▶" : post.type === "CAROUSEL" ? "▱" : "";
     if (selected === post.id) node.classList.add("selected");
+    const editors = assetEditorsFor(post.id);
+    if (editors.length) {
+      node.classList.add("is-being-edited");
+      node.insertAdjacentHTML("beforeend", editingPresenceMarkup(post.id));
+    }
     const quickDelete = node.querySelector(".tile-delete");
     const quickRefresh = node.querySelector(".tile-refresh");
     const isInstagramPost = Boolean(post.metaId || post.status === "posted");
@@ -1159,6 +1208,7 @@ function setGridEditorOpen(open) {
 
 function closeGridEditor() {
   selected = null;
+  updateEditingPresence();
   editorConflictState = null;
   setGridEditorOpen(false);
   renderGrid();
@@ -1320,7 +1370,7 @@ function renderInspector(hostSelector = "#inspector") {
   const comments = (post.comments || []).map(comment => `<div class="comment"><b>${esc(comment.author)}${comment.role ? ` · ${esc(comment.role)}` : ""}</b>${esc(comment.text)}</div>`).join("");
   const workflowOptions = Object.entries(WORKFLOW_LABELS).map(([key, label]) => `<option value="${key}" ${workflowOf(post) === key ? "selected" : ""}>${label}</option>`).join("");
   const pillarOptions = `<option value="">Choose a pillar</option>` + settings.pillars.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${esc(pillar)}</option>`).join("");
-  host.innerHTML = `<div class="editor editable-editor"><button class="mobile-editor-close" type="button" aria-label="Close asset editor">×</button><div class="editor-mobile-heading"><div><span class="eyebrow">EDITING SELECTED POST</span><b>${esc(post.caption || post.notes || assetTypeLabel(post))}</b></div><span>Swipe through fields below</span></div><div class="editor-scroll">
+  host.innerHTML = `<div class="editor editable-editor"><button class="mobile-editor-close" type="button" aria-label="Close asset editor">×</button><div class="editor-mobile-heading"><div><span class="eyebrow">EDITING SELECTED POST</span><b>${esc(post.caption || post.notes || assetTypeLabel(post))}</b></div><span>Swipe through fields below</span></div><div id="editorPresence">${editorPresenceMarkup(post.id)}</div><div class="editor-scroll">
     ${isCarousel ? `<div class="carousel-preview" aria-label="Carousel preview"><img class="carousel-slide" src="${esc(carouselImages(post)[carouselSlide] || post.image)}" alt="Carousel image ${carouselSlide + 1} of ${carouselCount}"><button id="carouselPrev" class="carousel-arrow carousel-prev" type="button" aria-label="Previous carousel image" ${carouselSlide === 0 ? "disabled" : ""}>‹</button><button id="carouselNext" class="carousel-arrow carousel-next" type="button" aria-label="Next carousel image" ${carouselSlide >= carouselCount - 1 ? "disabled" : ""}>›</button><span class="carousel-counter" aria-live="polite">${carouselSlide + 1} / ${carouselCount}</span></div>` : `<div class="preview-wrap${cropLocked ? "" : " crop-preview"}" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post, cropLocked)}${cropLocked ? "" : '<div class="crop-grid" aria-hidden="true"></div><span class="crop-hint">Drag to reposition</span><div class="crop-zoom-overlay"><span>Zoom</span><input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="' + Math.max(1, Math.min(3, Number(post.cropZoom) || 1)) + '" aria-label="Crop zoom"><output id="cropOverlayZoom">100%</output><button id="resetCrop" class="crop-overlay-reset" type="button" aria-label="Reset crop" title="Reset crop">↺</button></div>'}</div>`}
     <div class="asset-meta"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva" : "Uploaded"}</span>${hasReelCover(post) ? '<span class="asset-badge cover-badge">Cover attached</span>' : ""}</div>
     ${post.type === "REEL" || assetKindOf(post) === "video" ? `<div class="cover-card"><div><b>Reel cover photo</b><small>${post.coverImage ? "This image appears on the grid instead of the video frame." : "Add an image to choose the frame shown on the grid."}</small></div>${post.coverImage ? `<img class="cover-thumb" src="${esc(post.coverImage)}" alt="Reel cover photo">` : ""}<div class="handoff-actions"><label class="ghost button-link cover-upload-label">${post.coverImage ? "Replace cover" : "Upload cover photo"}<input id="coverInput" type="file" accept="image/*" hidden></label>${post.coverImage ? '<button id="removeCover" class="ghost" type="button">Remove cover</button>' : ""}</div><small id="coverHelp" class="field-help"></small></div>` : ""}
@@ -1363,6 +1413,7 @@ function renderInspector(hostSelector = "#inspector") {
     host.querySelectorAll("input, select, textarea").forEach(control => {
       control.addEventListener("input", () => { editorDirty = true; });
       control.addEventListener("change", () => { editorDirty = true; });
+      control.addEventListener("focus", () => updateEditingPresence(post.id, control.id));
     });
   }
   if (!currentEditorBaseline || currentEditorBaseline.id !== post.id) {
@@ -1726,7 +1777,7 @@ function renderCalendar() {
   $$("#calendarViewSwitcher [data-calendar-view]").forEach(button => button.classList.toggle("active", button.dataset.calendarView === calendarView));
   if (calendarView === "year") return renderCalendarYear(year);
   const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const calendarPostMarkup = (post, extraClass = "") => `<div class="cal-post ${extraClass}" data-workflow="${workflowOf(post)}" draggable="true" data-open="${post.id}" data-drag-post="${post.id}" role="button" tabindex="0" aria-label="Edit ${esc(post.notes || post.caption || post.type || "post")}"><img src="${esc(gridImageOf(post))}" alt=""><span>${esc((post.caption || post.notes || post.type || "Post").slice(0, 28))}<small>${esc(post.time || scheduleLabel(post))}</small></span></div>`;
+  const calendarPostMarkup = (post, extraClass = "") => `<div class="cal-post ${extraClass}${assetEditorsFor(post.id).length ? " is-being-edited" : ""}" data-presence-asset-id="${esc(post.id)}" data-workflow="${workflowOf(post)}" draggable="true" data-open="${post.id}" data-drag-post="${post.id}" role="button" tabindex="0" aria-label="Edit ${esc(post.notes || post.caption || post.type || "post")}"><img src="${esc(gridImageOf(post))}" alt=""><span>${esc((post.caption || post.notes || post.type || "Post").slice(0, 28))}<small>${esc(post.time || scheduleLabel(post))}</small></span>${editingPresenceMarkup(post.id)}</div>`;
   let html = names.map(name => `<div class="cal-head">${name}</div>`).join("");
   for (let i = 0; i < (calendarView === "week" ? 7 : 42); i++) {
     const day = new Date(begin);
@@ -2035,6 +2086,7 @@ function renderApprovals() {
 }
 function openPost(id, openEditor = false) {
   selected = id;
+  updateEditingPresence(id);
   const post = posts.find(item => item.id === id);
   if (post) {
     currentEditorBaseline = { id: post.id, ...assetEditorBaseline(post) };
@@ -2053,6 +2105,7 @@ function openPost(id, openEditor = false) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 function switchView(name) {
+  if (!['grid', 'editor'].includes(name)) updateEditingPresence();
   currentView = name;
   syncTopActions(name);
   $$(".view").forEach(view => view.classList.add("hidden"));
@@ -2474,7 +2527,7 @@ async function syncInstagram({silent = false} = {}) {
 // browser session or relying on browser storage.
 setInterval(refreshSharedPlanner, 10000);
 setInterval(checkInstagram, 30000);
-setInterval(heartbeat, 20000);
+setInterval(heartbeat, 5000);
 window.addEventListener("focus", () => { refreshSharedPlanner(); checkInstagram(); });
 
 $("#modalSync").onclick = syncInstagram;

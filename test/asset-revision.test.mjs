@@ -172,6 +172,30 @@ test("merges a stale edit to a different field", async () => {
   assert.equal(result.body.asset.revision, 4);
 });
 
+test("keeps simultaneous different-field asset saves", async () => {
+  const { cookie, postId } = await setupAuthenticatedPlanner();
+  const [captionSave, notesSave] = await Promise.all([
+    makeRequest({
+      method: "PATCH",
+      url: `/api/assets/${postId}`,
+      headers: { cookie },
+      body: { revision: 3, changes: { caption: "Caption saved at the same time" }, actor: { name: "Loren" } }
+    }),
+    makeRequest({
+      method: "PATCH",
+      url: `/api/assets/${postId}`,
+      headers: { cookie },
+      body: { revision: 3, changes: { notes: "Notes saved at the same time" }, actor: { name: "Brooke" } }
+    })
+  ]);
+
+  assert.equal(captionSave.status, 200);
+  assert.equal(notesSave.status, 200);
+  const planner = await makeRequest({ method: "GET", url: "/api/planner", headers: { cookie } });
+  assert.equal(planner.body.posts[0].caption, "Caption saved at the same time");
+  assert.equal(planner.body.posts[0].notes, "Notes saved at the same time");
+});
+
 test("updates an asset without advancing the shared planner version", async () => {
   const { cookie, postId } = await setupAuthenticatedPlanner();
   const result = await makeRequest({
@@ -214,6 +238,20 @@ test("merges a new comment with comments added by a teammate", async () => {
 
   assert.equal(second.status, 200);
   assert.deepEqual(second.body.asset.comments.map(comment => comment.text), ["Teammate feedback", "My feedback"]);
+});
+
+test("reports the asset and field a teammate is editing", async () => {
+  const { cookie, postId } = await setupAuthenticatedPlanner();
+  const result = await makeRequest({
+    method: "POST",
+    url: "/api/planner/presence",
+    headers: { cookie },
+    body: { actor: { name: "Brooke", role: "Editor", editing: { assetId: postId, field: "eCaption" } } }
+  });
+
+  assert.equal(result.status, 200);
+  const brooke = result.body.presence.find(person => person.name === "Brooke");
+  assert.deepEqual(brooke.editing, { assetId: postId, field: "eCaption" });
 });
 
 test("returns a structured conflict for a stale same-field edit", async () => {

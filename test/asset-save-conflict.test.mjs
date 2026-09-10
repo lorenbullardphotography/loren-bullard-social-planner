@@ -14,7 +14,7 @@ function assetEditorHelpers() {
     URL,
     Date
   };
-  vm.runInNewContext(`${helpers}\nthis.helpers = { mergeAssetEdit, assetEditorBaseline, assetEditorChanges, replaceAsset, removeConflictField, forceConflictField, mergeFreshAssets };`, context);
+  vm.runInNewContext(`${helpers}\nthis.helpers = { mergeAssetEdit, assetEditorBaseline, assetEditorChanges, replaceAsset, removeConflictField, forceConflictField, mergeFreshAssets, assetEditorsFor };`, context);
   return context.helpers;
 }
 
@@ -80,4 +80,17 @@ test("removes an asset missing from a newer planner snapshot", () => {
   const latest = [{ id: "a", revision: 3 }];
 
   assert.deepEqual(JSON.parse(JSON.stringify(mergeFreshAssets(local, latest, { preserveMissing: false }))), [{ id: "a", revision: 3 }]);
+});
+
+test("identifies only teammates editing the selected asset", () => {
+  const { assetEditorsFor } = assetEditorHelpers();
+  const people = [
+    { name: "Loren", editing: { assetId: "post-a", field: "caption" } },
+    { name: "Brooke", editing: { assetId: "post-a", field: "notes" } },
+    { name: "Maya", editing: { assetId: "post-b", field: "approval" } }
+  ];
+
+  assert.deepEqual(JSON.parse(JSON.stringify(assetEditorsFor("post-a", people, "Loren"))), [
+    { name: "Brooke", editing: { assetId: "post-a", field: "notes" } }
+  ]);
 });

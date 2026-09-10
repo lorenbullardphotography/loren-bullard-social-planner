@@ -43,6 +43,8 @@ const ACCOUNT_SESSION_DAYS = 14;
 const ROLLBACK_HISTORY_LIMIT = 40;
 
 const ROLE_VALUES = ["Admin", "Photographer", "Social Media Manager", "Assistant", "Editor"];
+let plannerMutationQueue = Promise.resolve();
+const PRESENCE_TTL_MS = 45 * 1000;
 const DEFAULT_ACCOUNTS = [
   { name: "Loren", role: "Admin" },
   { name: "Brooke", role: "Admin" }
@@ -737,6 +739,18 @@ function addReversibleActivity(planner, text) {
   return activity;
 }
 
+async function withPlannerMutation(fn) {
+  const previous = plannerMutationQueue;
+  let release;
+  plannerMutationQueue = new Promise(resolve => { release = resolve; });
+  await previous;
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
 function plannerSnapshot(planner) {
   return JSON.parse(JSON.stringify({
     posts: planner.posts,
@@ -785,7 +799,7 @@ async function writePlanner(nextPlanner, { incrementVersion = true, rollbackSnap
 }
 async function readPresence() {
   const stored = await readStored("planner-presence", {});
-  const cutoff = Date.now() - 1000 * 60 * 60;
+  const cutoff = Date.now() - PRESENCE_TTL_MS;
   return Object.values(stored && typeof stored === "object" ? stored : {}).filter(person => Date.parse(person.lastSeenAt || "") > cutoff);
 }
 async function writePresence(actor = {}) {
@@ -794,8 +808,15 @@ async function writePresence(actor = {}) {
   const current = stored && typeof stored === "object" ? stored : {};
   const key = String(actor.name).trim().toLowerCase();
   if (!key) return readPresence();
-  current[key] = { name: String(actor.name).slice(0, 80), role: String(actor.role || "Admin").slice(0, 40), lastSeenAt: new Date().toISOString() };
-  const cutoff = Date.now() - 1000 * 60 * 60;
+  const editingAssetId = String(actor?.editing?.assetId || "").trim().slice(0, 200);
+  const editingField = String(actor?.editing?.field || "").trim().slice(0, 80);
+  current[key] = {
+    name: String(actor.name).slice(0, 80),
+    role: String(actor.role || "Admin").slice(0, 40),
+    editing: editingAssetId ? { assetId: editingAssetId, field: editingField } : null,
+    lastSeenAt: new Date().toISOString()
+  };
+  const cutoff = Date.now() - PRESENCE_TTL_MS;
   for (const [name, person] of Object.entries(current)) {
     if (Date.parse(person.lastSeenAt || "") <= cutoff) delete current[name];
   }
@@ -1160,28 +1181,29 @@ export async function handleRequest(req, res) {
     }
 
     if (url.pathname.startsWith("/api/assets/") && req.method === "PATCH") {
-      const planner = await readPlanner();
-      const rollbackSnapshot = plannerSnapshot(planner);
-      const assetId = url.pathname.split("/").pop();
-      const post = planner.posts.find(item => item.id === assetId);
-      if (!post) return sendJson(res, 404, { error: "This asset was removed by a teammate." });
       const body = await readBody(req);
-      const changes = normalizeAssetChanges(body.changes);
-      if (!Object.keys(changes).length) return sendJson(res, 400, { error: "Choose at least one asset field to update." });
-      const submittedRevision = Number(body.revision) || 1;
-      const conflicts = assetConflicts(post, submittedRevision, changes);
-      const forceFields = Array.isArray(body.forceFields) ? body.forceFields : [];
-      const unforcedConflicts = Object.keys(conflicts).filter(field => !forceFields.includes(field));
-      if (unforcedConflicts.length > 0) {
-        return sendJson(res, 409, { error: "This asset changed while you were editing it.", asset: post, conflicts });
-      }
-      const updatedPost = applyAssetChanges(post, changes, body.actor || account, new Date().toISOString());
-      const postIndex = planner.posts.findIndex(item => item.id === post.id);
-      planner.posts[postIndex] = updatedPost;
-      upsertTeamMember(planner, body.actor || account);
-      const rollbackActivity = addReversibleActivity(planner, body.reason ? `${body?.actor?.name || account?.name || "Team"} ${body.reason}` : `${body?.actor?.name || account?.name || "Team"} updated planned content`);
-      await writePlanner(planner, { incrementVersion: false, rollbackSnapshot, rollbackActivity });
-      return sendJson(res, 200, { asset: updatedPost, merged: submittedRevision !== post.revision });
+      return withPlannerMutation(async () => {
+        const planner = await readPlanner();
+        const assetId = url.pathname.split("/").pop();
+        const post = planner.posts.find(item => item.id === assetId);
+        if (!post) return sendJson(res, 404, { error: "This asset was removed by a teammate." });
+        const changes = normalizeAssetChanges(body.changes);
+        if (!Object.keys(changes).length) return sendJson(res, 400, { error: "Choose at least one asset field to update." });
+        const submittedRevision = Number(body.revision) || 1;
+        const conflicts = assetConflicts(post, submittedRevision, changes);
+        const forceFields = Array.isArray(body.forceFields) ? body.forceFields : [];
+        const unforcedConflicts = Object.keys(conflicts).filter(field => !forceFields.includes(field));
+        if (unforcedConflicts.length > 0) {
+          return sendJson(res, 409, { error: "This asset changed while you were editing it.", asset: post, conflicts });
+        }
+        const updatedPost = applyAssetChanges(post, changes, body.actor || account, new Date().toISOString());
+        const postIndex = planner.posts.findIndex(item => item.id === post.id);
+        planner.posts[postIndex] = updatedPost;
+        upsertTeamMember(planner, body.actor || account);
+        addActivity(planner, body.reason ? `${body?.actor?.name || account?.name || "Team"} ${body.reason}` : `${body?.actor?.name || account?.name || "Team"} updated planned content`);
+        await writePlanner(planner, { incrementVersion: false });
+        return sendJson(res, 200, { asset: updatedPost, merged: submittedRevision !== post.revision });
+      });
     }
 
     if (url.pathname === "/api/assets" && req.method === "POST") {
