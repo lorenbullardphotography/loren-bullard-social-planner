@@ -895,6 +895,41 @@ async function getPlannerWriteService() {
   return getPlannerReadService();
 }
 
+// Task 10 observability: a safe operation log for judging whether row
+// storage is ready to have its legacy fallback retired. Deliberately
+// carries only these four fields — never captions, media URLs,
+// credentials, cookies, request bodies, or passwords, none of which this
+// function ever receives in the first place, so there's nothing to
+// accidentally include no matter what a caller passes as `operation`.
+export function buildPlannerDiagnostic({ operation, startedAt, outcome }) {
+  return {
+    operation: String(operation || "").slice(0, 80),
+    durationMs: Date.now() - startedAt,
+    outcome: String(outcome || "").slice(0, 40),
+    flags: { rowStorageEnabled: PLANNER_ROW_STORAGE_ENABLED, rowWritesEnabled: PLANNER_ROW_WRITES_ENABLED }
+  };
+}
+
+function logPlannerDiagnostic(entry) {
+  console.log(JSON.stringify({ plannerDiagnostic: entry }));
+}
+
+// Times one row-storage operation and logs its outcome. `fn` returns
+// either a plain result (outcome "ok") or a `{ error }` shape (outcome is
+// that error string) — the same convention every planner-service method
+// already uses, so call sites don't need to compute outcome themselves.
+async function withPlannerDiagnostics(operation, fn) {
+  const startedAt = Date.now();
+  try {
+    const result = await fn();
+    logPlannerDiagnostic(buildPlannerDiagnostic({ operation, startedAt, outcome: result?.error || "ok" }));
+    return result;
+  } catch (error) {
+    logPlannerDiagnostic(buildPlannerDiagnostic({ operation, startedAt, outcome: "exception" }));
+    throw error;
+  }
+}
+
 // Never throws: an unreachable/misconfigured Postgres is reported as
 // rowSchemaReady: false (a safe service-unavailable signal), not a 500.
 async function plannerRowSchemaHealth() {
@@ -1103,13 +1138,16 @@ export async function handleRequest(req, res) {
       const plannerService = await getPlannerReadService();
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const since = Number(url.searchParams.get("since")) || 0;
+      const startedAt = Date.now();
       const latest = await plannerService.latestChangeToken();
       if (since >= latest) {
+        logPlannerDiagnostic(buildPlannerDiagnostic({ operation: "planner.changes", startedAt, outcome: "not-modified" }));
         res.setHeader("ETag", `"seq-${latest}"`);
         res.writeHead(304);
         return res.end();
       }
       const { changes, nextToken } = await plannerService.changesSince(since);
+      logPlannerDiagnostic(buildPlannerDiagnostic({ operation: "planner.changes", startedAt, outcome: "ok" }));
       res.setHeader("ETag", `"seq-${nextToken}"`);
       return sendJson(res, 200, { changes, nextToken });
     }
@@ -1279,11 +1317,11 @@ export async function handleRequest(req, res) {
       const assetId = url.pathname.split("/").pop();
       const plannerService = await getPlannerWriteService();
       if (plannerService) {
-        const result = await plannerService.patchAsset({
+        const result = await withPlannerDiagnostics("asset.patch", () => plannerService.patchAsset({
           id: assetId, revision: body.revision, changes: body.changes,
           forceFields: Array.isArray(body.forceFields) ? body.forceFields : [],
           actor: body.actor || account, reason: body.reason
-        });
+        }));
         if (result.error === "not-found") return sendJson(res, 404, { error: "This asset was removed by a teammate." });
         if (result.error === "no-changes") return sendJson(res, 400, { error: "Choose at least one asset field to update." });
         if (result.error === "conflict") return sendJson(res, 409, { error: "This asset changed while you were editing it.", code: "ASSET_FIELD_CONFLICT", asset: result.asset, conflicts: result.conflicts });
@@ -1318,7 +1356,7 @@ export async function handleRequest(req, res) {
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const body = await readBody(req);
       if (!body?.asset || typeof body.asset !== "object") return sendJson(res, 400, { error: "An asset payload is required." });
-      const result = await plannerService.createAsset({ asset: body.asset, actor: body.actor || account, reason: body.reason });
+      const result = await withPlannerDiagnostics("asset.create", () => plannerService.createAsset({ asset: body.asset, actor: body.actor || account, reason: body.reason }));
       if (result.error === "id-in-use") return sendJson(res, 409, { error: "An asset with that id already exists." });
       return sendJson(res, 201, { asset: result.asset });
     }
@@ -1329,7 +1367,7 @@ export async function handleRequest(req, res) {
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const assetId = url.pathname.slice("/api/assets/".length);
       const body = await readBody(req);
-      const result = await plannerService.deleteAsset({ id: assetId, actor: body.actor || account, reason: body.reason });
+      const result = await withPlannerDiagnostics("asset.delete", () => plannerService.deleteAsset({ id: assetId, actor: body.actor || account, reason: body.reason }));
       if (result.error === "not-found") return sendJson(res, 404, { error: "This asset was already removed." });
       return sendJson(res, 200, { ok: true, id: result.id });
     }
@@ -1340,9 +1378,9 @@ export async function handleRequest(req, res) {
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const assetId = url.pathname.split("/")[3];
       const body = await readBody(req);
-      const result = await plannerService.reorderAsset({
+      const result = await withPlannerDiagnostics("asset.reorder", () => plannerService.reorderAsset({
         id: assetId, beforeId: body.beforeId || null, afterId: body.afterId || null, actor: body.actor || account
-      });
+      }));
       if (result.error === "not-found") return sendJson(res, 404, { error: "This asset was removed by a teammate." });
       if (result.error === "neighbor-not-found") return sendJson(res, 409, { error: "The grid changed while you were dragging. Refresh to see the latest order." });
       return sendJson(res, 200, { asset: result.asset, affected: result.affected, changeToken: result.changeToken });
@@ -1354,7 +1392,7 @@ export async function handleRequest(req, res) {
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const body = await readBody(req);
       if (!body?.idea || typeof body.idea !== "object") return sendJson(res, 400, { error: "An idea payload is required." });
-      const result = await plannerService.createIdea({ idea: body.idea, actor: body.actor || account, reason: body.reason });
+      const result = await withPlannerDiagnostics("idea.create", () => plannerService.createIdea({ idea: body.idea, actor: body.actor || account, reason: body.reason }));
       return sendJson(res, 201, { idea: result.idea, revision: result.revision });
     }
 
@@ -1364,7 +1402,7 @@ export async function handleRequest(req, res) {
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const ideaId = url.pathname.slice("/api/ideas/".length);
       const body = await readBody(req);
-      const result = await plannerService.patchIdea({ id: ideaId, revision: body.revision, changes: body.changes || {}, actor: body.actor || account, reason: body.reason });
+      const result = await withPlannerDiagnostics("idea.patch", () => plannerService.patchIdea({ id: ideaId, revision: body.revision, changes: body.changes || {}, actor: body.actor || account, reason: body.reason }));
       if (result.error === "not-found") return sendJson(res, 404, { error: "This idea was removed by a teammate." });
       if (result.error === "conflict") return sendJson(res, 409, { error: "This idea changed while you were editing it.", code: "IDEA_CONFLICT", idea: result.idea, revision: result.revision });
       return sendJson(res, 200, { idea: result.idea, revision: result.revision });
@@ -1376,7 +1414,7 @@ export async function handleRequest(req, res) {
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const ideaId = url.pathname.slice("/api/ideas/".length);
       const body = await readBody(req);
-      const result = await plannerService.deleteIdea({ id: ideaId, actor: body.actor || account, reason: body.reason });
+      const result = await withPlannerDiagnostics("idea.delete", () => plannerService.deleteIdea({ id: ideaId, actor: body.actor || account, reason: body.reason }));
       if (result.error === "not-found") return sendJson(res, 404, { error: "This idea was already removed." });
       return sendJson(res, 200, { ok: true, id: result.id });
     }
@@ -1386,7 +1424,7 @@ export async function handleRequest(req, res) {
       const plannerService = await getPlannerWriteService();
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const body = await readBody(req);
-      const result = await plannerService.patchSettings({ revision: body.revision, changes: body.changes || {}, actor: body.actor || account });
+      const result = await withPlannerDiagnostics("settings.patch", () => plannerService.patchSettings({ revision: body.revision, changes: body.changes || {}, actor: body.actor || account }));
       if (result.error === "conflict") return sendJson(res, 409, { error: "Settings changed in another browser.", code: "SETTINGS_CONFLICT", settings: result.settings, revision: result.revision });
       return sendJson(res, 200, { settings: result.settings, revision: result.revision });
     }
@@ -1396,7 +1434,7 @@ export async function handleRequest(req, res) {
       const plannerService = await getPlannerWriteService();
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const activityId = url.pathname.split("/")[3];
-      const result = await plannerService.undoActivity({ id: activityId, actor: account });
+      const result = await withPlannerDiagnostics("activity.undo", () => plannerService.undoActivity({ id: activityId, actor: account }));
       if (result.error === "not-found") return sendJson(res, 404, { error: "That activity could no longer be found." });
       if (result.error === "not-reversible") return sendJson(res, 400, { error: "This activity can no longer be undone.", code: "UNDO_NOT_REVERSIBLE" });
       if (result.error === "stale") return sendJson(res, 409, { error: "This item changed after that action and can no longer be safely undone.", code: "UNDO_STALE" });

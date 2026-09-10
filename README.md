@@ -169,6 +169,33 @@ document and the pre-migration backup are retained, so nothing is
 destroyed by activation — they simply stop being written to once writes
 are enabled.
 
+### Release diagnostics and retiring the legacy fallback
+
+Every row-storage request (asset/idea/settings create/patch/delete,
+reorder, undo, and the change-feed poll) logs one line to stdout after
+activation:
+
+```json
+{"plannerDiagnostic":{"operation":"asset.patch","durationMs":12,"outcome":"ok","flags":{"rowStorageEnabled":true,"rowWritesEnabled":true}}}
+```
+
+This is deliberately narrow — only the operation name, how long it took,
+its outcome (`"ok"`, a specific error/conflict code, or `"exception"`),
+and the current flag state. It never includes captions, media URLs,
+request bodies, cookies, or passwords, so it's safe to leave on and to
+ship to whatever log aggregation this deployment already uses.
+
+Use this to decide when it's safe to remove the legacy whole-document
+read fallback and any leftover presence storage keys: after activation,
+once **seven days** have passed with no parity mismatch, no
+whole-planner conflict, and no persistence 500 in these logs, the legacy
+normal-read fallback path in `server.mjs`/`lib/store.mjs` can be removed.
+This is a manual judgment call for whoever is running the deployment at
+the time, informed by these logs — it isn't something that happens on
+its own. Keep the exported pre-migration backup and the migration record
+in `planner_migrations` regardless of when (or whether) that cleanup
+happens.
+
 ## Connect Canva working drafts
 
 The planner supports adding a Canva design link without exporting or uploading a file. Click **Add Canva draft**, paste the design link, and use **Open in Canva** from the post editor. The link is shared with the whole planner team.

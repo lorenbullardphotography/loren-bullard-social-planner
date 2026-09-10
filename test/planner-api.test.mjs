@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { buildPlannerDiagnostic } from "../server.mjs";
 
 // These tests exercise the row-storage asset endpoints (PLANNER_ROW_STORAGE_ENABLED=true)
 // against a real Postgres database, spawned fresh per scenario (see
@@ -162,4 +163,42 @@ test("PUT /api/planner still works normally when row writes are not enabled", { 
   await resetSchema({ seedVerifiedMigration: true });
   const result = runScenario("put-planner-rejected-once-writes-enabled", { rowWritesEnabled: false });
   assert.equal(result.ordinaryPut, 200);
+});
+
+// --- Task 10: safe operation diagnostics ---
+
+test("buildPlannerDiagnostic contains only operation name, duration, outcome, and feature-flag state", () => {
+  const startedAt = Date.now() - 42;
+  const entry = buildPlannerDiagnostic({ operation: "asset.patch", startedAt, outcome: "ok" });
+
+  assert.deepEqual(Object.keys(entry).sort(), ["durationMs", "flags", "operation", "outcome"]);
+  assert.equal(entry.operation, "asset.patch");
+  assert.ok(entry.durationMs >= 40, "duration should reflect real elapsed time");
+  assert.equal(entry.outcome, "ok");
+  assert.deepEqual(Object.keys(entry.flags).sort(), ["rowStorageEnabled", "rowWritesEnabled"]);
+  assert.equal(typeof entry.flags.rowStorageEnabled, "boolean");
+  assert.equal(typeof entry.flags.rowWritesEnabled, "boolean");
+});
+
+test("buildPlannerDiagnostic never carries caption/media/credential-shaped data, even if a caller tries to pass it", () => {
+  // The function only accepts { operation, startedAt, outcome } — there's
+  // no parameter for a request body, caption, media URL, cookie, or
+  // password, so this proves there's nothing for an accidental extra
+  // field to leak through, not just that today's call sites behave.
+  const entry = buildPlannerDiagnostic({
+    operation: "asset.patch",
+    startedAt: Date.now(),
+    outcome: "ok",
+    // Attempt to smuggle unsafe fields in — they must be ignored.
+    caption: "a very personal caption",
+    body: { password: "hunter2" },
+    cookie: "planner_session=secret",
+    mediaUrl: "https://blob.example/private-photo.jpg"
+  });
+
+  const serialized = JSON.stringify(entry).toLowerCase();
+  for (const forbidden of ["caption", "password", "cookie", "secret", "mediaurl", "photo"]) {
+    assert.ok(!serialized.includes(forbidden), `diagnostic entry leaked forbidden term: ${forbidden}`);
+  }
+  assert.deepEqual(Object.keys(entry).sort(), ["durationMs", "flags", "operation", "outcome"]);
 });
