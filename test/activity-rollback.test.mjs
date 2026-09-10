@@ -13,6 +13,7 @@ test("server records rollback snapshots and guards stale restores", () => {
   assert.match(server, /That activity can no longer be undone/);
   assert.match(server, /This activity is no longer the latest planner change/);
   assert.match(server, /addActivity\(planner, `\$\{body\?\.actor\?\.name \|\| "Team"\} synced Instagram`\)/);
+  assert.match(server, /planner\.activity = planner\.activity\.map/);
 });
 
 test("activity feed includes an accessible undo control and rollback request", () => {

@@ -993,6 +993,11 @@ export async function handleRequest(req, res) {
 
     if (url.pathname === "/api/planner" && req.method === "GET") {
       const planner = await readPlanner();
+      const rollbackHistory = await readRollbackHistory();
+      planner.activity = planner.activity.map(item => ({
+        ...item,
+        reversible: Boolean(item.reversible && rollbackHistory.some(record => record.id === item.rollbackId))
+      }));
       return sendJson(res, 200, { ...planner, presence: await readPresence() });
     }
 
