@@ -17,8 +17,6 @@ let scratch = [];
 let team = [];
 let activity = [];
 let presence = [];
-let presenceRefreshInFlight = false;
-let presencePollingStarted = false;
 let editingPresence = { assetId: "", field: "" };
 let igStatus = { connected: false };
 let plannerVersion = 0;
@@ -654,25 +652,6 @@ async function refreshSharedPlanner() {
       renderPresenceIndicators();
     }
   } catch {}
-}
-async function refreshPresence() {
-  if (presenceRefreshInFlight) return;
-  presenceRefreshInFlight = true;
-  try {
-    const latest = await api("/api/planner/presence");
-    if (Array.isArray(latest?.presence)) {
-      presence = latest.presence;
-      renderPresenceIndicators();
-    }
-  } catch {} finally {
-    presenceRefreshInFlight = false;
-  }
-}
-function startPresencePolling() {
-  if (presencePollingStarted) return;
-  presencePollingStarted = true;
-  refreshPresence();
-  setInterval(refreshPresence, 3000);
 }
 async function persistPlanner(reason) {
   try {
@@ -2712,7 +2691,6 @@ async function init() {
     await loadAccount();
     await loadPlanner();
     renderAll();
-    startPresencePolling();
   } finally {
     setPageLoading(false);
   }

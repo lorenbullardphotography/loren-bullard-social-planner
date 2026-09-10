@@ -17,11 +17,10 @@ test("refreshes asset edit indicators when shared presence changes", () => {
   assert.match(refreshSharedPlanner, /presence = latest\.presence;\s*renderPresenceIndicators\(\);/);
 });
 
-test("starts lightweight presence polling only after the planner is rendered", () => {
+test("does not use high-frequency presence polling that can block shared storage", () => {
   const source = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
-  const init = source.match(/async function init\(\) \{([\s\S]*?)\n\}/)?.[1] || "";
 
-  assert.match(source, /function startPresencePolling\(\)[\s\S]*setInterval\(refreshPresence, 3000\)/);
-  assert.match(init, /renderAll\(\);\s*startPresencePolling\(\);/);
-  assert.doesNotMatch(source, /setInterval\(refreshPresence, 2000\)/);
+  assert.match(source, /setInterval\(refreshSharedPlanner, 10000\)/);
+  assert.doesNotMatch(source, /setInterval\(refreshPresence,/);
+  assert.doesNotMatch(source, /startPresencePolling\(\)/);
 });
