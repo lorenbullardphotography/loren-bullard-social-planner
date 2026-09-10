@@ -501,11 +501,6 @@ async function loadPlanner() {
     return;
   }
   setPlanner(planner);
-  await api("/api/planner/bootstrap", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ actor: currentUser })
-  }).then(setPlanner).catch(() => {});
 }
 function shouldRefreshPlanner({ currentView, editorDirty, editorSaveInProgress }) {
   return currentView !== "editor" || (!editorDirty && !editorSaveInProgress);
