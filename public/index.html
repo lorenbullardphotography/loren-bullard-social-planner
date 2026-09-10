@@ -19,8 +19,8 @@
       <button id="mobileDrawerClose" class="drawer-close" type="button" aria-label="Close navigation menu">×</button>
     </div>
     <nav>
-      <button class="nav active" data-view="tasks"><svg class="nav-icon" data-icon="tasks" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="m7.5 8 1.5 1.5L11.5 7M13 9h4M7.5 14l1.5 1.5 2.5-2.5M13 15h4"></path></svg><span class="nav-label">Tasks</span></button>
-      <button class="nav" data-view="grid"><svg class="nav-icon" data-icon="grid" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg><span class="nav-label">Grid Planner</span></button>
+      <button class="nav" data-view="tasks"><svg class="nav-icon" data-icon="tasks" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="m7.5 8 1.5 1.5L11.5 7M13 9h4M7.5 14l1.5 1.5 2.5-2.5M13 15h4"></path></svg><span class="nav-label">Tasks</span></button>
+      <button class="nav active" data-view="grid"><svg class="nav-icon" data-icon="grid" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg><span class="nav-label">Grid Planner</span></button>
       <button class="nav" data-view="calendar"><svg class="nav-icon" data-icon="calendar" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M7 3v4M17 3v4M3 10h18M7 14h.01M12 14h.01M17 14h.01M7 17h.01M12 17h.01"></path></svg><span class="nav-label">Calendar</span></button>
       <button class="nav" data-view="library"><svg class="nav-icon" data-icon="library" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V4Z"></path><path d="M7 4v16M10 8h5M10 12h5M10 16h3M18 7h1a2 2 0 0 1 2 2v11h-3"></path></svg><span class="nav-label">Library</span></button>
       <button class="nav" data-view="settings"><svg class="nav-icon" data-icon="settings" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg><span class="nav-label">Settings</span></button>
@@ -41,7 +41,7 @@
       <button id="mobileMenuBtn" class="mobile-menu-toggle" type="button" aria-label="Open navigation menu" aria-controls="mobileMenu" aria-expanded="false"><span></span><span></span><span></span></button>
       <div>
         <p class="eyebrow">LOREN BULLARD PHOTOGRAPHY</p>
-        <h1 id="pageTitle">Tasks</h1>
+        <h1 id="pageTitle">Grid Planner</h1>
         <p class="top-tagline">Timeless, joy-filled imagery that tells your story.</p>
       </div>
       <div class="top-actions">
@@ -51,7 +51,7 @@
       </div>
     </header>
 
-    <section id="view-grid" class="view hidden">
+    <section id="view-grid" class="view">
       <div class="intro">
         <div><h3>Feed Preview</h3><p>Plan new content above your live Instagram posts. Drag planned posts into the order you want.</p><small class="grid-gesture-hint">Tap to edit · Press and hold to move</small></div>
         <div class="stats">
@@ -74,7 +74,7 @@
       </div>
     </section>
 
-    <section id="view-tasks" class="view">
+    <section id="view-tasks" class="view hidden">
       <div class="brand-banner">
         <div class="brand-banner-logo"><img src="/assets/lbp-banner-logo.png" alt="Loren Bullard Family Photography and Films"></div>
         <span class="brand-banner-note">Plan with intention · create with heart</span>

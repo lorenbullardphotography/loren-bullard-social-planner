@@ -1059,6 +1059,10 @@ export async function handleRequest(req, res) {
       return sendJson(res, 200, { ok: true, planner: saved, activity: rollbackActivity });
     }
 
+    if (url.pathname === "/api/planner/presence" && req.method === "GET") {
+      return sendJson(res, 200, { presence: await optionalPresence() });
+    }
+
     if (url.pathname === "/api/planner/presence" && req.method === "POST") {
       const body = await readBody(req);
       return sendJson(res, 200, { presence: await optionalPresence(() => writePresence(body.actor)) });

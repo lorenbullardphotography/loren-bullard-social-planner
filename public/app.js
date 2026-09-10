@@ -1,7 +1,7 @@
 const USER_KEY = "lb-content-planner-user-v1";
 const PRESENCE_SESSION_KEY = "lb-content-planner-presence-session-v1";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
-let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "tasks", editorReturnView = "tasks", calendarView = "month", libraryFilter = "all", librarySearch = "", librarySection = "assets", taskTab = "mine", approvalDetail = null, activityFilters = null, editorDirty = false, editorSaveInProgress = false;
+let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "grid", editorReturnView = "grid", calendarView = "month", libraryFilter = "all", librarySearch = "", librarySection = "assets", taskTab = "mine", approvalDetail = null, activityFilters = null, editorDirty = false, editorSaveInProgress = false;
 let settings = { pillars: [], formats: ["IMAGE", "REEL", "CAROUSEL"], goals: [], syncPhotoCount: 12, workflowAutomations: {} };
 let calCursor = new Date();
 
@@ -17,6 +17,7 @@ let scratch = [];
 let team = [];
 let activity = [];
 let presence = [];
+let presenceRefreshInFlight = false;
 let editingPresence = { assetId: "", field: "" };
 let igStatus = { connected: false };
 let plannerVersion = 0;
@@ -649,9 +650,22 @@ async function refreshSharedPlanner() {
       renderAll();
     } else if (Array.isArray(latest?.presence)) {
       presence = latest.presence;
-      renderTeam();
+      renderPresenceIndicators();
     }
   } catch {}
+}
+async function refreshPresence() {
+  if (presenceRefreshInFlight) return;
+  presenceRefreshInFlight = true;
+  try {
+    const latest = await api("/api/planner/presence");
+    if (Array.isArray(latest?.presence)) {
+      presence = latest.presence;
+      renderPresenceIndicators();
+    }
+  } catch {} finally {
+    presenceRefreshInFlight = false;
+  }
 }
 async function persistPlanner(reason) {
   try {
@@ -2534,6 +2548,7 @@ async function syncInstagram({silent = false} = {}) {
 // let the owner and social employee see each other's changes without sharing a
 // browser session or relying on browser storage.
 setInterval(refreshSharedPlanner, 10000);
+setInterval(refreshPresence, 2000);
 setInterval(checkInstagram, 30000);
 setInterval(() => {
   if (editingPresence.assetId) heartbeat();

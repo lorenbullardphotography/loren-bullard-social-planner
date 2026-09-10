@@ -5,17 +5,17 @@ import fs from "node:fs";
 const html = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 
 test("uses the top bar as the only page-level H1", () => {
-  assert.match(html, /<h1 id="pageTitle">Tasks<\/h1>/);
+  assert.match(html, /<h1 id="pageTitle">Grid Planner<\/h1>/);
   assert.doesNotMatch(html, /<div><h1>Studio Planner<\/h1>/);
   assert.doesNotMatch(html, /<section id="view-(tasks|calendar|library|approvals|settings)"[^>]*>[\s\S]*?<h3>(Tasks|Content Calendar|Library|Approvals|Planner settings)<\/h3>/);
 });
 
-test("loads into the tasks view by default", () => {
+test("loads into the grid view by default", () => {
   const appJs = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
-  assert.match(appJs, /currentView = "tasks"/);
-  assert.match(html, /<button class="nav active" data-view="tasks">/);
-  assert.match(html, /<section id="view-tasks" class="view">/);
-  assert.match(html, /<section id="view-grid" class="view hidden">/);
+  assert.match(appJs, /currentView = "grid"/);
+  assert.match(html, /<button class="nav active" data-view="grid">/);
+  assert.match(html, /<section id="view-grid" class="view">/);
+  assert.match(html, /<section id="view-tasks" class="view hidden">/);
   assert.match(appJs, /\$\$\("#calendarAgenda \.cal-post"\)\.forEach/);
 });
 
@@ -154,4 +154,3 @@ test("server syncs all instagram media without restricting by syncPhotoCount", (
   assert.match(server, /async function getInstagramMedia\(token, limit = null\)/);
   assert.match(server, /getInstagramMedia\(session\.access_token\)/);
 });
-
