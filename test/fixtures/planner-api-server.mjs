@@ -1,0 +1,86 @@
+// Spawned as a fresh child process by planner-api.test.mjs so that
+// PLANNER_ROW_STORAGE_ENABLED and DATABASE_URL are real environment
+// variables in place before server.mjs (and lib/store.mjs) are first
+// imported — both are read into module-level constants on first import,
+// so setting them mid-process would silently have no effect. Starts a real
+// HTTP server and runs whatever scenario name is passed as argv[2],
+// printing one JSON result line to stdout. See
+// test/planner-migration.test.mjs / run-migration-e2e.mjs for why this
+// uses a real server + fetch() rather than the EventEmitter req/res mock
+// most of this repo's other tests use (that mock's event timing races
+// against real Postgres I/O and silently drops the request body).
+import http from "node:http";
+import { handleRequest } from "../../server.mjs";
+
+const server = http.createServer(handleRequest);
+await new Promise(resolve => server.listen(0, resolve));
+const base = `http://127.0.0.1:${server.address().port}`;
+
+async function call(method, path, body, cookie) {
+  const response = await fetch(`${base}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  const cookieHeader = response.headers.get("set-cookie")?.split(";")[0] || "";
+  let json = null;
+  try { json = await response.json(); } catch {}
+  return { status: response.status, cookie: cookieHeader, json };
+}
+
+async function signIn() {
+  const login = await call("POST", "/auth/login", { login: "Loren", password: "admin" });
+  return login.cookie;
+}
+
+const scenario = process.argv[2];
+const cookie = await signIn();
+
+if (scenario === "concurrent-different-assets") {
+  const a = await call("POST", "/api/planner/assets", { asset: { image: "/a.jpg", caption: "asset a" }, actor: { name: "Loren" } }, cookie);
+  const b = await call("POST", "/api/planner/assets", { asset: { image: "/b.jpg", caption: "asset b" }, actor: { name: "Loren" } }, cookie);
+  const [patchA, patchB] = await Promise.all([
+    call("PATCH", `/api/assets/${a.json.asset.id}`, { revision: a.json.asset.revision, changes: { caption: "a edited" }, actor: { name: "Loren" } }, cookie),
+    call("PATCH", `/api/assets/${b.json.asset.id}`, { revision: b.json.asset.revision, changes: { caption: "b edited" }, actor: { name: "Brooke" } }, cookie)
+  ]);
+  console.log(JSON.stringify({ patchA: { status: patchA.status, caption: patchA.json?.asset?.caption }, patchB: { status: patchB.status, caption: patchB.json?.asset?.caption } }));
+} else if (scenario === "different-fields-merge") {
+  const created = await call("POST", "/api/planner/assets", { asset: { image: "/c.jpg", caption: "original", notes: "original notes" }, actor: { name: "Loren" } }, cookie);
+  const id = created.json.asset.id;
+  const baseRevision = created.json.asset.revision;
+  const [captionPatch, notesPatch] = await Promise.all([
+    call("PATCH", `/api/assets/${id}`, { revision: baseRevision, changes: { caption: "new caption" }, actor: { name: "Loren" } }, cookie),
+    call("PATCH", `/api/assets/${id}`, { revision: baseRevision, changes: { notes: "new notes" }, actor: { name: "Brooke" } }, cookie)
+  ]);
+  const final = await call("GET", "/api/planner", undefined, cookie);
+  console.log(JSON.stringify({
+    captionPatch: { status: captionPatch.status },
+    notesPatch: { status: notesPatch.status }
+  }));
+} else if (scenario === "stale-same-field-conflict") {
+  const created = await call("POST", "/api/planner/assets", { asset: { image: "/d.jpg", caption: "original" }, actor: { name: "Loren" } }, cookie);
+  const id = created.json.asset.id;
+  const baseRevision = created.json.asset.revision;
+  const first = await call("PATCH", `/api/assets/${id}`, { revision: baseRevision, changes: { caption: "first writer wins the field" }, actor: { name: "Loren" } }, cookie);
+  const stale = await call("PATCH", `/api/assets/${id}`, { revision: baseRevision, changes: { caption: "stale writer loses" }, actor: { name: "Brooke" } }, cookie);
+  console.log(JSON.stringify({
+    first: { status: first.status },
+    stale: { status: stale.status, code: stale.json?.code, currentCaption: stale.json?.conflicts?.caption?.currentValue }
+  }));
+} else if (scenario === "create-then-delete") {
+  const created = await call("POST", "/api/planner/assets", { asset: { image: "/e.jpg", caption: "to delete" }, actor: { name: "Loren" } }, cookie);
+  const id = created.json.asset.id;
+  const del = await call("DELETE", `/api/assets/${id}`, { actor: { name: "Loren" }, reason: "cleanup" }, cookie);
+  const patchAfterDelete = await call("PATCH", `/api/assets/${id}`, { revision: 1, changes: { caption: "should fail" }, actor: { name: "Loren" } }, cookie);
+  console.log(JSON.stringify({ created: created.status, deleted: { status: del.status, ok: del.json?.ok }, patchAfterDelete: { status: patchAfterDelete.status } }));
+} else if (scenario === "legacy-planner-put-still-works") {
+  // Row storage is opt-in per route; the legacy whole-document endpoints
+  // must keep working untouched even while PLANNER_ROW_STORAGE_ENABLED=true,
+  // since activation (Task 9) hasn't happened yet.
+  const planner = await call("GET", "/api/planner", undefined, cookie);
+  const put = await call("PUT", "/api/planner", { version: planner.json.version, posts: planner.json.posts, scratch: planner.json.scratch, settings: planner.json.settings, actor: { name: "Loren" }, reason: "test" }, cookie);
+  console.log(JSON.stringify({ status: put.status }));
+}
+
+server.close();
+process.exit(0);

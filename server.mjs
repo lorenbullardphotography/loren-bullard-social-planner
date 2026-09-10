@@ -6,6 +6,13 @@ import { fileURLToPath } from "node:url";
 import { deleteStored, getDatabaseClient, hasDirectDatabase, readStored, storageMode, writeStored } from "./lib/store.mjs";
 import { applyWorkflowAutomations, normalizeWorkflowAutomations } from "./lib/workflow-automations.mjs";
 import { createPlannerRepository } from "./lib/planner-repository.mjs";
+import { createPlannerService } from "./lib/planner-service.mjs";
+
+// Row storage is additive and opt-in: with this unset (the default), every
+// route below behaves exactly as it did before Task 2, using the legacy
+// whole-document planner_store path. It is only turned on after a migration
+// has run and its parity report has been reviewed (Task 9).
+const PLANNER_ROW_STORAGE_ENABLED = String(process.env.PLANNER_ROW_STORAGE_ENABLED || "").toLowerCase() === "true";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
@@ -882,7 +889,11 @@ async function getPlannerRepository() {
   if (!hasDirectDatabase()) return null;
   if (!plannerRepositoryPromise) {
     plannerRepositoryPromise = getDatabaseClient()
-      .then(sql => createPlannerRepository({ sql }))
+      .then(async sql => {
+        const repository = createPlannerRepository({ sql });
+        await repository.ensureSchema();
+        return repository;
+      })
       .catch(error => {
         // Don't cache a failed connection attempt forever — let the next
         // health check retry instead of permanently reporting unavailable.
@@ -891,6 +902,16 @@ async function getPlannerRepository() {
       });
   }
   return plannerRepositoryPromise;
+}
+
+// Returns null when row storage isn't enabled/configured, so callers can
+// fall back to the legacy whole-document path without a special case for
+// "flag off" vs "Postgres unavailable" — both just mean "no service".
+async function getPlannerService() {
+  if (!PLANNER_ROW_STORAGE_ENABLED) return null;
+  const repository = await getPlannerRepository();
+  if (!repository) return null;
+  return createPlannerService({ repository });
 }
 
 // Never throws: an unreachable/misconfigured Postgres is reported as
@@ -1256,9 +1277,21 @@ export async function handleRequest(req, res) {
 
     if (url.pathname.startsWith("/api/assets/") && req.method === "PATCH") {
       const body = await readBody(req);
+      const assetId = url.pathname.split("/").pop();
+      const plannerService = await getPlannerService();
+      if (plannerService) {
+        const result = await plannerService.patchAsset({
+          id: assetId, revision: body.revision, changes: body.changes,
+          forceFields: Array.isArray(body.forceFields) ? body.forceFields : [],
+          actor: body.actor || account, reason: body.reason
+        });
+        if (result.error === "not-found") return sendJson(res, 404, { error: "This asset was removed by a teammate." });
+        if (result.error === "no-changes") return sendJson(res, 400, { error: "Choose at least one asset field to update." });
+        if (result.error === "conflict") return sendJson(res, 409, { error: "This asset changed while you were editing it.", code: "ASSET_FIELD_CONFLICT", asset: result.asset, conflicts: result.conflicts });
+        return sendJson(res, 200, { asset: result.asset, merged: result.merged });
+      }
       return withPlannerMutation(async () => {
         const planner = await readPlanner();
-        const assetId = url.pathname.split("/").pop();
         const post = planner.posts.find(item => item.id === assetId);
         if (!post) return sendJson(res, 404, { error: "This asset was removed by a teammate." });
         const changes = normalizeAssetChanges(body.changes);
@@ -1268,7 +1301,7 @@ export async function handleRequest(req, res) {
         const forceFields = Array.isArray(body.forceFields) ? body.forceFields : [];
         const unforcedConflicts = Object.keys(conflicts).filter(field => !forceFields.includes(field));
         if (unforcedConflicts.length > 0) {
-          return sendJson(res, 409, { error: "This asset changed while you were editing it.", asset: post, conflicts });
+          return sendJson(res, 409, { error: "This asset changed while you were editing it.", code: "ASSET_FIELD_CONFLICT", asset: post, conflicts });
         }
         const updatedPost = applyAssetChanges(post, changes, body.actor || account, new Date().toISOString());
         const postIndex = planner.posts.findIndex(item => item.id === post.id);
@@ -1278,6 +1311,27 @@ export async function handleRequest(req, res) {
         await writePlanner(planner, { incrementVersion: false });
         return sendJson(res, 200, { asset: updatedPost, merged: submittedRevision !== post.revision });
       });
+    }
+
+    if (url.pathname === "/api/planner/assets" && req.method === "POST") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      const plannerService = await getPlannerService();
+      if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
+      const body = await readBody(req);
+      if (!body?.asset || typeof body.asset !== "object") return sendJson(res, 400, { error: "An asset payload is required." });
+      const result = await plannerService.createAsset({ asset: body.asset, actor: body.actor || account, reason: body.reason });
+      return sendJson(res, 201, { asset: result.asset });
+    }
+
+    if (url.pathname.startsWith("/api/assets/") && req.method === "DELETE") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      const plannerService = await getPlannerService();
+      if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
+      const assetId = url.pathname.slice("/api/assets/".length);
+      const body = await readBody(req);
+      const result = await plannerService.deleteAsset({ id: assetId, actor: body.actor || account, reason: body.reason });
+      if (result.error === "not-found") return sendJson(res, 404, { error: "This asset was already removed." });
+      return sendJson(res, 200, { ok: true, id: result.id });
     }
 
     if (url.pathname === "/api/assets" && req.method === "POST") {
