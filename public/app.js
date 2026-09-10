@@ -1069,6 +1069,7 @@ function renderGrid() {
         requestAnimationFrame(() => $("#inspector").scrollIntoView({ behavior: "smooth", block: "start" }));
       }
     };
+    node.addEventListener("selectstart", event => event.preventDefault());
     node.ondblclick = event => {
       event.preventDefault();
       if (Date.now() < suppressTileClickUntil) return;
@@ -1156,9 +1157,29 @@ async function reorder(a, b) {
   if (fromIndex < 0 || toIndex < 0) return;
   const [moved] = futurePosts.splice(fromIndex, 1);
   futurePosts.splice(toIndex, 0, { ...moved, updatedBy: currentUser.name, updatedAt: new Date().toISOString() });
+  const previousPositions = new Map($$("#grid .tile").map(tile => [tile.dataset.id, tile.getBoundingClientRect()]));
   posts = [...futurePosts, ...donePosts];
   renderAll();
+  animateGridReorder(previousPositions);
   await persistPlanner("reordered the grid");
+}
+
+function animateGridReorder(previousPositions) {
+  if (!previousPositions?.size || typeof requestAnimationFrame !== "function") return;
+  requestAnimationFrame(() => {
+    $$("#grid .tile").forEach(tile => {
+      const before = previousPositions.get(tile.dataset.id);
+      if (!before) return;
+      const after = tile.getBoundingClientRect();
+      const x = before.left - after.left;
+      const y = before.top - after.top;
+      if (Math.abs(x) < 1 && Math.abs(y) < 1) return;
+      tile.animate(
+        [{ transform: `translate(${x}px, ${y}px)` }, { transform: "translate(0, 0)" }],
+        { duration: 280, easing: "cubic-bezier(.2,.8,.2,1)" }
+      );
+    });
+  });
 }
 
 const FIELD_LABELS = {
@@ -1758,6 +1779,7 @@ function renderCalendar() {
   });
   $$("[data-drag-post]").forEach(node => node.ondragstart = event => { if (node.dataset.instagram === "true") return event.preventDefault(); dragId = node.dataset.dragPost; event.stopPropagation(); });
   $$("[data-drag-post]").forEach(node => {
+    node.addEventListener("selectstart", event => event.preventDefault());
     node.addEventListener("pointerdown", event => {
       if (!event.isPrimary || event.pointerType === "mouse" || event.button !== 0 || node.dataset.instagram === "true") return;
       calendarTouch = { id: node.dataset.dragPost, node, x: event.clientX, y: event.clientY, timer: setTimeout(() => {

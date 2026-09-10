@@ -50,6 +50,26 @@ test("tab bars and filters enable smooth horizontal touch scrolling", () => {
   assert.match(css, /\.library-tab\{[^}]*white-space:nowrap/);
 });
 
+test("grid reorder animates tiles into their new positions", () => {
+  assert.match(css, /\.tile\{[^}]*transition:[^}]*transform/);
+  assert.match(app, /animateGridReorder/);
+});
+
+test("mobile drag surfaces suppress native text selection and narrow calendar overflow", () => {
+  assert.match(css, /\.tile,\.tile \*.*-webkit-user-select:none/);
+  assert.match(css, /\.cal-post,\.cal-post \*.*-webkit-user-select:none/);
+  assert.match(css, /\.month-nav\{[^}]*min-width:0/);
+  assert.match(app, /selectstart/);
+});
+
+test("mobile tab bars and calendar controls can shrink without clipping", () => {
+  assert.match(css, /\.task-tabs\{[^}]*min-width:0/);
+  assert.match(css, /\.library-tabs\{[^}]*min-width:0/);
+  assert.match(css, /\.task-tabs\{[^}]*width:100%/);
+  assert.match(css, /\.calendar-toolbar>\*\{[^}]*min-width:0/);
+  assert.match(css, /\.calendar-view-switcher\{[^}]*min-width:0/);
+});
+
 test("login page scales padding and typography for narrow mobile devices", () => {
   assert.match(loginHtml, /@media\(max-width:380px\)\{\.card\{padding:22px 18px\}/);
 });
