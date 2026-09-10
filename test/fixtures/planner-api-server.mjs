@@ -117,6 +117,25 @@ if (scenario === "concurrent-different-assets") {
   const first = await call("PATCH", `/api/ideas/${id}`, { revision: baseRevision, changes: { title: "first writer" }, actor: { name: "Loren" } }, cookie);
   const stale = await call("PATCH", `/api/ideas/${id}`, { revision: baseRevision, changes: { title: "stale writer" }, actor: { name: "Brooke" } }, cookie);
   console.log(JSON.stringify({ first: { status: first.status }, stale: { status: stale.status, code: stale.json?.code } }));
+} else if (scenario === "gate-requires-verified-migration") {
+  // The schema exists (ensureSchema runs lazily on first repository use)
+  // but no planner_migrations row with parity_result='ok' has been seeded.
+  // The flags alone must not be enough to serve row storage.
+  const changes = await call("GET", "/api/planner/changes?since=0", undefined, cookie);
+  const created = await call("POST", "/api/planner/assets", { asset: { image: "/x.jpg", caption: "x" }, actor: { name: "Loren" } }, cookie);
+  console.log(JSON.stringify({ changesStatus: changes.status, createStatus: created.status }));
+} else if (scenario === "put-planner-rejected-once-writes-enabled") {
+  // Sign in as a freshly-created Admin rather than trusting "Loren"'s
+  // role, which is mutable local test/dev state shared across runs.
+  const adminName = `Activation Test Admin ${Date.now()}`;
+  await call("POST", "/api/team/members", { name: adminName, role: "Admin", password: "testpassword123" }, cookie);
+  const adminLogin = await call("POST", "/auth/login", { login: adminName, password: "testpassword123" });
+  const adminCookie = adminLogin.cookie;
+
+  const planner = await call("GET", "/api/planner", undefined, cookie);
+  const put = await call("PUT", "/api/planner", { version: planner.json.version, posts: planner.json.posts, scratch: planner.json.scratch, settings: planner.json.settings, actor: { name: "Loren" }, reason: "test" }, cookie);
+  const adminImport = await call("PUT", "/api/planner", { version: planner.json.version, posts: planner.json.posts, scratch: planner.json.scratch, settings: planner.json.settings, actor: { name: adminName }, reason: "test", adminImport: true }, adminCookie);
+  console.log(JSON.stringify({ ordinaryPut: put.status, adminImportPut: adminImport.status }));
 }
 
 server.close();

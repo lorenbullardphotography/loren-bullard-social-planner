@@ -13,18 +13,37 @@ import { fileURLToPath } from "node:url";
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const fixture = fileURLToPath(new URL("./fixtures/planner-api-server.mjs", import.meta.url));
 
-function runScenario(name) {
+function runScenario(name, { rowStorageEnabled = true, rowWritesEnabled = true } = {}) {
   const output = execFileSync(process.execPath, [fixture, name], {
-    env: { ...process.env, DATABASE_URL: testDatabaseUrl, PLANNER_ROW_STORAGE_ENABLED: "true" },
+    env: {
+      ...process.env, DATABASE_URL: testDatabaseUrl,
+      PLANNER_ROW_STORAGE_ENABLED: String(rowStorageEnabled),
+      PLANNER_ROW_WRITES_ENABLED: String(rowWritesEnabled)
+    },
     encoding: "utf8"
   });
   return JSON.parse(output.trim().split("\n").pop());
 }
 
-async function resetSchema() {
+// Task 9: row reads/writes require a *verified* migration (a
+// planner_migrations row with parity_result='ok'), not just the feature
+// flag — so every test exercising the row-storage endpoints has to seed
+// one, the same way a real activation would after a reviewed shadow
+// migration. resetSchema() does this by default; the one test that
+// specifically checks the gate itself (further below) skips seeding.
+async function resetSchema({ seedVerifiedMigration = true } = {}) {
   const { default: postgres } = await import("postgres");
+  const { createPlannerRepository } = await import("../lib/planner-repository.mjs");
   const sql = postgres(testDatabaseUrl, { ssl: false });
   await sql`DROP TABLE IF EXISTS planner_assets, planner_ideas, planner_settings, planner_activity, planner_changes, planner_migrations CASCADE`;
+  if (seedVerifiedMigration) {
+    const repository = createPlannerRepository({ sql, workspaceId: "default" });
+    await repository.ensureSchema();
+    await sql`
+      INSERT INTO planner_migrations (id, workspace_id, source_checksum, parity_result, completed_at)
+      VALUES ('test-seed', 'default', 'test-seed', 'ok', NOW())
+    `;
+  }
   await sql.end({ timeout: 1 });
 }
 
@@ -62,9 +81,13 @@ test("row storage: creating then deleting an asset makes it unpatchable", { skip
   assert.equal(result.patchAfterDelete.status, 404);
 });
 
-test("row storage flag on: the legacy whole-document PUT /api/planner endpoint is untouched", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+test("row storage reads enabled but writes not yet: the legacy whole-document PUT /api/planner endpoint is untouched", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  // Task 9 activation is two stages: turning on row READS (this test's
+  // scenario) must not by itself retire the legacy whole-document save —
+  // that only happens once PLANNER_ROW_WRITES_ENABLED is also on (covered
+  // separately below).
   await resetSchema();
-  const result = runScenario("legacy-planner-put-still-works");
+  const result = runScenario("legacy-planner-put-still-works", { rowWritesEnabled: false });
   assert.equal(result.status, 200);
 });
 
@@ -103,4 +126,40 @@ test("row storage: a stale idea edit returns IDEA_CONFLICT", { skip: !testDataba
   assert.equal(result.first.status, 200);
   assert.equal(result.stale.status, 409);
   assert.equal(result.stale.code, "IDEA_CONFLICT");
+});
+
+// --- Task 9: controlled activation ---
+
+test("row reads/writes stay unavailable with both flags on until a migration's parity has actually been verified", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema({ seedVerifiedMigration: false });
+  const result = runScenario("gate-requires-verified-migration");
+  assert.equal(result.changesStatus, 503, "the change feed must not serve reads without a verified migration, even with the flag on");
+  assert.equal(result.createStatus, 503, "writes must not be possible without a verified migration, even with the flag on");
+});
+
+test("row reads/writes work once a verified migration exists", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema({ seedVerifiedMigration: true });
+  const result = runScenario("gate-requires-verified-migration");
+  assert.equal(result.changesStatus, 304, "no changes yet, but the read service is now active");
+  assert.equal(result.createStatus, 201);
+});
+
+test("PLANNER_ROW_WRITES_ENABLED alone (without PLANNER_ROW_STORAGE_ENABLED) does not activate writes", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema({ seedVerifiedMigration: true });
+  const result = runScenario("gate-requires-verified-migration", { rowStorageEnabled: false, rowWritesEnabled: true });
+  assert.equal(result.changesStatus, 503);
+  assert.equal(result.createStatus, 503, "writes require the read-side service to be active too, not just their own flag");
+});
+
+test("once row writes are enabled, ordinary PUT /api/planner is rejected but an explicit Admin import still works", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema({ seedVerifiedMigration: true });
+  const result = runScenario("put-planner-rejected-once-writes-enabled");
+  assert.equal(result.ordinaryPut, 403);
+  assert.equal(result.adminImportPut, 200);
+});
+
+test("PUT /api/planner still works normally when row writes are not enabled", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema({ seedVerifiedMigration: true });
+  const result = runScenario("put-planner-rejected-once-writes-enabled", { rowWritesEnabled: false });
+  assert.equal(result.ordinaryPut, 200);
 });

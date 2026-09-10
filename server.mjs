@@ -8,11 +8,19 @@ import { applyWorkflowAutomations, normalizeWorkflowAutomations } from "./lib/wo
 import { createPlannerRepository } from "./lib/planner-repository.mjs";
 import { createPlannerService } from "./lib/planner-service.mjs";
 
-// Row storage is additive and opt-in: with this unset (the default), every
-// route below behaves exactly as it did before Task 2, using the legacy
-// whole-document planner_store path. It is only turned on after a migration
-// has run and its parity report has been reviewed (Task 9).
+// Row storage is additive and opt-in, activated in two separate stages —
+// with both unset (the default), every route below behaves exactly as it
+// did before Task 2, using the legacy whole-document planner_store path.
+//
+// Stage 1, PLANNER_ROW_STORAGE_ENABLED: turns on row READS (the change feed)
+// for preview verification. Stage 2, PLANNER_ROW_WRITES_ENABLED: turns on
+// row WRITES (every create/patch/delete/reorder/undo endpoint) once that
+// read-side preview has been accepted. Neither flag does anything by
+// itself, though: both require a completed migration whose parity report
+// came back clean (checked at runtime via hasVerifiedMigrationParity(),
+// not just trusted from the env var) — see getPlannerReadService() below.
 const PLANNER_ROW_STORAGE_ENABLED = String(process.env.PLANNER_ROW_STORAGE_ENABLED || "").toLowerCase() === "true";
+const PLANNER_ROW_WRITES_ENABLED = String(process.env.PLANNER_ROW_WRITES_ENABLED || "").toLowerCase() === "true";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
@@ -862,14 +870,29 @@ async function getPlannerRepository() {
   return plannerRepositoryPromise;
 }
 
-// Returns null when row storage isn't enabled/configured, so callers can
-// fall back to the legacy whole-document path without a special case for
-// "flag off" vs "Postgres unavailable" — both just mean "no service".
-async function getPlannerService() {
+// Returns null when row storage isn't enabled/configured/verified, so
+// callers can fall back to the legacy whole-document path without a
+// special case for "flag off" vs "Postgres unavailable" vs "migration not
+// yet reviewed" — all of those just mean "no service." The flag alone is
+// deliberately not trusted: hasVerifiedMigrationParity() re-checks against
+// planner_migrations on every call, so someone flipping the env var before
+// running (or after a failed) migration can't accidentally serve reads
+// from row tables that don't yet match the legacy document.
+async function getPlannerReadService() {
   if (!PLANNER_ROW_STORAGE_ENABLED) return null;
   const repository = await getPlannerRepository();
   if (!repository) return null;
+  if (!(await repository.hasVerifiedMigrationParity())) return null;
   return createPlannerService({ repository });
+}
+
+// Writes are a second, separate activation stage: PLANNER_ROW_WRITES_ENABLED
+// only takes effect once the read-side service above is already active
+// (verified migration parity included), matching "enable writes only after
+// row-read parity is accepted."
+async function getPlannerWriteService() {
+  if (!PLANNER_ROW_WRITES_ENABLED) return null;
+  return getPlannerReadService();
 }
 
 // Never throws: an unreachable/misconfigured Postgres is reported as
@@ -1077,7 +1100,7 @@ export async function handleRequest(req, res) {
 
     if (url.pathname === "/api/planner/changes" && req.method === "GET") {
       if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
-      const plannerService = await getPlannerService();
+      const plannerService = await getPlannerReadService();
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const since = Number(url.searchParams.get("since")) || 0;
       const latest = await plannerService.latestChangeToken();
@@ -1133,6 +1156,13 @@ export async function handleRequest(req, res) {
 
     if (url.pathname === "/api/planner" && req.method === "PUT") {
       const body = await readBody(req);
+      // Once row writes are active, this whole-document save is retired
+      // from normal UI flows — every route above it now saves one row at a
+      // time. It still exists for an explicit, authenticated administrator
+      // import (adminImport: true), never for an ordinary client save.
+      if ((await getPlannerWriteService()) && !(account?.role === "Admin" && body.adminImport === true)) {
+        return sendJson(res, 403, { error: "Whole-planner saves are disabled. This planner now saves each change individually." });
+      }
       const planner = await readPlanner();
       if (Number.isFinite(Number(body.version)) && Number(body.version) !== planner.version) {
         return sendJson(res, 409, { error: "This planner changed in another browser. Refresh to review the latest version before saving.", planner });
@@ -1247,7 +1277,7 @@ export async function handleRequest(req, res) {
     if (url.pathname.startsWith("/api/assets/") && req.method === "PATCH") {
       const body = await readBody(req);
       const assetId = url.pathname.split("/").pop();
-      const plannerService = await getPlannerService();
+      const plannerService = await getPlannerWriteService();
       if (plannerService) {
         const result = await plannerService.patchAsset({
           id: assetId, revision: body.revision, changes: body.changes,
@@ -1284,7 +1314,7 @@ export async function handleRequest(req, res) {
 
     if (url.pathname === "/api/planner/assets" && req.method === "POST") {
       if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
-      const plannerService = await getPlannerService();
+      const plannerService = await getPlannerWriteService();
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const body = await readBody(req);
       if (!body?.asset || typeof body.asset !== "object") return sendJson(res, 400, { error: "An asset payload is required." });
@@ -1295,7 +1325,7 @@ export async function handleRequest(req, res) {
 
     if (url.pathname.startsWith("/api/assets/") && req.method === "DELETE") {
       if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
-      const plannerService = await getPlannerService();
+      const plannerService = await getPlannerWriteService();
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const assetId = url.pathname.slice("/api/assets/".length);
       const body = await readBody(req);
@@ -1306,7 +1336,7 @@ export async function handleRequest(req, res) {
 
     if (url.pathname.startsWith("/api/assets/") && url.pathname.endsWith("/reorder") && req.method === "POST") {
       if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
-      const plannerService = await getPlannerService();
+      const plannerService = await getPlannerWriteService();
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const assetId = url.pathname.split("/")[3];
       const body = await readBody(req);
@@ -1320,7 +1350,7 @@ export async function handleRequest(req, res) {
 
     if (url.pathname === "/api/ideas" && req.method === "POST") {
       if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
-      const plannerService = await getPlannerService();
+      const plannerService = await getPlannerWriteService();
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const body = await readBody(req);
       if (!body?.idea || typeof body.idea !== "object") return sendJson(res, 400, { error: "An idea payload is required." });
@@ -1330,7 +1360,7 @@ export async function handleRequest(req, res) {
 
     if (url.pathname.startsWith("/api/ideas/") && req.method === "PATCH") {
       if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
-      const plannerService = await getPlannerService();
+      const plannerService = await getPlannerWriteService();
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const ideaId = url.pathname.slice("/api/ideas/".length);
       const body = await readBody(req);
@@ -1342,7 +1372,7 @@ export async function handleRequest(req, res) {
 
     if (url.pathname.startsWith("/api/ideas/") && req.method === "DELETE") {
       if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
-      const plannerService = await getPlannerService();
+      const plannerService = await getPlannerWriteService();
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const ideaId = url.pathname.slice("/api/ideas/".length);
       const body = await readBody(req);
@@ -1353,7 +1383,7 @@ export async function handleRequest(req, res) {
 
     if (url.pathname === "/api/settings" && req.method === "PATCH") {
       if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
-      const plannerService = await getPlannerService();
+      const plannerService = await getPlannerWriteService();
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const body = await readBody(req);
       const result = await plannerService.patchSettings({ revision: body.revision, changes: body.changes || {}, actor: body.actor || account });
@@ -1363,7 +1393,7 @@ export async function handleRequest(req, res) {
 
     if (url.pathname.startsWith("/api/activity/") && url.pathname.endsWith("/undo") && req.method === "POST") {
       if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
-      const plannerService = await getPlannerService();
+      const plannerService = await getPlannerWriteService();
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const activityId = url.pathname.split("/")[3];
       const result = await plannerService.undoActivity({ id: activityId, actor: account });

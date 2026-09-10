@@ -15,16 +15,31 @@ const fixture = fileURLToPath(new URL("./fixtures/planner-collaboration-server.m
 
 function runScenario(name) {
   const output = execFileSync(process.execPath, [fixture, name], {
-    env: { ...process.env, DATABASE_URL: testDatabaseUrl, PLANNER_ROW_STORAGE_ENABLED: "true" },
+    env: { ...process.env, DATABASE_URL: testDatabaseUrl, PLANNER_ROW_STORAGE_ENABLED: "true", PLANNER_ROW_WRITES_ENABLED: "true" },
     encoding: "utf8"
   });
   return JSON.parse(output.trim().split("\n").pop());
 }
 
-async function resetSchema() {
+// Task 9: row reads/writes require a *verified* migration (a
+// planner_migrations row with parity_result='ok'), not just the feature
+// flag — so every test exercising the row-storage endpoints has to seed
+// one, the same way a real activation would after a reviewed shadow
+// migration. resetSchema() does this by default; the one test that
+// specifically checks the gate itself (further below) skips seeding.
+async function resetSchema({ seedVerifiedMigration = true } = {}) {
   const { default: postgres } = await import("postgres");
+  const { createPlannerRepository } = await import("../lib/planner-repository.mjs");
   const sql = postgres(testDatabaseUrl, { ssl: false });
   await sql`DROP TABLE IF EXISTS planner_assets, planner_ideas, planner_settings, planner_activity, planner_changes, planner_migrations CASCADE`;
+  if (seedVerifiedMigration) {
+    const repository = createPlannerRepository({ sql, workspaceId: "default" });
+    await repository.ensureSchema();
+    await sql`
+      INSERT INTO planner_migrations (id, workspace_id, source_checksum, parity_result, completed_at)
+      VALUES ('test-seed', 'default', 'test-seed', 'ok', NOW())
+    `;
+  }
   await sql.end({ timeout: 1 });
 }
 
