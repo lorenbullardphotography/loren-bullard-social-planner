@@ -3,8 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { deleteStored, readStored, storageMode, writeStored } from "./lib/store.mjs";
+import { deleteStored, getDatabaseClient, hasDirectDatabase, readStored, storageMode, writeStored } from "./lib/store.mjs";
 import { applyWorkflowAutomations, normalizeWorkflowAutomations } from "./lib/workflow-automations.mjs";
+import { createPlannerRepository } from "./lib/planner-repository.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
@@ -871,6 +872,40 @@ function mergeInstagramPosts(planner, media, actorName = "Instagram sync") {
   }
 }
 
+let plannerRepositoryPromise;
+
+// Lazily builds the row-storage repository the first time it's needed.
+// Returns null when direct Postgres isn't configured — the repository
+// requires a real Postgres client and never falls back to the Supabase
+// REST/local-file paths used by the legacy planner_store document.
+async function getPlannerRepository() {
+  if (!hasDirectDatabase()) return null;
+  if (!plannerRepositoryPromise) {
+    plannerRepositoryPromise = getDatabaseClient()
+      .then(sql => createPlannerRepository({ sql }))
+      .catch(error => {
+        // Don't cache a failed connection attempt forever — let the next
+        // health check retry instead of permanently reporting unavailable.
+        plannerRepositoryPromise = undefined;
+        throw error;
+      });
+  }
+  return plannerRepositoryPromise;
+}
+
+// Never throws: an unreachable/misconfigured Postgres is reported as
+// rowSchemaReady: false (a safe service-unavailable signal), not a 500.
+async function plannerRowSchemaHealth() {
+  try {
+    const repository = await getPlannerRepository();
+    if (!repository) return { rowSchemaReady: false };
+    const result = await repository.health();
+    return { rowSchemaReady: Boolean(result?.rowSchemaReady) };
+  } catch {
+    return { rowSchemaReady: false };
+  }
+}
+
 export async function handleRequest(req, res) {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -1027,6 +1062,12 @@ export async function handleRequest(req, res) {
     if (!account) {
       if (url.pathname.startsWith("/api/")) return sendJson(res, 401, {error: "Please sign in to the planner."});
       if (url.pathname !== "/login.html" && url.pathname !== "/login.js" && url.pathname !== "/auth/login") return redirect(res, "/login.html");
+    }
+
+    if (url.pathname === "/api/health/storage" && req.method === "GET") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      const { rowSchemaReady } = await plannerRowSchemaHealth();
+      return sendJson(res, 200, { plannerStorage: storageMode(), rowSchemaReady });
     }
 
     if (url.pathname === "/api/planner" && req.method === "GET") {
