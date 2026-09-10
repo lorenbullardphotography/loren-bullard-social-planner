@@ -1334,6 +1334,20 @@ export async function handleRequest(req, res) {
       return sendJson(res, 200, { ok: true, id: result.id });
     }
 
+    if (url.pathname.startsWith("/api/assets/") && url.pathname.endsWith("/reorder") && req.method === "POST") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      const plannerService = await getPlannerService();
+      if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
+      const assetId = url.pathname.split("/")[3];
+      const body = await readBody(req);
+      const result = await plannerService.reorderAsset({
+        id: assetId, beforeId: body.beforeId || null, afterId: body.afterId || null, actor: body.actor || account
+      });
+      if (result.error === "not-found") return sendJson(res, 404, { error: "This asset was removed by a teammate." });
+      if (result.error === "neighbor-not-found") return sendJson(res, 409, { error: "The grid changed while you were dragging. Refresh to see the latest order." });
+      return sendJson(res, 200, { asset: result.asset, affected: result.affected, changeToken: result.changeToken });
+    }
+
     if (url.pathname === "/api/assets" && req.method === "POST") {
       const body = await readBody(req);
       const match = String(body?.data || "").match(/^data:([^;]+);base64,(.+)$/s);

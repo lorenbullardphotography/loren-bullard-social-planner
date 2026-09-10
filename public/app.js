@@ -1230,13 +1230,50 @@ async function reorder(a, b) {
   const fromIndex = futurePosts.findIndex(post => post.id === a);
   const toIndex = futurePosts.findIndex(post => post.id === b);
   if (fromIndex < 0 || toIndex < 0) return;
+
+  // Neighbor ids for the server-authoritative reorder call, computed from
+  // the drop target's position with the moved tile conceptually removed
+  // first (so it's correct regardless of whether a started before or
+  // after b in the list).
+  const withoutMoved = futurePosts.filter(post => post.id !== a).map(post => post.id);
+  const targetIndex = withoutMoved.indexOf(b);
+  const beforeId = targetIndex > 0 ? withoutMoved[targetIndex - 1] : null;
+  const afterId = b;
+
   const [moved] = futurePosts.splice(fromIndex, 1);
   futurePosts.splice(toIndex, 0, { ...moved, updatedBy: currentUser.name, updatedAt: new Date().toISOString() });
   const previousPositions = new Map($$("#grid .tile").map(tile => [tile.dataset.id, tile.getBoundingClientRect()]));
   posts = [...futurePosts, ...donePosts];
   renderAll();
   animateGridReorder(previousPositions);
-  await persistPlanner("reordered the grid");
+
+  const tile = $(`#grid .tile[data-id="${a}"]`);
+  tile?.classList.add("reorder-pending");
+  tile?.setAttribute("aria-disabled", "true");
+  try {
+    const result = await api(`/api/assets/${encodeURIComponent(a)}/reorder`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ beforeId, afterId, actor: currentUser })
+    });
+    for (const asset of result.affected || []) posts = replaceAsset(posts, asset);
+    renderAll();
+  } catch (error) {
+    if (error.status === 503) {
+      // Row storage isn't enabled in this environment yet — fall back to
+      // the legacy whole-document save so reordering keeps working.
+      await persistPlanner("reordered the grid");
+    } else {
+      // Never resend the whole (possibly stale) local planner on a real
+      // reorder failure — refresh from the server and let the user retry
+      // the drag instead.
+      await refreshSharedPlanner();
+      notify(error.message || "That reorder didn't save. Refresh and try again.");
+    }
+  } finally {
+    tile?.classList.remove("reorder-pending");
+    tile?.removeAttribute("aria-disabled");
+  }
 }
 
 function animateGridReorder(previousPositions) {
