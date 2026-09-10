@@ -900,7 +900,7 @@ async function plannerRowSchemaHealth() {
     const repository = await getPlannerRepository();
     if (!repository) return { rowSchemaReady: false };
     const result = await repository.health();
-    return { rowSchemaReady: Boolean(result?.rowSchemaReady) };
+    return { rowSchemaReady: result?.rowSchemaReady };
   } catch {
     return { rowSchemaReady: false };
   }

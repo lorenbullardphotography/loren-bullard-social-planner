@@ -96,6 +96,46 @@ test("health() reports schema readiness when Postgres is available", async () =>
   assert.equal(result.available, true);
 });
 
+test("health() memoizes schema readiness: DDL is only issued once across repeated calls", async () => {
+  const sql = createRecordingSql();
+  const repository = createPlannerRepository({ sql, workspaceId: "default" });
+
+  const first = await repository.health();
+  assert.equal(first.rowSchemaReady, true);
+  const statementCountAfterFirstCall = sql.statements.length;
+  assert.ok(statementCountAfterFirstCall > 0, "expected the first health() call to run the schema DDL");
+
+  const second = await repository.health();
+  assert.equal(second.rowSchemaReady, true);
+  assert.equal(
+    sql.statements.length,
+    statementCountAfterFirstCall,
+    "expected the second health() call to skip re-running the DDL batch"
+  );
+
+  const third = await repository.health();
+  assert.equal(third.rowSchemaReady, true);
+  assert.equal(
+    sql.statements.length,
+    statementCountAfterFirstCall,
+    "expected a third health() call to still skip re-running the DDL batch"
+  );
+});
+
+test("ensureSchema() called directly still re-runs the DDL batch even after health() has memoized readiness", async () => {
+  const sql = createRecordingSql();
+  const repository = createPlannerRepository({ sql, workspaceId: "default" });
+
+  await repository.health();
+  const statementCountAfterHealth = sql.statements.length;
+
+  // ensureSchema() itself stays callable and idempotent on its own for
+  // explicit/repeated invocation (later tasks may call it directly) — only
+  // health()'s implicit re-running of DDL on every call is memoized.
+  await repository.ensureSchema();
+  assert.equal(sql.statements.length, statementCountAfterHealth * 2);
+});
+
 test("createPlannerRepository requires a real sql client and never falls back silently", () => {
   assert.throws(() => createPlannerRepository({ sql: null, workspaceId: "default" }));
 });
