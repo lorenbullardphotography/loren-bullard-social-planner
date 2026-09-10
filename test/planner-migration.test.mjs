@@ -195,6 +195,36 @@ test("migrateLegacyPlanner and compareLegacyPlanner (real Postgres)", { skip: !t
     const report = await repository.compareLegacyPlanner(legacyPlanner);
     assert.equal(report.ok, true);
   });
+
+  // Found by running this migration against real production data: history
+  // predating this app's crypto.randomUUID()-always convention for
+  // activity ids included entries with no id at all. A plain INSERT with
+  // an undefined id crashes the postgres driver outright (it rejects
+  // undefined parameters), and even once that's fixed, comparing an
+  // id-less source entry by id against the migrated set (which always has
+  // a real id) would report a false "missing" mismatch on every clean run.
+  await t.test("migrates and correctly verifies parity for legacy activity entries with no id", async () => {
+    const repository = await freshRepository();
+    const plannerWithIdlessActivity = {
+      ...legacyPlanner,
+      activity: [
+        { id: undefined, text: "an entry from before ids were mandatory", at: "2020-01-01T00:00:00.000Z" },
+        { text: "another id-less entry, same shape", at: "2020-01-02T00:00:00.000Z" },
+        ...legacyPlanner.activity
+      ]
+    };
+
+    const migration = await repository.migrateLegacyPlanner(plannerWithIdlessActivity);
+    assert.equal(migration.alreadyMigrated, false);
+
+    const activityRows = await sql`SELECT id, summary FROM planner_activity`;
+    assert.equal(activityRows.length, 3, "both id-less entries and the one normal entry should all be present");
+    assert.ok(activityRows.every(row => typeof row.id === "string" && row.id.length > 0), "every migrated row must have a real generated id even when the source had none");
+
+    const report = await repository.compareLegacyPlanner(plannerWithIdlessActivity);
+    assert.equal(report.ok, true, `expected clean parity, got: ${JSON.stringify(report.mismatches)}`);
+    assert.deepEqual(report.mismatches, []);
+  });
 });
 
 test("POST /api/admin/planner-row-migration succeeds end-to-end against a real Postgres database", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
