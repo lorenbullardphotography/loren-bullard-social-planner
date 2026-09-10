@@ -112,7 +112,9 @@ function readJsonFile(file, fallback) {
   catch { return fallback; }
 }
 
+let environmentSessionSeeded = false;
 async function readSession() {
+  await seedEnvironmentSession();
   return readStored("instagram-session", {});
 }
 async function writeSession(value) {
@@ -121,14 +123,16 @@ async function writeSession(value) {
 async function readCanvaSession(userId) { return readStored(`canva-session-${userId}`, {}); }
 async function writeCanvaSession(userId, value) { return writeStored(`canva-session-${userId}`, value); }
 async function seedEnvironmentSession() {
-  const existing = await readSession();
-  if (process.env.INSTAGRAM_ACCESS_TOKEN && !existing.access_token && !existing.disabled) {
+  if (environmentSessionSeeded || !process.env.INSTAGRAM_ACCESS_TOKEN) return;
+  const existing = await readStored("instagram-session", {});
+  if (!existing.access_token && !existing.disabled) {
     await writeSession({
       access_token: process.env.INSTAGRAM_ACCESS_TOKEN,
       source: "environment",
       stored_at: new Date().toISOString()
     });
   }
+  environmentSessionSeeded = true;
 }
 
 function sendJson(res, status, data) {
@@ -869,7 +873,6 @@ function mergeInstagramPosts(planner, media, actorName = "Instagram sync") {
 
 export async function handleRequest(req, res) {
   try {
-    await seedEnvironmentSession();
     const url = new URL(req.url, `http://${req.headers.host}`);
     // Vercel rewrites requests to the single API function. Preserve the
     // original application path so /auth/* and /api/* routes remain distinct.
