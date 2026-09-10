@@ -81,6 +81,13 @@ test("does not refresh away an active asset editor", () => {
   const { shouldRefreshPlanner } = previewHelpers();
   assert.equal(shouldRefreshPlanner({ currentView: "editor", editorDirty: true, editorSaveInProgress: false }), false);
   assert.equal(shouldRefreshPlanner({ currentView: "editor", editorDirty: false, editorSaveInProgress: true }), false);
+  // Regression: a background poll must not rebuild the open editor even
+  // before the first keystroke (editorDirty still false) or right after an
+  // autosave clears it — renderInspector("#postEditor") is a full innerHTML
+  // rebuild, so this window used to reset scroll and re-populate fields
+  // from whatever's currently saved, which read as "the page keeps
+  // refreshing" while composing a caption.
+  assert.equal(shouldRefreshPlanner({ currentView: "editor", editorDirty: false, editorSaveInProgress: false }), false);
   assert.equal(shouldRefreshPlanner({ currentView: "library", editorDirty: true, editorSaveInProgress: false }), true);
 });
 

@@ -490,8 +490,17 @@ async function loadPlanner() {
   setPlanner(planner);
   await refreshActivityFeed();
 }
-function shouldRefreshPlanner({ currentView, editorDirty, editorSaveInProgress }) {
-  return currentView !== "editor" || (!editorDirty && !editorSaveInProgress);
+// Never let a background poll refresh the editor while it's open, dirty or
+// not: renderInspector("#postEditor") is a full innerHTML rebuild, so any
+// unrelated change elsewhere in the planner (a teammate's edit, an
+// Instagram sync, anything) would reset scroll position and, before the
+// first keystroke sets editorDirty, silently re-populate fields from the
+// saved post — surfacing as "the page keeps refreshing" while composing a
+// caption. Row storage's per-field conflict check at save time is what
+// actually keeps concurrent edits safe; the editor doesn't also need to
+// stay live-synced while a person is looking at it.
+function shouldRefreshPlanner({ currentView }) {
+  return currentView !== "editor";
 }
 function editorDestinationAfterSave(currentView, editorReturnView) {
   return currentView === "editor" ? editorReturnView : currentView;
