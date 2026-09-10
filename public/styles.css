@@ -254,3 +254,4 @@ body{font-family:Poppins,Arial,sans-serif;background:radial-gradient(circle at 9
 .loading-spinner-inline{width:14px;height:14px;border:2px solid rgba(120,140,165,.25);border-top-color:var(--brand2);border-radius:50%;animation:spin .8s linear infinite;display:inline-block;vertical-align:middle;flex-shrink:0}
 .button-spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;margin-right:6px;vertical-align:-2px}
 @keyframes spin{to{transform:rotate(360deg)}}
+.activity-undo{align-self:center;margin-left:auto;padding:6px 10px;font-size:10px;white-space:nowrap}

@@ -999,7 +999,10 @@ function renderActivity() {
     ? items.map(item => {
       const at = new Date(item.at);
       const type = activityType(item);
-      return `<article class="activity-item activity-${esc(type)}"><time datetime="${esc(item.at)}">${at.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</time><div><span class="activity-type activity-type-${esc(type)}">${esc(activityLabel(type))}</span><strong>${esc(normalizeActivityText(item.text))}</strong></div></article>`;
+      const undo = item.reversible && item.rollbackId
+        ? `<button type="button" class="ghost activity-undo" data-rollback-id="${esc(item.rollbackId)}" aria-label="Undo ${esc(normalizeActivityText(item.text))}">Undo</button>`
+        : "";
+      return `<article class="activity-item activity-${esc(type)}"><time datetime="${esc(item.at)}">${at.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</time><div><span class="activity-type activity-type-${esc(type)}">${esc(activityLabel(type))}</span><strong>${esc(normalizeActivityText(item.text))}</strong></div>${undo}</article>`;
     }).join("")
     : `<div class="empty">Shared activity will appear here as the team edits, approves, and syncs content.</div>`;
 }
@@ -2229,6 +2232,59 @@ $("#approvalsTab").onclick = () => { taskTab = "approvals"; approvalDetail = nul
 $("#activityTab").onclick = () => { taskTab = "activity"; approvalDetail = null; renderTasks(); renderActivity(); };
 $("#taskSort").onchange = () => renderTasks();
 $("#activityFilters").onchange = () => { activityFilters = $$("#activityFilters input:checked").map(input => input.value); saveActivityFilters(currentUser, activityFilters); renderActivity(); };
+let pendingUndo = null;
+function openUndoConfirmation(activityId, button = null) {
+  const item = activity.find(entry => entry.rollbackId === activityId);
+  if (!item) return;
+  pendingUndo = { activityId, button };
+  $("#rollbackConfirmText").textContent = `This will undo: ${normalizeActivityText(item.text)}`;
+  $("#rollbackConfirmModal").classList.remove("hidden");
+  $("#confirmRollbackBtn").focus();
+}
+function closeUndoConfirmation() {
+  pendingUndo = null;
+  $("#rollbackConfirmModal").classList.add("hidden");
+}
+async function undoActivity(activityId, button = null) {
+  if (!activityId) return;
+  if (button) button.disabled = true;
+  try {
+    const data = await api(`/api/planner/rollback/${encodeURIComponent(activityId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version: plannerVersion })
+    });
+    setPlanner(data.planner);
+    renderAll();
+    notify("Activity undone");
+  } catch (error) {
+    if (error.planner) setPlanner(error.planner);
+    renderActivity();
+    notify(error.message || "That activity could not be undone");
+    if (button) button.disabled = false;
+  }
+}
+$("#activityList").onclick = event => {
+  const button = event.target.closest("[data-rollback-id]");
+  if (button) openUndoConfirmation(button.dataset.rollbackId, button);
+};
+$("#confirmRollbackBtn").onclick = () => {
+  const request = pendingUndo;
+  closeUndoConfirmation();
+  if (request) undoActivity(request.activityId, request.button);
+};
+$("#cancelRollbackBtn").onclick = closeUndoConfirmation;
+$("#closeRollbackConfirm").onclick = closeUndoConfirmation;
+$("#rollbackConfirmModal").onclick = event => { if (event.target.id === "rollbackConfirmModal") closeUndoConfirmation(); };
+document.addEventListener("keydown", event => {
+  const target = event.target;
+  const editing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target.isContentEditable || target.closest?.("input, textarea, select, [contenteditable='true']");
+  if (!event.metaKey || event.shiftKey || event.key.toLowerCase() !== "z" || editing) return;
+  const latest = activity[0];
+  if (!latest?.reversible || !latest.rollbackId) return;
+  event.preventDefault();
+  openUndoConfirmation(latest.rollbackId);
+});
 $("#prevMonth").onclick = () => { if (calendarView === "week") calCursor.setDate(calCursor.getDate() - 7); else if (calendarView === "year") calCursor.setFullYear(calCursor.getFullYear() - 1); else calCursor.setMonth(calCursor.getMonth() - 1); renderCalendar(); };
 $("#todayMonth").onclick = () => { calCursor = new Date(); renderCalendar(); };
 $("#nextMonth").onclick = () => { if (calendarView === "week") calCursor.setDate(calCursor.getDate() + 7); else if (calendarView === "year") calCursor.setFullYear(calCursor.getFullYear() + 1); else calCursor.setMonth(calCursor.getMonth() + 1); renderCalendar(); };

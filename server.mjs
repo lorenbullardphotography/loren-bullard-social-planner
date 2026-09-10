@@ -40,6 +40,7 @@ const PLANNER_PASSWORD = process.env.PLANNER_PASSWORD || "";
 const AUTH_SECRET = process.env.AUTH_SECRET || PLANNER_PASSWORD || "planner-development-secret";
 const ASSET_STORAGE_LIMIT_MB = Math.max(50, Number(process.env.ASSET_STORAGE_LIMIT_MB) || 500);
 const ACCOUNT_SESSION_DAYS = 14;
+const ROLLBACK_HISTORY_LIMIT = 40;
 
 const ROLE_VALUES = ["Admin", "Photographer", "Social Media Manager", "Assistant", "Editor"];
 const DEFAULT_ACCOUNTS = [
@@ -715,11 +716,60 @@ function upsertTeamMember(planner, actor = {}) {
 
 function addActivity(planner, text) {
   if (!text) return;
-  planner.activity.unshift({ text: normalizeActivityText(text), at: new Date().toISOString() });
+  const activity = {
+    id: crypto.randomUUID(),
+    text: normalizeActivityText(text),
+    at: new Date().toISOString(),
+    reversible: false,
+    rollbackId: null
+  };
+  planner.activity.unshift(activity);
   planner.activity = planner.activity.slice(0, 40);
+  return activity;
 }
 
-async function writePlanner(nextPlanner, { incrementVersion = true } = {}) {
+function addReversibleActivity(planner, text) {
+  const activity = addActivity(planner, text);
+  if (activity) {
+    activity.reversible = true;
+    activity.rollbackId = activity.id;
+  }
+  return activity;
+}
+
+function plannerSnapshot(planner) {
+  return JSON.parse(JSON.stringify({
+    posts: planner.posts,
+    scratch: planner.scratch,
+    team: planner.team,
+    settings: planner.settings
+  }));
+}
+
+async function readRollbackHistory() {
+  const history = await readStored("planner-rollback-history", []);
+  return Array.isArray(history) ? history.slice(0, ROLLBACK_HISTORY_LIMIT) : [];
+}
+
+async function writeRollbackHistory(history) {
+  return writeStored("planner-rollback-history", history.slice(0, ROLLBACK_HISTORY_LIMIT));
+}
+
+async function saveRollbackSnapshot(snapshot, activity, restoreVersion, restoreUpdatedAt) {
+  if (!snapshot || !activity?.rollbackId) return;
+  const history = await readRollbackHistory();
+  history.unshift({
+    id: activity.rollbackId,
+    activityId: activity.id,
+    snapshot,
+    restoreVersion,
+    restoreUpdatedAt,
+    createdAt: activity.at
+  });
+  await writeRollbackHistory(history);
+}
+
+async function writePlanner(nextPlanner, { incrementVersion = true, rollbackSnapshot = null, rollbackActivity = null } = {}) {
   const normalized = {
     version: Number(nextPlanner?.version || 0) + (incrementVersion ? 1 : 0),
     posts: Array.isArray(nextPlanner?.posts) ? nextPlanner.posts.map(normalizePost) : [],
@@ -729,7 +779,9 @@ async function writePlanner(nextPlanner, { incrementVersion = true } = {}) {
     settings: normalizeSettings(nextPlanner?.settings),
     updatedAt: new Date().toISOString()
   };
-  return writeStored("planner-data", normalized);
+  const saved = await writeStored("planner-data", normalized);
+  if (rollbackSnapshot && rollbackActivity) await saveRollbackSnapshot(rollbackSnapshot, rollbackActivity, saved.version, saved.updatedAt);
+  return saved;
 }
 async function readPresence() {
   const stored = await readStored("planner-presence", {});
@@ -865,8 +917,9 @@ export async function handleRequest(req, res) {
 
       const planner = await readPlanner();
       upsertTeamMember(planner, newUser);
-      addActivity(planner, `${account.name} added ${name} (${role}) to the team`);
-      await writePlanner(planner);
+      const rollbackSnapshot = plannerSnapshot(planner);
+      const rollbackActivity = addReversibleActivity(planner, `${account.name} added ${name} (${role}) to the team`);
+      await writePlanner(planner, { rollbackSnapshot, rollbackActivity });
 
       return sendJson(res, 201, { ok: true, member: publicUser(newUser) });
     }
@@ -889,20 +942,21 @@ export async function handleRequest(req, res) {
       }
 
       const oldName = targetUser.name;
+      const planner = await readPlanner();
+      const rollbackSnapshot = plannerSnapshot(planner);
       targetUser.name = name;
       targetUser.role = role;
       if (password) targetUser.passwordHash = hashPassword(password);
       await writeUsers(users);
 
-      const planner = await readPlanner();
       const existingTeamIdx = planner.team.findIndex(m => m.name.toLowerCase() === oldName.toLowerCase());
       if (existingTeamIdx >= 0) {
         planner.team[existingTeamIdx] = { name, role, lastSeenAt: planner.team[existingTeamIdx].lastSeenAt || new Date().toISOString() };
       } else {
         upsertTeamMember(planner, targetUser);
       }
-      addActivity(planner, `${account.name} updated team member ${name}`);
-      await writePlanner(planner);
+      const rollbackActivity = addReversibleActivity(planner, `${account.name} updated team member ${name}`);
+      await writePlanner(planner, { rollbackSnapshot, rollbackActivity });
 
       return sendJson(res, 200, { ok: true, member: publicUser(targetUser) });
     }
@@ -921,13 +975,14 @@ export async function handleRequest(req, res) {
         return sendJson(res, 400, { error: "Cannot remove the last remaining Admin account." });
       }
 
+      const planner = await readPlanner();
+      const rollbackSnapshot = plannerSnapshot(planner);
       users = users.filter(item => item.id !== memberId);
       await writeUsers(users);
 
-      const planner = await readPlanner();
       planner.team = planner.team.filter(m => m.name.toLowerCase() !== targetUser.name.toLowerCase());
-      addActivity(planner, `${account.name} removed ${targetUser.name} from the team`);
-      await writePlanner(planner);
+      const rollbackActivity = addReversibleActivity(planner, `${account.name} removed ${targetUser.name} from the team`);
+      await writePlanner(planner, { rollbackSnapshot, rollbackActivity });
 
       return sendJson(res, 200, { ok: true, memberId });
     }
@@ -941,6 +996,29 @@ export async function handleRequest(req, res) {
       return sendJson(res, 200, { ...planner, presence: await readPresence() });
     }
 
+    if (url.pathname.startsWith("/api/planner/rollback/") && req.method === "POST") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      const activityId = decodeURIComponent(url.pathname.slice("/api/planner/rollback/".length));
+      const body = await readBody(req);
+      const planner = await readPlanner();
+      const history = await readRollbackHistory();
+      const record = history.find(item => item.id === activityId);
+      if (!record) return sendJson(res, 404, { error: "That activity can no longer be undone." });
+      if (Number(body.version) !== planner.version || Number(record.restoreVersion) !== planner.version || (record.restoreUpdatedAt && record.restoreUpdatedAt !== planner.updatedAt)) {
+        return sendJson(res, 409, { error: "This activity is no longer the latest planner change. Refresh to review the latest activity.", planner });
+      }
+      const original = planner.activity.find(item => item.id === record.activityId);
+      const restored = {
+        ...planner,
+        ...record.snapshot,
+        activity: planner.activity
+      };
+      const rollbackActivity = addActivity(restored, `${account.name} undid “${original?.text || "a recent activity"}”`);
+      const saved = await writePlanner(restored);
+      await writeRollbackHistory(history.filter(item => item.id !== activityId));
+      return sendJson(res, 200, { ok: true, planner: saved, activity: rollbackActivity });
+    }
+
     if (url.pathname === "/api/planner/presence" && req.method === "POST") {
       const body = await readBody(req);
       return sendJson(res, 200, { presence: await writePresence(body.actor) });
@@ -950,10 +1028,11 @@ export async function handleRequest(req, res) {
       const body = await readBody(req);
       const planner = await readPlanner();
       if (!planner.posts.length && Array.isArray(body.seedPosts) && body.seedPosts.length) {
+        const rollbackSnapshot = plannerSnapshot(planner);
         planner.posts = body.seedPosts.map(normalizePost);
         upsertTeamMember(planner, body.actor);
-        addActivity(planner, `${body?.actor?.name || "Team"} started the shared planner`);
-        return sendJson(res, 200, await writePlanner(planner));
+        const rollbackActivity = addReversibleActivity(planner, `${body?.actor?.name || "Team"} started the shared planner`);
+        return sendJson(res, 200, await writePlanner(planner, { rollbackSnapshot, rollbackActivity }));
       }
       if (body?.actor?.name) {
         upsertTeamMember(planner, body.actor);
@@ -968,6 +1047,7 @@ export async function handleRequest(req, res) {
       if (Number.isFinite(Number(body.version)) && Number(body.version) !== planner.version) {
         return sendJson(res, 409, { error: "This planner changed in another browser. Refresh to review the latest version before saving.", planner });
       }
+      const rollbackSnapshot = plannerSnapshot(planner);
       const previousUrls = new Set(planner.posts.map(post => post.image).filter(Boolean));
       planner.posts = Array.isArray(body.posts) ? body.posts.map(post => normalizePost({ ...post, updatedBy: body?.actor?.name || post.updatedBy })) : planner.posts;
       planner.scratch = Array.isArray(body.scratch) ? body.scratch.map(entry => normalizeScratchEntry({ ...entry, updatedBy: body?.actor?.name || entry.updatedBy })) : planner.scratch;
@@ -976,9 +1056,9 @@ export async function handleRequest(req, res) {
       planner.settings = normalizeSettings(body.settings || planner.settings);
       const automationChanges = applyWorkflowAutomations(planner, planner.settings.workflowAutomations);
       upsertTeamMember(planner, body.actor);
-      addActivity(planner, body.reason ? `${body?.actor?.name || "Team"} ${body.reason}` : "");
+      const rollbackActivity = body.reason ? addReversibleActivity(planner, `${body?.actor?.name || "Team"} ${body.reason}`) : null;
       if (automationChanges) addActivity(planner, `${body?.actor?.name || "Team"} automatically assigned ${automationChanges} workflow ${automationChanges === 1 ? "task" : "tasks"}`);
-      return sendJson(res, 200, await writePlanner(planner));
+      return sendJson(res, 200, await writePlanner(planner, { rollbackSnapshot: rollbackActivity ? rollbackSnapshot : null, rollbackActivity }));
     }
 
     if (url.pathname === "/api/instagram/status") {
@@ -1061,20 +1141,22 @@ export async function handleRequest(req, res) {
       if (!session.access_token) return sendJson(res, 401, {error:"Instagram is not connected yet."});
       const body = await readBody(req);
       const planner = await readPlanner();
+      const rollbackSnapshot = plannerSnapshot(planner);
       const [profile, media] = await Promise.all([
         getInstagramProfile(session.access_token),
         getInstagramMedia(session.access_token)
       ]);
       upsertTeamMember(planner, body.actor);
       mergeInstagramPosts(planner, media, body?.actor?.name || "Instagram sync");
-      addActivity(planner, `${body?.actor?.name || "Team"} synced Instagram`);
-      const saved = await writePlanner(planner);
+      const rollbackActivity = addReversibleActivity(planner, `${body?.actor?.name || "Team"} synced Instagram`);
+      const saved = await writePlanner(planner, { rollbackSnapshot, rollbackActivity });
       await writeSession({...session, last_synced_at: new Date().toISOString()});
       return sendJson(res, 200, { profile, mediaCount: media.length, planner: saved });
     }
 
     if (url.pathname.startsWith("/api/assets/") && req.method === "PATCH") {
       const planner = await readPlanner();
+      const rollbackSnapshot = plannerSnapshot(planner);
       const assetId = url.pathname.split("/").pop();
       const post = planner.posts.find(item => item.id === assetId);
       if (!post) return sendJson(res, 404, { error: "This asset was removed by a teammate." });
@@ -1092,8 +1174,8 @@ export async function handleRequest(req, res) {
       const postIndex = planner.posts.findIndex(item => item.id === post.id);
       planner.posts[postIndex] = updatedPost;
       upsertTeamMember(planner, body.actor || account);
-      addActivity(planner, body.reason ? `${body?.actor?.name || account?.name || "Team"} ${body.reason}` : `${body?.actor?.name || account?.name || "Team"} updated planned content`);
-      await writePlanner(planner, { incrementVersion: false });
+      const rollbackActivity = addReversibleActivity(planner, body.reason ? `${body?.actor?.name || account?.name || "Team"} ${body.reason}` : `${body?.actor?.name || account?.name || "Team"} updated planned content`);
+      await writePlanner(planner, { incrementVersion: false, rollbackSnapshot, rollbackActivity });
       return sendJson(res, 200, { asset: updatedPost, merged: submittedRevision !== post.revision });
     }
 
