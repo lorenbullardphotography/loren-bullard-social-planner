@@ -1070,6 +1070,22 @@ export async function handleRequest(req, res) {
       return sendJson(res, 200, { plannerStorage: storageMode(), rowSchemaReady });
     }
 
+    if (url.pathname === "/api/admin/planner-row-migration" && req.method === "POST") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      if (account.role !== "Admin") return sendJson(res, 403, { error: "Only an Admin can run the planner row migration." });
+      const body = await readBody(req);
+      if (body.mode !== "shadow") return sendJson(res, 400, { error: "Only mode \"shadow\" is supported." });
+      const repository = await getPlannerRepository();
+      if (!repository) return sendJson(res, 503, { error: "Direct Postgres row storage is not configured in this environment." });
+      const legacyPlanner = await readPlanner();
+      const migration = await repository.migrateLegacyPlanner(legacyPlanner);
+      const parity = await repository.compareLegacyPlanner(legacyPlanner);
+      await repository.recordMigrationParity(migration.checksum, parity.ok);
+      // Shadow mode only reports parity — it never flips PLANNER_ROW_STORAGE_ENABLED
+      // or PLANNER_ROW_WRITES_ENABLED; that activation step is Task 9.
+      return sendJson(res, 200, { migration, parity });
+    }
+
     if (url.pathname === "/api/planner" && req.method === "GET") {
       const planner = await readPlanner();
       const rollbackHistory = await readRollbackHistory();
