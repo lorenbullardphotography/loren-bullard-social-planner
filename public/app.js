@@ -1,4 +1,5 @@
 const USER_KEY = "lb-content-planner-user-v1";
+const PRESENCE_SESSION_KEY = "lb-content-planner-presence-session-v1";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "tasks", editorReturnView = "tasks", calendarView = "month", libraryFilter = "all", librarySearch = "", librarySection = "assets", taskTab = "mine", approvalDetail = null, activityFilters = null, editorDirty = false, editorSaveInProgress = false;
 let settings = { pillars: [], formats: ["IMAGE", "REEL", "CAROUSEL"], goals: [], syncPhotoCount: 12, workflowAutomations: {} };
@@ -20,6 +21,7 @@ let editingPresence = { assetId: "", field: "" };
 let igStatus = { connected: false };
 let plannerVersion = 0;
 let currentUser = loadUser();
+const presenceSessionId = loadPresenceSessionId();
 const CALENDAR_INSTAGRAM_KEY = "lb-calendar-instagram-v1";
 let calendarShowInstagram = loadCalendarInstagramPreference(currentUser);
 let initialInstagramSyncDone = false;
@@ -40,6 +42,17 @@ function loadUser() {
     if (saved?.name) return { name: saved.name, role: saved.role || "Admin" };
   } catch {}
   return { name: "Loren", role: "Admin" };
+}
+function loadPresenceSessionId() {
+  try {
+    const saved = sessionStorage.getItem(PRESENCE_SESSION_KEY);
+    if (saved) return saved;
+    const sessionId = crypto.randomUUID();
+    sessionStorage.setItem(PRESENCE_SESSION_KEY, sessionId);
+    return sessionId;
+  } catch {
+    return crypto.randomUUID();
+  }
 }
 function saveUser() {
   localStorage.setItem(USER_KEY, JSON.stringify(currentUser));
@@ -540,8 +553,8 @@ function mergeFreshAssets(localPosts = [], latestPosts = [], { preserveMissing =
   return preserveMissing ? [...merged, ...localPosts.filter(post => !latestIds.has(post.id))] : merged;
 }
 
-function assetEditorsFor(assetId, people = presence, currentName = currentUser?.name) {
-  return people.filter(person => person?.editing?.assetId === assetId && person.name !== currentName);
+function assetEditorsFor(assetId, people = presence, currentName = currentUser?.name, currentSessionId = presenceSessionId) {
+  return people.filter(person => person?.editing?.assetId === assetId && (person.sessionId ? person.sessionId !== currentSessionId : person.name !== currentName));
 }
 
 function presenceFieldLabel(field = "") {
@@ -1026,7 +1039,7 @@ async function heartbeat() {
     const data = await api("/api/planner/presence", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actor: { ...currentUser, editing: editingPresence } })
+      body: JSON.stringify({ actor: { ...currentUser, sessionId: presenceSessionId, editing: editingPresence } })
     });
     presence = Array.isArray(data.presence) ? data.presence : presence;
     renderPresenceIndicators();

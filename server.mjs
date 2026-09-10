@@ -806,13 +806,15 @@ async function writePresence(actor = {}) {
   if (!actor?.name) return readPresence();
   const stored = await readStored("planner-presence", {});
   const current = stored && typeof stored === "object" ? stored : {};
-  const key = String(actor.name).trim().toLowerCase();
+  const sessionId = String(actor?.sessionId || "").trim().slice(0, 160);
+  const key = sessionId || String(actor.name).trim().toLowerCase();
   if (!key) return readPresence();
   const editingAssetId = String(actor?.editing?.assetId || "").trim().slice(0, 200);
   const editingField = String(actor?.editing?.field || "").trim().slice(0, 80);
   current[key] = {
     name: String(actor.name).slice(0, 80),
     role: String(actor.role || "Admin").slice(0, 40),
+    sessionId: sessionId || null,
     editing: editingAssetId ? { assetId: editingAssetId, field: editingField } : null,
     lastSeenAt: new Date().toISOString()
   };

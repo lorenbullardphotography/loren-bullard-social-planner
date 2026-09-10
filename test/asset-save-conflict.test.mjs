@@ -82,15 +82,15 @@ test("removes an asset missing from a newer planner snapshot", () => {
   assert.deepEqual(JSON.parse(JSON.stringify(mergeFreshAssets(local, latest, { preserveMissing: false }))), [{ id: "a", revision: 3 }]);
 });
 
-test("identifies only teammates editing the selected asset", () => {
+test("identifies another browser editing the selected asset even when it uses the same account", () => {
   const { assetEditorsFor } = assetEditorHelpers();
   const people = [
-    { name: "Loren", editing: { assetId: "post-a", field: "caption" } },
-    { name: "Brooke", editing: { assetId: "post-a", field: "notes" } },
+    { name: "Loren", sessionId: "browser-a", editing: { assetId: "post-a", field: "caption" } },
+    { name: "Loren", sessionId: "browser-b", editing: { assetId: "post-a", field: "notes" } },
     { name: "Maya", editing: { assetId: "post-b", field: "approval" } }
   ];
 
-  assert.deepEqual(JSON.parse(JSON.stringify(assetEditorsFor("post-a", people, "Loren"))), [
-    { name: "Brooke", editing: { assetId: "post-a", field: "notes" } }
+  assert.deepEqual(JSON.parse(JSON.stringify(assetEditorsFor("post-a", people, "Loren", "browser-a"))), [
+    { name: "Loren", sessionId: "browser-b", editing: { assetId: "post-a", field: "notes" } }
   ]);
 });

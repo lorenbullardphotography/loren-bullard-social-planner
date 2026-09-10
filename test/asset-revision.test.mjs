@@ -254,6 +254,27 @@ test("reports the asset and field a teammate is editing", async () => {
   assert.deepEqual(brooke.editing, { assetId: postId, field: "eCaption" });
 });
 
+test("keeps presence from separate browser sessions using the same account", async () => {
+  const { cookie, postId } = await setupAuthenticatedPlanner();
+  await makeRequest({
+    method: "POST",
+    url: "/api/planner/presence",
+    headers: { cookie },
+    body: { actor: { name: "Loren", role: "Photographer", sessionId: "browser-a", editing: { assetId: postId, field: "eCaption" } } }
+  });
+  const result = await makeRequest({
+    method: "POST",
+    url: "/api/planner/presence",
+    headers: { cookie },
+    body: { actor: { name: "Loren", role: "Photographer", sessionId: "browser-b", editing: { assetId: postId, field: "eNotes" } } }
+  });
+
+  assert.equal(result.status, 200);
+  const sameAccountSessions = result.body.presence.filter(person => ["browser-a", "browser-b"].includes(person.sessionId));
+  assert.equal(sameAccountSessions.length, 2);
+  assert.deepEqual(sameAccountSessions.map(person => person.sessionId).sort(), ["browser-a", "browser-b"]);
+});
+
 test("returns a structured conflict for a stale same-field edit", async () => {
   const { cookie, postId } = await setupAuthenticatedPlanner();
   const result = await makeRequest({
