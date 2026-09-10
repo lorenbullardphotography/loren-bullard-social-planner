@@ -499,7 +499,7 @@ function shouldRefreshPlanner({ currentView, editorDirty, editorSaveInProgress }
 function editorDestinationAfterSave(currentView, editorReturnView) {
   return currentView === "editor" ? editorReturnView : currentView;
 }
-const ASSET_EDIT_FIELDS = ["type", "workflow", "status", "approval", "assignee", "priority", "pillar", "date", "scheduleState", "caption", "notes", "audio", "hashtags", "tagNotes", "altText", "location", "locationTag", "cropZoom", "cropX", "cropY"];
+const ASSET_EDIT_FIELDS = ["type", "workflow", "status", "approval", "assignee", "priority", "pillar", "date", "scheduleState", "caption", "notes", "audio", "hashtags", "tagNotes", "altText", "location", "locationTag", "cropZoom", "cropX", "cropY", "comments", "coverImage", "image", "images", "assetKind", "canvaAssetType", "canvaPreviewUpdatedAt"];
 let currentEditorBaseline = null;
 let editorConflictState = null;
 
@@ -529,6 +529,40 @@ function replaceAsset(postsList, savedAsset) {
   return (postsList || []).map(post => post.id === savedAsset.id ? normalized : post);
 }
 
+function mergeFreshAssets(localPosts = [], latestPosts = [], { preserveMissing = true } = {}) {
+  const localById = new Map(localPosts.map(post => [post.id, post]));
+  const merged = latestPosts.map(latestPost => {
+    const localPost = localById.get(latestPost.id);
+    return !localPost || Number(latestPost.revision || 1) > Number(localPost.revision || 1) ? latestPost : localPost;
+  });
+  const latestIds = new Set(latestPosts.map(post => post.id));
+  return preserveMissing ? [...merged, ...localPosts.filter(post => !latestIds.has(post.id))] : merged;
+}
+
+async function saveQuickAssetChanges(post, changes, reason) {
+  try {
+    const result = await api(`/api/assets/${post.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision: post.revision || 1, changes, actor: currentUser, reason })
+    });
+    posts = replaceAsset(posts, result.asset);
+    selected = result.asset.id;
+    currentEditorBaseline = { id: result.asset.id, ...assetEditorBaseline(result.asset) };
+    return result.asset;
+  } catch (error) {
+    if (error.status === 409 && error.asset) {
+      posts = replaceAsset(posts, error.asset);
+      currentEditorBaseline = { id: error.asset.id, ...assetEditorBaseline(error.asset) };
+      renderAll();
+      notify("This asset changed while you were editing it. Review the latest version and try again.");
+    } else {
+      notify(error.message || "The asset could not be saved");
+    }
+    return null;
+  }
+}
+
 function removeConflictField(changes = {}, field) {
   const next = { ...changes };
   delete next[field];
@@ -553,8 +587,14 @@ async function refreshSharedPlanner() {
   if (!shouldRefreshPlanner({ currentView, editorDirty, editorSaveInProgress })) return;
   try {
     const latest = await api("/api/planner");
-    if (Number(latest?.version || 0) > plannerVersion) {
-      setPlanner(latest);
+    const hasNewerPlanner = Number(latest?.version || 0) > plannerVersion;
+    const mergedPosts = mergeFreshAssets(posts, latest.posts || [], { preserveMissing: !hasNewerPlanner });
+    const hasNewerAssets = mergedPosts.some((post, index) => post !== posts[index]) || mergedPosts.length !== posts.length;
+    if (hasNewerPlanner) {
+      setPlanner({ ...latest, posts: mergedPosts });
+      renderAll();
+    } else if (hasNewerAssets) {
+      posts = mergedPosts;
       renderAll();
     } else if (Array.isArray(latest?.presence)) {
       presence = latest.presence;
@@ -1319,11 +1359,10 @@ function renderInspector(hostSelector = "#inspector") {
   }
   qq("[data-ap]").forEach(button => {
     button.onclick = async () => {
-      applyWorkflow(post, button.dataset.ap);
-      post.updatedBy = currentUser.name;
-      post.updatedAt = new Date().toISOString();
-      renderAll();
-      await persistPlanner(`updated approval for ${post.type.toLowerCase()} content`);
+      const updated = { ...post };
+      applyWorkflow(updated, button.dataset.ap);
+      const saved = await saveQuickAssetChanges(post, assetEditorChanges(assetEditorBaseline(post), updated), `updated approval for ${post.type.toLowerCase()} content`);
+      if (saved) renderAll();
     };
   });
   const cropPreview = q(".crop-preview");
@@ -1568,30 +1607,20 @@ function renderInspector(hostSelector = "#inspector") {
       const uploadFile = await prepareUploadFile(file);
       if (uploadFile.size > 3 * 1024 * 1024) throw new Error("This asset is too large for the hosted upload connection. Photos are compressed automatically; videos must be under 3 MB.");
       const uploaded = await api("/api/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: uploadFile.name, data: await readFile(uploadFile) }) });
-      post.coverImage = uploaded.url;
-      post.updatedBy = currentUser.name;
-      post.updatedAt = new Date().toISOString();
-      await persistPlanner("added a reel cover photo");
-      renderAll();
-      notify("Reel cover photo attached");
+      const saved = await saveQuickAssetChanges(post, { coverImage: uploaded.url }, "added a reel cover photo");
+      if (saved) { renderAll(); notify("Reel cover photo attached"); }
     } catch (error) { if (help) help.textContent = "Cover upload failed"; notify(error.message || "Cover photo upload failed"); }
     finally { event.target.value = ""; }
   };
   if (q("#removeCover")) q("#removeCover").onclick = async () => {
-    const previousCover = post.coverImage;
-    post.coverImage = "";
-    post.updatedBy = currentUser.name;
-    post.updatedAt = new Date().toISOString();
-    try { await persistPlanner("removed a reel cover photo"); renderAll(); notify("Reel cover removed"); }
-    catch (error) { post.coverImage = previousCover; renderAll(); notify(error.message || "Reel cover could not be removed"); }
+    const saved = await saveQuickAssetChanges(post, { coverImage: "" }, "removed a reel cover photo");
+    if (saved) { renderAll(); notify("Reel cover removed"); }
   };
   q("#markMeta").onclick = async () => {
-    applyWorkflow(post, "ready-meta");
-    post.updatedBy = currentUser.name;
-    post.updatedAt = new Date().toISOString();
-    renderAll();
-    await persistPlanner("marked content ready for Meta Business Suite");
-    notify("Ready for Meta Business Suite");
+    const updated = { ...post };
+    applyWorkflow(updated, "ready-meta");
+    const saved = await saveQuickAssetChanges(post, assetEditorChanges(assetEditorBaseline(post), updated), "marked content ready for Meta Business Suite");
+    if (saved) { renderAll(); notify("Ready for Meta Business Suite"); }
   };
   q("#readLocationMetadata").onclick = async () => {
     if (assetSourceOf(post) !== "uploaded" || assetKindOf(post) !== "image") return notify("GPS metadata is available for uploaded photos");
@@ -1605,41 +1634,34 @@ function renderInspector(hostSelector = "#inspector") {
   q("#addComment").onclick = async () => {
     const value = q("#commentText").value.trim();
     if (!value) return;
-    (post.comments ||= []).push({ author: currentUser.name, role: currentUser.role, text: value, at: new Date().toISOString() });
-    post.updatedBy = currentUser.name;
-    post.updatedAt = new Date().toISOString();
-    renderInspector();
-    renderApprovals();
-    renderActivity();
-    await persistPlanner("left feedback on a post");
+    const comment = { author: currentUser.name, role: currentUser.role, text: value, at: new Date().toISOString() };
+    const saved = await saveQuickAssetChanges(post, { comments: [...(post.comments || []), comment] }, "left feedback on a post");
+    if (saved) renderAll();
   };
 }
 async function refreshCanvaPreview(post, button = $("#refreshCanva")) {
   if (button) { button.disabled = true; button.textContent = "Refreshing…"; }
   try {
     const data = await api("/api/canva/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ canvaUrl: post.canvaUrl, designId: post.canvaDesignId || undefined, pageCount: post.canvaPageCount || 0, designTypes: post.canvaDesignTypes || [], doctypeName: post.canvaDoctypeName || "" }) });
-    post.image = data.previewUrl;
-    if (Array.isArray(data.images) && data.images.length) post.images = data.images;
+    const updated = { ...post, image: data.previewUrl };
+    if (Array.isArray(data.images) && data.images.length) updated.images = data.images;
     if (data.mediaType === "video") {
-      post.assetKind = "video";
-      post.type = "REEL";
-      post.canvaAssetType = "video";
+      updated.assetKind = "video";
+      updated.type = "REEL";
+      updated.canvaAssetType = "video";
     } else if (data.contentType === "carousel") {
-      post.assetKind = "image";
-      post.type = "CAROUSEL";
-      post.canvaAssetType = "image";
+      updated.assetKind = "image";
+      updated.type = "CAROUSEL";
+      updated.canvaAssetType = "image";
     }
-    post.canvaPreviewUpdatedAt = new Date().toISOString();
-    post.updatedBy = currentUser.name;
-    post.updatedAt = new Date().toISOString();
-    renderAll();
-    await persistPlanner("refreshed a Canva preview");
-    notify("Canva preview refreshed");
+    updated.canvaPreviewUpdatedAt = new Date().toISOString();
+    const saved = await saveQuickAssetChanges(post, assetEditorChanges(assetEditorBaseline(post), updated), "refreshed a Canva preview");
+    if (saved) { renderAll(); notify("Canva preview refreshed"); }
   } catch (error) { notify(error.message || "Canva preview could not be refreshed"); }
   finally {
     if (button) { button.disabled = false; button.textContent = "Refresh preview"; }
   }
-  return post;
+  return posts.find(item => item.id === post.id) || post;
 }
 function renderCalendarYear(year) {
   const months = Array.from({ length: 12 }, (_, index) => {
@@ -1769,19 +1791,15 @@ function renderCalendar() {
       const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".day");
       const post = posts.find(item => item.id === state.id);
       if (!post || !target) return;
-      post.date = target.dataset.day;
-      post.updatedBy = currentUser.name;
-      post.updatedAt = new Date().toISOString();
-      renderAll();
-      await persistPlanner("moved content on the calendar");
-      notify("Publish date updated");
+      const saved = await saveQuickAssetChanges(post, { date: target.dataset.day }, "moved content on the calendar");
+      if (saved) { renderAll(); notify("Publish date updated"); }
     };
     node.addEventListener("pointerup", finishCalendarTouch);
     node.addEventListener("pointercancel", finishCalendarTouch);
   });
   $$(".day[data-day]").forEach(node => {
     node.ondragover = event => { if (dragId) event.preventDefault(); };
-    node.ondrop = async event => { event.preventDefault(); const post = posts.find(item => item.id === dragId); if (!post) return; post.date = node.dataset.day; post.updatedBy = currentUser.name; post.updatedAt = new Date().toISOString(); dragId = null; renderAll(); await persistPlanner("moved content on the calendar"); notify("Publish date updated"); };
+    node.ondrop = async event => { event.preventDefault(); const post = posts.find(item => item.id === dragId); if (!post) return; dragId = null; const saved = await saveQuickAssetChanges(post, { date: node.dataset.day }, "moved content on the calendar"); if (saved) { renderAll(); notify("Publish date updated"); } };
   });
 }
 function renderLibrary() {

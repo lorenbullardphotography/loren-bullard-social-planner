@@ -14,7 +14,7 @@ function assetEditorHelpers() {
     URL,
     Date
   };
-  vm.runInNewContext(`${helpers}\nthis.helpers = { mergeAssetEdit, assetEditorBaseline, assetEditorChanges, replaceAsset, removeConflictField, forceConflictField };`, context);
+  vm.runInNewContext(`${helpers}\nthis.helpers = { mergeAssetEdit, assetEditorBaseline, assetEditorChanges, replaceAsset, removeConflictField, forceConflictField, mergeFreshAssets };`, context);
   return context.helpers;
 }
 
@@ -53,4 +53,31 @@ test("adds a selected field to the explicit force list", () => {
   assert.deepEqual(JSON.parse(JSON.stringify(forceConflictField([], "caption"))), ["caption"]);
   assert.deepEqual(JSON.parse(JSON.stringify(forceConflictField(["caption"], "caption"))), ["caption"]);
   assert.deepEqual(JSON.parse(JSON.stringify(forceConflictField(["notes"], "caption"))), ["notes", "caption"]);
+});
+
+test("keeps local assets unless the shared copy has a newer asset revision", () => {
+  const { mergeFreshAssets } = assetEditorHelpers();
+  const local = [
+    { id: "a", revision: 3, caption: "My latest" },
+    { id: "b", revision: 2, caption: "Keep this" }
+  ];
+  const latest = [
+    { id: "a", revision: 2, caption: "Older server copy" },
+    { id: "b", revision: 4, caption: "Teammate update" },
+    { id: "c", revision: 1, caption: "New asset" }
+  ];
+
+  assert.deepEqual(JSON.parse(JSON.stringify(mergeFreshAssets(local, latest))), [
+    { id: "a", revision: 3, caption: "My latest" },
+    { id: "b", revision: 4, caption: "Teammate update" },
+    { id: "c", revision: 1, caption: "New asset" }
+  ]);
+});
+
+test("removes an asset missing from a newer planner snapshot", () => {
+  const { mergeFreshAssets } = assetEditorHelpers();
+  const local = [{ id: "a", revision: 3 }, { id: "b", revision: 2 }];
+  const latest = [{ id: "a", revision: 3 }];
+
+  assert.deepEqual(JSON.parse(JSON.stringify(mergeFreshAssets(local, latest, { preserveMissing: false }))), [{ id: "a", revision: 3 }]);
 });

@@ -450,7 +450,8 @@ function normalizeComment(comment) {
 export const ASSET_EDITABLE_FIELDS = new Set([
   "type", "workflow", "status", "approval", "assignee", "priority", "pillar",
   "date", "scheduleState", "caption", "notes", "audio", "hashtags", "tagNotes",
-  "altText", "location", "locationTag", "cropZoom", "cropX", "cropY"
+  "altText", "location", "locationTag", "cropZoom", "cropX", "cropY",
+  "comments", "coverImage", "image", "images", "assetKind", "canvaAssetType", "canvaPreviewUpdatedAt"
 ]);
 
 function sanitizeFieldMap(map, sanitizeVal) {
@@ -581,6 +582,16 @@ export function applyAssetChanges(post, changes = {}, actor = {}, now = new Date
     }
   }
 
+  if (Object.hasOwn(normalizedChanges, "comments")) {
+    const commentKeys = new Set(normalizedPost.comments.map(comment => JSON.stringify(comment)));
+    normalizedChanges.comments = [...normalizedPost.comments, ...normalizedChanges.comments.filter(comment => {
+      const key = JSON.stringify(comment);
+      if (commentKeys.has(key)) return false;
+      commentKeys.add(key);
+      return true;
+    })];
+  }
+
   return normalizePost({
     ...normalizedPost,
     ...normalizedChanges,
@@ -600,6 +611,7 @@ export function assetConflicts(post, submittedRevision, changes = {}) {
   const conflicts = {};
 
   for (const field of Object.keys(normalizedChanges)) {
+    if (field === "comments") continue;
     const fieldRev = normalizedPost.fieldUpdatedRevision[field] || 1;
     if (fieldRev > subRev) {
       conflicts[field] = {
@@ -707,9 +719,9 @@ function addActivity(planner, text) {
   planner.activity = planner.activity.slice(0, 40);
 }
 
-async function writePlanner(nextPlanner) {
+async function writePlanner(nextPlanner, { incrementVersion = true } = {}) {
   const normalized = {
-    version: Number(nextPlanner?.version || 0) + 1,
+    version: Number(nextPlanner?.version || 0) + (incrementVersion ? 1 : 0),
     posts: Array.isArray(nextPlanner?.posts) ? nextPlanner.posts.map(normalizePost) : [],
     scratch: Array.isArray(nextPlanner?.scratch) ? nextPlanner.scratch.map(normalizeScratchEntry).slice(0, 500) : [],
     team: Array.isArray(nextPlanner?.team) ? nextPlanner.team : [],
@@ -1081,7 +1093,7 @@ export async function handleRequest(req, res) {
       planner.posts[postIndex] = updatedPost;
       upsertTeamMember(planner, body.actor || account);
       addActivity(planner, body.reason ? `${body?.actor?.name || account?.name || "Team"} ${body.reason}` : `${body?.actor?.name || account?.name || "Team"} updated planned content`);
-      await writePlanner(planner);
+      await writePlanner(planner, { incrementVersion: false });
       return sendJson(res, 200, { asset: updatedPost, merged: submittedRevision !== post.revision });
     }
 

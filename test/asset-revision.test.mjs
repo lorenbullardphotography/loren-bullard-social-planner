@@ -172,6 +172,50 @@ test("merges a stale edit to a different field", async () => {
   assert.equal(result.body.asset.revision, 4);
 });
 
+test("updates an asset without advancing the shared planner version", async () => {
+  const { cookie, postId } = await setupAuthenticatedPlanner();
+  const result = await makeRequest({
+    method: "PATCH",
+    url: `/api/assets/${postId}`,
+    headers: { cookie },
+    body: { revision: 3, changes: { notes: "Saved independently" }, actor: { name: "Loren" } }
+  });
+
+  assert.equal(result.status, 200);
+  const planner = await makeRequest({ method: "GET", url: "/api/planner", headers: { cookie } });
+  assert.equal(planner.body.version, 1);
+  assert.equal(planner.body.posts[0].notes, "Saved independently");
+});
+
+test("merges a new comment with comments added by a teammate", async () => {
+  const { cookie, postId } = await setupAuthenticatedPlanner();
+  const first = await makeRequest({
+    method: "PATCH",
+    url: `/api/assets/${postId}`,
+    headers: { cookie },
+    body: {
+      revision: 3,
+      changes: { comments: [{ author: "Brooke", text: "Teammate feedback", at: "2026-09-08T20:00:00.000Z" }] },
+      actor: { name: "Brooke" }
+    }
+  });
+  assert.equal(first.status, 200);
+
+  const second = await makeRequest({
+    method: "PATCH",
+    url: `/api/assets/${postId}`,
+    headers: { cookie },
+    body: {
+      revision: 3,
+      changes: { comments: [{ author: "Loren", text: "My feedback", at: "2026-09-08T20:01:00.000Z" }] },
+      actor: { name: "Loren" }
+    }
+  });
+
+  assert.equal(second.status, 200);
+  assert.deepEqual(second.body.asset.comments.map(comment => comment.text), ["Teammate feedback", "My feedback"]);
+});
+
 test("returns a structured conflict for a stale same-field edit", async () => {
   const { cookie, postId } = await setupAuthenticatedPlanner();
   const result = await makeRequest({
@@ -224,5 +268,3 @@ test("returns 400 if changes object contains no valid editable fields", async ()
   assert.equal(result.status, 400);
   assert.equal(result.body.error, "Choose at least one asset field to update.");
 });
-
-
