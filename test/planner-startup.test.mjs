@@ -20,7 +20,15 @@ test("refreshes asset edit indicators when shared presence changes", () => {
 test("does not use high-frequency presence polling that can block shared storage", () => {
   const source = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 
-  assert.match(source, /setInterval\(refreshSharedPlanner, 10000\)/);
   assert.doesNotMatch(source, /setInterval\(refreshPresence,/);
   assert.doesNotMatch(source, /startPresencePolling\(\)/);
+});
+
+test("only polls the shared planner while the tab is visible, at a low frequency", () => {
+  const source = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+
+  const intervalCall = source.match(/setInterval\(\(\) => \{\s*if \(document\.visibilityState === "visible"\) refreshSharedPlanner\(\);\s*\}, (\d+)\)/);
+  assert.ok(intervalCall, "expected a visibility-gated refreshSharedPlanner interval");
+  assert.ok(Number(intervalCall[1]) >= 30000, "polling interval should be at least 30 seconds to limit Fast Origin Transfer usage");
+  assert.match(source, /document\.addEventListener\("visibilitychange", \(\) => \{\s*if \(document\.visibilityState === "visible"\) refreshSharedPlanner\(\);\s*\}\)/);
 });

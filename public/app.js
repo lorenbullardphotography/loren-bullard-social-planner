@@ -2532,13 +2532,21 @@ async function syncInstagram({silent = false} = {}) {
 
 // The planner and Instagram connection live on the server. Periodic refreshes
 // let the owner and social employee see each other's changes without sharing a
-// browser session or relying on browser storage.
-setInterval(refreshSharedPlanner, 10000);
+// browser session or relying on browser storage. Only poll while the tab is
+// visible: a background tab polling every few seconds all day was the main
+// driver of Vercel Fast Origin Transfer overage, since every poll re-fetches
+// the entire planner document.
+setInterval(() => {
+  if (document.visibilityState === "visible") refreshSharedPlanner();
+}, 30000);
 setInterval(checkInstagram, 30000);
 setInterval(() => {
   if (editingPresence.assetId) heartbeat();
 }, 5000);
 window.addEventListener("focus", () => { refreshSharedPlanner(); checkInstagram(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refreshSharedPlanner();
+});
 
 $("#modalSync").onclick = syncInstagram;
 $("#saveSettings").onclick = async () => {
