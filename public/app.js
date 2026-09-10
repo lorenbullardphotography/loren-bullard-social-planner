@@ -1068,9 +1068,7 @@ function renderGrid() {
       selected = post.id;
       renderGrid();
       renderInspector();
-      if (window.matchMedia("(max-width: 700px)").matches) {
-        requestAnimationFrame(() => $("#inspector").scrollIntoView({ behavior: "smooth", block: "start" }));
-      }
+      if (window.matchMedia("(max-width: 700px)").matches) setGridEditorOpen(true);
     };
     node.addEventListener("selectstart", event => event.preventDefault());
     node.ondblclick = event => {
@@ -1103,6 +1101,9 @@ function renderGrid() {
     if (post.status !== "posted") {
       node.addEventListener("pointerdown", event => {
         if (!event.isPrimary || event.button !== 0) return;
+        // On desktop, editing a tile should never accidentally start a reorder.
+        // The drag handle is the explicit affordance for mouse and trackpad input.
+        if (event.pointerType === "mouse" && !event.target.closest(".handle")) return;
         touchDrag = { id: post.id, node, x: event.clientX, y: event.clientY, moved: false, timer: null };
         const delay = event.pointerType === "mouse" ? 100 : 220;
         touchDrag.timer = setTimeout(() => {
@@ -1151,6 +1152,19 @@ function renderGrid() {
   }
   $("#gridEmpty").classList.toggle("hidden", ordered().length > 0);
 }
+
+function setGridEditorOpen(open) {
+  $("#view-grid")?.classList.toggle("grid-editor-open", Boolean(open));
+}
+
+function closeGridEditor() {
+  selected = null;
+  editorConflictState = null;
+  setGridEditorOpen(false);
+  renderGrid();
+  renderInspector();
+}
+
 async function reorder(a, b) {
   if (!a || a === b) return;
   const futurePosts = future();
@@ -1294,18 +1308,19 @@ function renderInspector(hostSelector = "#inspector") {
   const isCarousel = post.type === "CAROUSEL" && carouselCount > 1;
   if (isCarousel) carouselSlide = Math.max(0, Math.min(carouselSlide, carouselImages(post).length - 1));
   if (post.status === "posted") {
-    host.innerHTML = `<div class="editor">
+    host.innerHTML = `<div class="editor"><button class="mobile-editor-close" type="button" aria-label="Close asset editor">×</button>
       <div class="preview-wrap">${assetPreview(post)}</div>
       <div class="posted-lock">This post is live on Instagram and stays locked in the grid.<br><br><b>${post.timestamp ? new Date(post.timestamp).toLocaleDateString() : "Posted"}</b>${post.permalink ? ` · <a href="${esc(post.permalink)}" target="_blank" rel="noopener noreferrer">Open on Instagram</a>` : ""}<br>${esc(formatSchedule(post))}${locationSummary(post)}</div>
       <label class="field">Caption<textarea rows="8" readonly>${esc(post.caption || "")}</textarea></label>
     </div>`;
+    q(".mobile-editor-close")?.addEventListener("click", closeGridEditor);
     return;
   }
   const cropLocked = assetKindOf(post) === "video" || post.type === "REEL" || assetSourceOf(post) === "canva";
   const comments = (post.comments || []).map(comment => `<div class="comment"><b>${esc(comment.author)}${comment.role ? ` · ${esc(comment.role)}` : ""}</b>${esc(comment.text)}</div>`).join("");
   const workflowOptions = Object.entries(WORKFLOW_LABELS).map(([key, label]) => `<option value="${key}" ${workflowOf(post) === key ? "selected" : ""}>${label}</option>`).join("");
   const pillarOptions = `<option value="">Choose a pillar</option>` + settings.pillars.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${esc(pillar)}</option>`).join("");
-  host.innerHTML = `<div class="editor editable-editor"><div class="editor-mobile-heading"><div><span class="eyebrow">EDITING SELECTED POST</span><b>${esc(post.caption || post.notes || assetTypeLabel(post))}</b></div><span>Swipe through fields below</span></div><div class="editor-scroll">
+  host.innerHTML = `<div class="editor editable-editor"><button class="mobile-editor-close" type="button" aria-label="Close asset editor">×</button><div class="editor-mobile-heading"><div><span class="eyebrow">EDITING SELECTED POST</span><b>${esc(post.caption || post.notes || assetTypeLabel(post))}</b></div><span>Swipe through fields below</span></div><div class="editor-scroll">
     ${isCarousel ? `<div class="carousel-preview" aria-label="Carousel preview"><img class="carousel-slide" src="${esc(carouselImages(post)[carouselSlide] || post.image)}" alt="Carousel image ${carouselSlide + 1} of ${carouselCount}"><button id="carouselPrev" class="carousel-arrow carousel-prev" type="button" aria-label="Previous carousel image" ${carouselSlide === 0 ? "disabled" : ""}>‹</button><button id="carouselNext" class="carousel-arrow carousel-next" type="button" aria-label="Next carousel image" ${carouselSlide >= carouselCount - 1 ? "disabled" : ""}>›</button><span class="carousel-counter" aria-live="polite">${carouselSlide + 1} / ${carouselCount}</span></div>` : `<div class="preview-wrap${cropLocked ? "" : " crop-preview"}" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post, cropLocked)}${cropLocked ? "" : '<div class="crop-grid" aria-hidden="true"></div><span class="crop-hint">Drag to reposition</span><div class="crop-zoom-overlay"><span>Zoom</span><input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="' + Math.max(1, Math.min(3, Number(post.cropZoom) || 1)) + '" aria-label="Crop zoom"><output id="cropOverlayZoom">100%</output><button id="resetCrop" class="crop-overlay-reset" type="button" aria-label="Reset crop" title="Reset crop">↺</button></div>'}</div>`}
     <div class="asset-meta"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva" : "Uploaded"}</span>${hasReelCover(post) ? '<span class="asset-badge cover-badge">Cover attached</span>' : ""}</div>
     ${post.type === "REEL" || assetKindOf(post) === "video" ? `<div class="cover-card"><div><b>Reel cover photo</b><small>${post.coverImage ? "This image appears on the grid instead of the video frame." : "Add an image to choose the frame shown on the grid."}</small></div>${post.coverImage ? `<img class="cover-thumb" src="${esc(post.coverImage)}" alt="Reel cover photo">` : ""}<div class="handoff-actions"><label class="ghost button-link cover-upload-label">${post.coverImage ? "Replace cover" : "Upload cover photo"}<input id="coverInput" type="file" accept="image/*" hidden></label>${post.coverImage ? '<button id="removeCover" class="ghost" type="button">Remove cover</button>' : ""}</div><small id="coverHelp" class="field-help"></small></div>` : ""}
@@ -1343,6 +1358,7 @@ function renderInspector(hostSelector = "#inspector") {
     </div>
     <div class="actions"><button id="saveEdit" class="primary">Save</button><button id="deleteEdit" class="danger">Delete</button></div>
   </div>`;
+  q(".mobile-editor-close")?.addEventListener("click", closeGridEditor);
   if (hostSelector === "#postEditor") {
     host.querySelectorAll("input, select, textarea").forEach(control => {
       control.addEventListener("input", () => { editorDirty = true; });
@@ -2032,6 +2048,7 @@ function openPost(id, openEditor = false) {
     switchView("grid");
     renderGrid();
     renderInspector();
+    if (window.matchMedia("(max-width: 700px)").matches) setGridEditorOpen(true);
   }
   window.scrollTo({ top: 0, behavior: "smooth" });
 }

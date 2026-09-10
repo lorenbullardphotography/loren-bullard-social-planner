@@ -62,6 +62,19 @@ test("mobile drag surfaces suppress native text selection and narrow calendar ov
   assert.match(app, /selectstart/);
 });
 
+test("grid asset editing uses a mobile modal with an explicit close control", () => {
+  assert.match(css, /#view-grid\.grid-editor-open::before\{[^}]*position:fixed/);
+  assert.match(css, /#view-grid\.grid-editor-open \.inspector\{[^}]*position:fixed/);
+  assert.match(css, /#view-grid\.grid-editor-open \.mobile-editor-close\{[^}]*display:grid/);
+  assert.match(app, /function closeGridEditor\(\)/);
+  assert.match(app, /class="mobile-editor-close"/);
+});
+
+test("desktop grid reordering starts only from the drag handle", () => {
+  assert.match(app, /event\.pointerType === "mouse" && !event\.target\.closest\("\.handle"\)/);
+  assert.match(css, /\.handle\{[^}]*cursor:grab/);
+});
+
 test("mobile tab bars and calendar controls can shrink without clipping", () => {
   assert.match(css, /\.task-tabs\{[^}]*min-width:0/);
   assert.match(css, /\.library-tabs\{[^}]*min-width:0/);
