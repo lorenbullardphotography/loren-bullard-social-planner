@@ -18,6 +18,7 @@ let team = [];
 let activity = [];
 let presence = [];
 let presenceRefreshInFlight = false;
+let presencePollingStarted = false;
 let editingPresence = { assetId: "", field: "" };
 let igStatus = { connected: false };
 let plannerVersion = 0;
@@ -666,6 +667,12 @@ async function refreshPresence() {
   } catch {} finally {
     presenceRefreshInFlight = false;
   }
+}
+function startPresencePolling() {
+  if (presencePollingStarted) return;
+  presencePollingStarted = true;
+  refreshPresence();
+  setInterval(refreshPresence, 3000);
 }
 async function persistPlanner(reason) {
   try {
@@ -2548,7 +2555,6 @@ async function syncInstagram({silent = false} = {}) {
 // let the owner and social employee see each other's changes without sharing a
 // browser session or relying on browser storage.
 setInterval(refreshSharedPlanner, 10000);
-setInterval(refreshPresence, 2000);
 setInterval(checkInstagram, 30000);
 setInterval(() => {
   if (editingPresence.assetId) heartbeat();
@@ -2706,10 +2712,10 @@ async function init() {
     await loadAccount();
     await loadPlanner();
     renderAll();
+    startPresencePolling();
   } finally {
     setPageLoading(false);
   }
-  heartbeat().catch(() => {});
   checkInstagram().then(async () => {
     if (igStatus.connected && !initialInstagramSyncDone) {
       initialInstagramSyncDone = true;
