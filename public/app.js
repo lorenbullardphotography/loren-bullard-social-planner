@@ -499,8 +499,17 @@ async function loadPlanner() {
 // caption. Row storage's per-field conflict check at save time is what
 // actually keeps concurrent edits safe; the editor doesn't also need to
 // stay live-synced while a person is looking at it.
-function shouldRefreshPlanner({ currentView }) {
-  return currentView !== "editor";
+//
+// The standalone "editor" view isn't the only place this rebuild happens:
+// on desktop, opening a tile from the Grid Planner keeps currentView
+// "grid" and renders the very same form into the right-hand #inspector
+// panel (see renderAll()'s `if (currentView === "grid") renderInspector()`)
+// — so a post open in that panel needs the same protection as the
+// full-page editor, gated on a post actually being selected there.
+function shouldRefreshPlanner({ currentView, selected }) {
+  if (currentView === "editor") return false;
+  if (currentView === "grid" && selected) return false;
+  return true;
 }
 function editorDestinationAfterSave(currentView, editorReturnView) {
   return currentView === "editor" ? editorReturnView : currentView;
@@ -663,7 +672,7 @@ async function refreshActivityFeed() {
 // state until Task 9) would silently reintroduce that overage at 5s instead
 // of the 30s it was fixed at.
 async function refreshSharedPlanner() {
-  if (!shouldRefreshPlanner({ currentView, editorDirty, editorSaveInProgress })) return "skipped";
+  if (!shouldRefreshPlanner({ currentView, selected })) return "skipped";
   try {
     const result = await fetchPlannerChanges(plannerChangeToken);
     if (result.status === 304) return "delta";

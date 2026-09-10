@@ -89,6 +89,12 @@ test("does not refresh away an active asset editor", () => {
   // refreshing" while composing a caption.
   assert.equal(shouldRefreshPlanner({ currentView: "editor", editorDirty: false, editorSaveInProgress: false }), false);
   assert.equal(shouldRefreshPlanner({ currentView: "library", editorDirty: true, editorSaveInProgress: false }), true);
+  // Regression: on desktop, opening a tile from the Grid Planner keeps
+  // currentView "grid" and renders the same editor form into the
+  // right-hand #inspector panel instead of navigating to "editor" - that
+  // panel needs the identical protection whenever a post is open in it.
+  assert.equal(shouldRefreshPlanner({ currentView: "grid", selected: "post-1" }), false);
+  assert.equal(shouldRefreshPlanner({ currentView: "grid", selected: null }), true);
 });
 
 test("returns to the page that opened the asset editor after saving", () => {
