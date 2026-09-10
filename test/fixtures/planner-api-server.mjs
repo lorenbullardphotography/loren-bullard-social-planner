@@ -136,6 +136,20 @@ if (scenario === "concurrent-different-assets") {
   const put = await call("PUT", "/api/planner", { version: planner.json.version, posts: planner.json.posts, scratch: planner.json.scratch, settings: planner.json.settings, actor: { name: "Loren" }, reason: "test" }, cookie);
   const adminImport = await call("PUT", "/api/planner", { version: planner.json.version, posts: planner.json.posts, scratch: planner.json.scratch, settings: planner.json.settings, actor: { name: adminName }, reason: "test", adminImport: true }, adminCookie);
   console.log(JSON.stringify({ ordinaryPut: put.status, adminImportPut: adminImport.status }));
+} else if (scenario === "asset-patch-appears-in-activity-feed") {
+  // Regression test: a real caption edit through the row-storage endpoints
+  // must show up in GET /api/planner/activity, the feed the Team Activity
+  // tab reads from once row storage is serving reads. Before this fix,
+  // recordActivity() wrote the row but nothing ever read it back.
+  const created = await call("POST", "/api/planner/assets", { asset: { image: "/g.jpg", caption: "before" }, actor: { name: "Loren" } }, cookie);
+  const asset = created.json.asset;
+  const patched = await call("PATCH", `/api/assets/${asset.id}`, { revision: asset.revision, changes: { caption: "after" }, actor: { name: "Loren" } }, cookie);
+  const activity = await call("GET", "/api/planner/activity", undefined, cookie);
+  console.log(JSON.stringify({
+    patchStatus: patched.status,
+    activityStatus: activity.status,
+    entries: activity.json?.activity?.map(item => item.text) || []
+  }));
 }
 
 server.close();

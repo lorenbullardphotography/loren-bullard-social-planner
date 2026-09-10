@@ -484,9 +484,11 @@ async function loadPlanner() {
       body: JSON.stringify({ seedPosts: seed, actor: currentUser })
     });
     setPlanner(bootstrapped);
+    await refreshActivityFeed();
     return;
   }
   setPlanner(planner);
+  await refreshActivityFeed();
 }
 function shouldRefreshPlanner({ currentView, editorDirty, editorSaveInProgress }) {
   return currentView !== "editor" || (!editorDirty && !editorSaveInProgress);
@@ -626,6 +628,24 @@ function applyPlannerDelta(delta) {
   if (changed) renderAll();
 }
 
+// Once row storage serves reads, every save records its activity entry into
+// planner_activity instead of the legacy document's `activity` array (which
+// stops being written to at that point) — so the Team Activity tab has to
+// be refreshed from the row-storage feed instead. A 503 here just means row
+// storage isn't active yet; `activity` is left as whatever setPlanner()
+// already populated from the legacy document, unchanged.
+async function refreshActivityFeed() {
+  try {
+    const response = await fetch("/api/planner/activity");
+    if (!response.ok) return false;
+    const data = await response.json();
+    activity = (Array.isArray(data?.activity) ? data.activity : []).map(item => ({ ...item, text: normalizeActivityText(item?.text) }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Returns "delta" | "fallback" | "skipped" so the poll scheduler (below) can
 // pick the right cadence: cheap delta polling can safely run every 5
 // seconds, but the legacy whole-document fallback must stay throttled to
@@ -638,7 +658,11 @@ async function refreshSharedPlanner() {
   try {
     const result = await fetchPlannerChanges(plannerChangeToken);
     if (result.status === 304) return "delta";
-    if (result.status === 200) { applyPlannerDelta(result.data); return "delta"; }
+    if (result.status === 200) {
+      applyPlannerDelta(result.data);
+      if (await refreshActivityFeed()) renderActivity();
+      return "delta";
+    }
 
     // status 503: row storage isn't enabled in this environment — fall back
     // to the legacy whole-document poll (unchanged from before Task 7,
@@ -2196,8 +2220,8 @@ function switchView(name) {
     return;
   }
   if (name === "settings") renderPlannerSettings();
-  if (name === "activity") renderActivity();
-  if (name === "tasks") { renderTasks(); renderActivity(); }
+  if (name === "activity") { renderActivity(); refreshActivityFeed().then(refreshed => refreshed && renderActivity()); }
+  if (name === "tasks") { renderTasks(); renderActivity(); refreshActivityFeed().then(refreshed => refreshed && renderActivity()); }
   if (name === "library") { setLibrarySection(librarySection); renderLibrary(); }
   if (name === "grid") renderInspector();
   if (name === "editor") renderInspector("#postEditor");
@@ -2393,7 +2417,10 @@ document.addEventListener("keydown", event => { if (event.key === "Escape") clos
 $("#myTasksTab").onclick = () => { taskTab = "mine"; approvalDetail = null; renderTasks(); };
 $("#teamTasksTab").onclick = () => { taskTab = "team"; approvalDetail = null; renderTasks(); };
 $("#approvalsTab").onclick = () => { taskTab = "approvals"; approvalDetail = null; renderTasks(); };
-$("#activityTab").onclick = () => { taskTab = "activity"; approvalDetail = null; renderTasks(); renderActivity(); };
+$("#activityTab").onclick = () => {
+  taskTab = "activity"; approvalDetail = null; renderTasks(); renderActivity();
+  refreshActivityFeed().then(refreshed => refreshed && renderActivity());
+};
 $("#taskSort").onchange = () => renderTasks();
 $("#activityFilters").onchange = () => { activityFilters = $$("#activityFilters input:checked").map(input => input.value); saveActivityFilters(currentUser, activityFilters); renderActivity(); };
 let pendingUndo = null;

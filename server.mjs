@@ -1152,6 +1152,23 @@ export async function handleRequest(req, res) {
       return sendJson(res, 200, { changes, nextToken });
     }
 
+    // Once row storage is active, ordinary saves record activity into
+    // planner_activity (see recordActivity in lib/planner-service.mjs)
+    // instead of the legacy whole-document's `activity` array, which stops
+    // being written to at that point (see PUT /api/planner above) — so the
+    // Team Activity tab has to read from here instead once row storage is
+    // serving reads, or every row-storage save would look like it never
+    // happened in that tab.
+    if (url.pathname === "/api/planner/activity" && req.method === "GET") {
+      if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
+      const plannerService = await getPlannerReadService();
+      if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
+      const startedAt = Date.now();
+      const activity = await plannerService.recentActivity();
+      logPlannerDiagnostic(buildPlannerDiagnostic({ operation: "planner.activity", startedAt, outcome: "ok" }));
+      return sendJson(res, 200, { activity });
+    }
+
     if (url.pathname.startsWith("/api/planner/rollback/") && req.method === "POST") {
       if (!account) return sendJson(res, 401, { error: "Please sign in to the planner." });
       const activityId = decodeURIComponent(url.pathname.slice("/api/planner/rollback/".length));

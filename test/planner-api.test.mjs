@@ -165,6 +165,14 @@ test("PUT /api/planner still works normally when row writes are not enabled", { 
   assert.equal(result.ordinaryPut, 200);
 });
 
+test("row storage: a saved asset edit appears in GET /api/planner/activity", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema();
+  const result = runScenario("asset-patch-appears-in-activity-feed");
+  assert.equal(result.patchStatus, 200);
+  assert.equal(result.activityStatus, 200);
+  assert.ok(result.entries.some(text => text.includes("updated planned content")), `expected the patch's activity entry in the feed, got: ${JSON.stringify(result.entries)}`);
+});
+
 // --- Task 10: safe operation diagnostics ---
 
 test("buildPlannerDiagnostic contains only operation name, duration, outcome, and feature-flag state", () => {
