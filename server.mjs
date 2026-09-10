@@ -1148,8 +1148,8 @@ export async function handleRequest(req, res) {
       ]);
       upsertTeamMember(planner, body.actor);
       mergeInstagramPosts(planner, media, body?.actor?.name || "Instagram sync");
-      const rollbackActivity = addReversibleActivity(planner, `${body?.actor?.name || "Team"} synced Instagram`);
-      const saved = await writePlanner(planner, { rollbackSnapshot, rollbackActivity });
+      addActivity(planner, `${body?.actor?.name || "Team"} synced Instagram`);
+      const saved = await writePlanner(planner);
       await writeSession({...session, last_synced_at: new Date().toISOString()});
       return sendJson(res, 200, { profile, mediaCount: media.length, planner: saved });
     }
