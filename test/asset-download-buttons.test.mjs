@@ -35,3 +35,12 @@ test("bumps the app.js cache-busting version", () => {
   const html = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
   assert.match(html, /<script src="\/app\.js\?v=20260911-/);
 });
+
+test("video previews carry a hidden fallback message and an error handler that reveals it", () => {
+  assert.match(appJs, /class="video-fallback hidden"/);
+  assert.match(appJs, /function wireVideoFallback\(root\)/);
+  const wireCalls = appJs.match(/wireVideoFallback\(host\)/g) || [];
+  assert.equal(wireCalls.length, 2, "expected wiring in both the posted-locked branch and the editable branch");
+  const css = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.preview-wrap \.video-fallback\{/);
+});

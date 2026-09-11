@@ -865,8 +865,16 @@ function assetPreview(post, lockCrop = false) {
   const x = lockCrop ? 50 : cropCoordinate(post.cropX);
   const y = lockCrop ? 50 : cropCoordinate(post.cropY);
   return mediaKind === "video"
-    ? '<video class="crop-media" style="aspect-ratio:' + ratioValue + ';transform:translate(' + ((x - 50) * (zoom - 1)) + '%,' + ((y - 50) * (zoom - 1)) + '%) scale(' + zoom + ')" src="' + esc(post.image) + '" controls playsinline preload="metadata"></video>'
+    ? '<video class="crop-media" style="aspect-ratio:' + ratioValue + ';transform:translate(' + ((x - 50) * (zoom - 1)) + '%,' + ((y - 50) * (zoom - 1)) + '%) scale(' + zoom + ')" src="' + esc(post.image) + '" controls playsinline preload="metadata"></video><div class="video-fallback hidden">This browser can\'t preview this video format.<br>Use "Download original asset" below to view it.</div>'
     : '<img class="crop-media" style="aspect-ratio:' + ratioValue + ';transform:translate(' + ((x - 50) * (zoom - 1)) + '%,' + ((y - 50) * (zoom - 1)) + '%) scale(' + zoom + ')" src="' + esc(post.image) + '" alt="">';
+}
+function wireVideoFallback(root) {
+  root.querySelectorAll("video.crop-media").forEach(video => {
+    video.addEventListener("error", () => {
+      video.classList.add("hidden");
+      video.nextElementSibling?.classList.remove("hidden");
+    });
+  });
 }
 function cropCoordinate(value) {
   const coordinate = Number(value);
@@ -1482,6 +1490,7 @@ function renderInspector(hostSelector = "#inspector") {
       <label class="field">Caption<textarea rows="8" readonly>${esc(post.caption || "")}</textarea></label>
       <div class="handoff-actions"><button id="downloadOriginalAsset" class="ghost" type="button">↓ Download original asset</button><button id="downloadAssetDetails" class="ghost" type="button">↓ Download content details (.txt)</button></div>
     </div>`;
+    wireVideoFallback(host);
     q(".mobile-editor-close")?.addEventListener("click", closeGridEditor);
     q("#downloadOriginalAsset").onclick = () => downloadAsset(post);
     q("#downloadAssetDetails").onclick = () => downloadMetaTextFile(post);
@@ -1530,6 +1539,7 @@ function renderInspector(hostSelector = "#inspector") {
     </div>
     <div class="actions"><button id="saveEdit" class="primary">Save</button><button id="deleteEdit" class="danger">Delete</button></div>
   </div>`;
+  wireVideoFallback(host);
   q(".mobile-editor-close")?.addEventListener("click", closeGridEditor);
   if (hostSelector === "#postEditor") {
     host.querySelectorAll("input, select, textarea").forEach(control => {
