@@ -95,18 +95,27 @@ test("team member API workflow: list, add, edit, password reset, and remove", as
     assert.ok(m.id && m.name && m.role);
   }
 
+  // This repo's tests run against the real local .data/ files rather than an
+  // isolated fixture (a pre-existing quirk, not something to fix here — see
+  // the same note in test/planner-migration.test.mjs), so a hardcoded name
+  // can permanently collide with a leftover record from an earlier
+  // interrupted run. Use a unique name per run instead.
+  const uniqueSuffix = `${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+  const memberName = `Team Workflow Test Admin ${uniqueSuffix}`;
+  const renamedMemberName = `Team Workflow Test Editor ${uniqueSuffix}`;
+
   // 3. POST /api/team/members creates a new member
   const addReq = createMockReqRes({
     method: "POST",
     url: "/api/team/members",
     headers: authHeaders,
-    body: { name: "David Admin", role: "Admin", password: "supersecret123" }
+    body: { name: memberName, role: "Admin", password: "supersecret123" }
   });
   await handleRequest(addReq.req, addReq.res);
   assert.equal(addReq.res.statusCode, 201);
   const addData = JSON.parse(addReq.res.body);
   assert.ok(addData.ok);
-  assert.equal(addData.member.name, "David Admin");
+  assert.equal(addData.member.name, memberName);
   assert.equal(addData.member.role, "Admin");
   assert.equal(addData.member.passwordHash, undefined);
   const davidId = addData.member.id;
@@ -115,7 +124,7 @@ test("team member API workflow: list, add, edit, password reset, and remove", as
   const newLogin = createMockReqRes({
     method: "POST",
     url: "/auth/login",
-    body: { login: "David Admin", password: "supersecret123" }
+    body: { login: memberName, password: "supersecret123" }
   });
   await handleRequest(newLogin.req, newLogin.res);
   assert.equal(newLogin.res.statusCode, 200);
@@ -125,7 +134,7 @@ test("team member API workflow: list, add, edit, password reset, and remove", as
     method: "POST",
     url: "/api/team/members",
     headers: authHeaders,
-    body: { name: "david admin", role: "Editor", password: "password123" }
+    body: { name: memberName.toLowerCase(), role: "Editor", password: "password123" }
   });
   await handleRequest(dupReq.req, dupReq.res);
   assert.equal(dupReq.res.statusCode, 409);
@@ -144,19 +153,19 @@ test("team member API workflow: list, add, edit, password reset, and remove", as
     method: "PUT",
     url: `/api/team/members/${davidId}`,
     headers: authHeaders,
-    body: { name: "David Lead", role: "Editor", password: "newpassword456" }
+    body: { name: renamedMemberName, role: "Editor", password: "newpassword456" }
   });
   await handleRequest(editReq.req, editReq.res);
   assert.equal(editReq.res.statusCode, 200);
   const editData = JSON.parse(editReq.res.body);
-  assert.equal(editData.member.name, "David Lead");
+  assert.equal(editData.member.name, renamedMemberName);
   assert.equal(editData.member.role, "Editor");
 
   // 7. Verify new password works
   const resetLogin = createMockReqRes({
     method: "POST",
     url: "/auth/login",
-    body: { login: "David Lead", password: "newpassword456" }
+    body: { login: renamedMemberName, password: "newpassword456" }
   });
   await handleRequest(resetLogin.req, resetLogin.res);
   assert.equal(resetLogin.res.statusCode, 200);
@@ -183,7 +192,7 @@ test("team member API workflow: list, add, edit, password reset, and remove", as
   const deletedLogin = createMockReqRes({
     method: "POST",
     url: "/auth/login",
-    body: { login: "David Lead", password: "newpassword456" }
+    body: { login: renamedMemberName, password: "newpassword456" }
   });
   await handleRequest(deletedLogin.req, deletedLogin.res);
   assert.equal(deletedLogin.res.statusCode, 401);
