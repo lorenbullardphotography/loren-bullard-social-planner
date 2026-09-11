@@ -7,6 +7,7 @@ import { deleteStored, getDatabaseClient, hasDirectDatabase, readStored, readSto
 import { applyWorkflowAutomations, normalizeWorkflowAutomations } from "./lib/workflow-automations.mjs";
 import { createPlannerRepository } from "./lib/planner-repository.mjs";
 import { createPlannerService } from "./lib/planner-service.mjs";
+import { handleUpload } from "@vercel/blob/client";
 
 // Row storage is additive and opt-in, activated in two separate stages —
 // with both unset (the default), every route below behaves exactly as it
@@ -438,6 +439,16 @@ async function blobUsage() {
     cursor = page.hasMore ? page.cursor : null;
   } while (cursor);
   return { configured: true, usedBytes, limitBytes: ASSET_STORAGE_LIMIT_MB * 1024 * 1024 };
+}
+export function isPlannerUploadPathname(pathname) {
+  return typeof pathname === "string" && pathname.startsWith("planner/");
+}
+export function allowedUploadContentType(clientPayload) {
+  const mime = String(clientPayload || "").toLowerCase();
+  return mime.startsWith("image/") || mime.startsWith("video/") ? mime : null;
+}
+export function remainingUploadBytes(usage) {
+  return Math.max(0, Number(usage?.limitBytes || 0) - Number(usage?.usedBytes || 0));
 }
 async function deleteBlobUrl(url) {
   if (!url || !url.includes(".blob.vercel-storage.com")) return;
@@ -1528,6 +1539,33 @@ export async function handleRequest(req, res) {
       if (result.error === "stale") return sendJson(res, 409, { error: "This item changed after that action and can no longer be safely undone.", code: "UNDO_STALE" });
       await touchTeamPresence(account);
       return sendJson(res, 200, result);
+    }
+
+    if (url.pathname === "/api/assets/upload-token" && req.method === "POST") {
+      if (!process.env.BLOB_READ_WRITE_TOKEN) {
+        return sendJson(res, 503, { error: "Vercel Blob is not connected to this production environment. Add BLOB_READ_WRITE_TOKEN under Production environment variables, then redeploy." });
+      }
+      const body = await readBody(req);
+      try {
+        const usage = await blobUsage();
+        const responseBody = await handleUpload({
+          body,
+          request: req,
+          onBeforeGenerateToken: async (pathname, clientPayload) => {
+            if (!isPlannerUploadPathname(pathname)) throw new Error("Invalid upload path.");
+            const mime = allowedUploadContentType(clientPayload);
+            if (!mime) throw new Error("Only images and reels are supported.");
+            return {
+              allowedContentTypes: [mime],
+              addRandomSuffix: false,
+              maximumSizeInBytes: remainingUploadBytes(usage)
+            };
+          }
+        });
+        return sendJson(res, 200, responseBody);
+      } catch (error) {
+        return sendJson(res, 400, { error: error.message || "Could not start the upload." });
+      }
     }
 
     if (url.pathname === "/api/assets" && req.method === "POST") {
