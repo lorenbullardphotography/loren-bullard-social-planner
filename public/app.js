@@ -901,49 +901,6 @@ function contentBriefMarkup(post) {
     </div>`;
 }
 
-async function readExifGps(file) {
-  try {
-    const bytes = new DataView(await file.arrayBuffer());
-    if (bytes.getUint16(0) !== 0xffd8) return null;
-    let offset = 2;
-    while (offset + 4 < bytes.byteLength) {
-      if (bytes.getUint8(offset) !== 0xff || bytes.getUint8(offset + 1) === 0xda) break;
-      const marker = bytes.getUint8(offset + 1), length = bytes.getUint16(offset + 2);
-      if (marker === 0xe1 && new TextDecoder().decode(new Uint8Array(bytes.buffer, bytes.byteOffset + offset + 4, 6)) === "Exif\0\0") {
-        return parseExifGps(bytes, offset + 10);
-      }
-      offset += 2 + length;
-    }
-  } catch {}
-  return null;
-}
-function parseExifGps(view, tiff) {
-  const little = view.getUint16(tiff) === 0x4949;
-  const u16 = o => view.getUint16(o, little), u32 = o => view.getUint32(o, little);
-  if (u16(tiff + 2) !== 42) return null;
-  const readIfd = at => {
-    const out = {};
-    if (!at || at + 2 > view.byteLength) return out;
-    const count = u16(at);
-    for (let i = 0; i < count; i++) {
-      const entry = at + 2 + i * 12; if (entry + 12 > view.byteLength) break;
-      const tag = u16(entry), type = u16(entry + 2), countValue = u32(entry + 4), size = type === 3 ? 2 : type === 4 ? 4 : type === 5 ? 8 : 1;
-      const valueAt = size * countValue <= 4 ? entry + 8 : tiff + u32(entry + 8);
-      if (tag === 0x8825) out.gps = tiff + u32(valueAt);
-      else if (tag === 1 || tag === 3) out[tag] = String.fromCharCode(...new Uint8Array(view.buffer, view.byteOffset + valueAt, Math.min(countValue, 2))).replace(/\0/g, "");
-      else if (tag === 2 || tag === 4) out[tag] = [0, 1, 2].map(i => { const p = valueAt + i * 8; return p + 8 <= view.byteLength ? u32(p) / (u32(p + 4) || 1) : 0; });
-    }
-    return out;
-  };
-  const main = readIfd(tiff + u32(tiff + 4)), gps = readIfd(main.gps);
-  if (!gps[1] || !gps[3] || !gps[2]?.length || !gps[4]?.length) return null;
-  const latitude = (gps[2][0] + gps[2][1] / 60 + gps[2][2] / 3600) * (gps[1] === "S" ? -1 : 1);
-  const longitude = (gps[4][0] + gps[4][1] / 60 + gps[4][2] / 3600) * (gps[3] === "W" ? -1 : 1);
-  return Number.isFinite(latitude) && Number.isFinite(longitude) ? { latitude, longitude } : null;
-}
-async function readExifGpsFromUrl(url) {
-  try { return readExifGps(new File([await (await fetch(url)).arrayBuffer()], "asset.jpg", { type: "image/jpeg" })); } catch { return null; }
-}
 function renderPlannerSettings() {
   const pillars = $("#settingsPillars");
   if (!pillars) return;
@@ -1598,7 +1555,7 @@ function renderInspector(hostSelector = "#inspector") {
   if (isCarousel) carouselSlide = Math.max(0, Math.min(carouselSlide, carouselImages(post).length - 1));
   if (post.status === "posted") {
     host.innerHTML = `<div class="editor"><button class="mobile-editor-close" type="button" aria-label="Close asset editor">×</button>
-      <div class="preview-wrap">${assetPreview(post)}</div>
+      <div class="preview-wrap">${assetPreview(post)}<button id="downloadOriginalAssetOverlay" class="preview-download-btn" type="button" aria-label="Download original asset" title="Download original asset"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button></div>
       <div class="posted-lock">This post is live on Instagram and stays locked in the grid.<br><br><b>${post.timestamp ? new Date(post.timestamp).toLocaleDateString() : "Posted"}</b>${post.permalink ? ` · <a href="${esc(post.permalink)}" target="_blank" rel="noopener noreferrer">Open on Instagram</a>` : ""}<br>${esc(formatSchedule(post))}${locationSummary(post)}</div>
       <label class="field">Caption<textarea rows="8" readonly>${esc(post.caption || "")}</textarea></label>
       <div class="handoff-actions"><button id="downloadOriginalAsset" class="ghost" type="button">↓ Download original asset</button><button id="downloadAssetDetails" class="ghost" type="button">↓ Download content details (.txt)</button></div>
@@ -1606,6 +1563,7 @@ function renderInspector(hostSelector = "#inspector") {
     wireVideoFallback(host);
     q(".mobile-editor-close")?.addEventListener("click", closeGridEditor);
     q("#downloadOriginalAsset").onclick = () => downloadAsset(post);
+    if (q("#downloadOriginalAssetOverlay")) q("#downloadOriginalAssetOverlay").onclick = () => downloadAsset(post);
     q("#downloadAssetDetails").onclick = () => downloadMetaTextFile(post);
     return;
   }
@@ -1614,11 +1572,10 @@ function renderInspector(hostSelector = "#inspector") {
   const workflowOptions = Object.entries(WORKFLOW_LABELS).map(([key, label]) => `<option value="${key}" ${workflowOf(post) === key ? "selected" : ""}>${label}</option>`).join("");
   const pillarOptions = `<option value="">Choose a pillar</option>` + settings.pillars.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${esc(pillar)}</option>`).join("");
   host.innerHTML = `<div class="editor editable-editor"><button class="mobile-editor-close" type="button" aria-label="Close asset editor">×</button><div class="editor-mobile-heading"><div><span class="eyebrow">EDITING SELECTED POST</span><b>${esc(post.caption || post.notes || assetTypeLabel(post))}</b></div><span>Swipe through fields below</span></div><div class="editor-scroll">
-    ${isCarousel ? `<div class="carousel-preview" aria-label="Carousel preview"><img class="carousel-slide" src="${esc(carouselImages(post)[carouselSlide] || post.image)}" alt="Carousel image ${carouselSlide + 1} of ${carouselCount}"><button id="carouselPrev" class="carousel-arrow carousel-prev" type="button" aria-label="Previous carousel image" ${carouselSlide === 0 ? "disabled" : ""}>‹</button><button id="carouselNext" class="carousel-arrow carousel-next" type="button" aria-label="Next carousel image" ${carouselSlide >= carouselCount - 1 ? "disabled" : ""}>›</button><span class="carousel-counter" aria-live="polite">${carouselSlide + 1} / ${carouselCount}</span></div>` : `<div class="preview-wrap${cropLocked ? "" : " crop-preview"}" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post, cropLocked)}${cropLocked ? "" : '<div class="crop-grid" aria-hidden="true"></div><span class="crop-hint">Drag to reposition</span><div class="crop-zoom-overlay"><span>Zoom</span><input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="' + Math.max(1, Math.min(3, Number(post.cropZoom) || 1)) + '" aria-label="Crop zoom"><output id="cropOverlayZoom">100%</output><button id="resetCrop" class="crop-overlay-reset" type="button" aria-label="Reset crop" title="Reset crop">↺</button></div>'}</div>`}
+    ${isCarousel ? `<div class="carousel-preview" aria-label="Carousel preview"><img class="carousel-slide" src="${esc(carouselImages(post)[carouselSlide] || post.image)}" alt="Carousel image ${carouselSlide + 1} of ${carouselCount}"><button id="carouselPrev" class="carousel-arrow carousel-prev" type="button" aria-label="Previous carousel image" ${carouselSlide === 0 ? "disabled" : ""}>‹</button><button id="carouselNext" class="carousel-arrow carousel-next" type="button" aria-label="Next carousel image" ${carouselSlide >= carouselCount - 1 ? "disabled" : ""}>›</button><span class="carousel-counter" aria-live="polite">${carouselSlide + 1} / ${carouselCount}</span><button id="downloadOriginalAssetOverlay" class="preview-download-btn" type="button" aria-label="Download original asset" title="Download original asset"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button></div>` : `<div class="preview-wrap${cropLocked ? "" : " crop-preview"}" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post, cropLocked)}${cropLocked ? "" : '<div class="crop-grid" aria-hidden="true"></div><span class="crop-hint">Drag to reposition</span><div class="crop-zoom-overlay"><span>Zoom</span><input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="' + Math.max(1, Math.min(3, Number(post.cropZoom) || 1)) + '" aria-label="Crop zoom"><output id="cropOverlayZoom">100%</output><button id="resetCrop" class="crop-overlay-reset" type="button" aria-label="Reset crop" title="Reset crop">↺</button></div>'}<button id="downloadOriginalAssetOverlay" class="preview-download-btn" type="button" aria-label="Download original asset" title="Download original asset"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button></div>`}
     <div class="asset-meta"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva" : "Uploaded"}</span>${hasReelCover(post) ? '<span class="asset-badge cover-badge">Cover attached</span>' : ""}</div>
-    <div class="handoff-actions"><button id="downloadOriginalAsset" class="ghost" type="button">↓ Download original asset</button><button id="downloadAssetDetails" class="ghost" type="button">↓ Download content details (.txt)</button></div>
     ${post.type === "REEL" || assetKindOf(post) === "video" ? `<div class="cover-card"><div><b>Reel cover photo</b><small>${post.coverImage ? "This image appears on the grid instead of the video frame." : "Add an image to choose the frame shown on the grid."}</small></div>${post.coverImage ? `<img class="cover-thumb" src="${esc(post.coverImage)}" alt="Reel cover photo">` : ""}<div class="handoff-actions"><label class="ghost button-link cover-upload-label">${post.coverImage ? "Replace cover" : "Upload cover photo"}<input id="coverInput" type="file" accept="image/*" hidden></label>${post.coverImage ? '<button id="removeCover" class="ghost" type="button">Remove cover</button>' : ""}</div><small id="coverHelp" class="field-help"></small></div>` : ""}
-    <div class="location-card"><div><b>Location tag</b><small>Add the place where this content was created.</small></div><label class="field nested">Location<input id="eLocation" maxlength="120" value="${esc(post.location || post.locationTag?.name || "")}" placeholder="Crystal Bridges, Bentonville"></label><button id="readLocationMetadata" class="ghost" type="button">⌖ Check photo metadata</button><small id="locationHelp" class="field-help">We’ll use the photo’s embedded location when available.</small></div>
+    <div class="location-card"><div><b>Location tag</b><small>Add the place where this content was created.</small></div><label class="field nested">Location<input id="eLocation" maxlength="120" value="${esc(post.location || post.locationTag?.name || "")}" placeholder="Crystal Bridges, Bentonville"></label></div>
     ${post.canvaUrl ? `<div class="canva-source"><b>Canva working draft</b><span>Preview refreshes from Canva when connected.</span><div class="handoff-actions"><a class="ghost button-link" href="${esc(post.canvaUrl)}" target="_blank" rel="noopener noreferrer">Open in Canva</a><button id="refreshCanva" class="ghost">Refresh preview</button></div></div>` : ""}
     <div class="two">
       <label class="field">Workflow<select id="eWorkflow">${workflowOptions}</select></label>
@@ -1646,8 +1603,9 @@ function renderInspector(hostSelector = "#inspector") {
     <div class="field">Comments<div class="comment-list">${comments || `<span style="text-transform:none;font-weight:400">No feedback yet.</span>`}</div>
       <div style="display:flex;gap:6px"><input id="commentText" placeholder="Add feedback as ${esc(currentUser.name)}…" style="flex:1"><button id="addComment" class="ghost">Add</button></div>
     </div>
-    <div class="handoff"><b>Meta Business Suite handoff</b><span>Use Meta for final scheduling and publishing.</span><div class="handoff-actions"><button id="copyCaption" class="ghost">Copy caption</button><button id="copyHashtags" class="ghost">Copy hashtags</button><a class="ghost button-link" href="https://business.facebook.com/latest/home" target="_blank" rel="noopener noreferrer">Open Meta</a></div><button id="markMeta" class="primary">Mark ready for Meta</button></div>
+    <div class="handoff"><b>Meta Business Suite handoff</b><span>Use Meta for final scheduling and publishing.</span><div class="handoff-actions"><button id="copyCaption" class="ghost">Copy caption</button><button id="copyHashtags" class="ghost">Copy hashtags</button></div><button id="markMeta" class="primary">Mark ready for Meta</button></div>
     <div class="posted-lock">Last updated${post.updatedBy ? ` by <b>${esc(post.updatedBy)}</b>` : ""}${post.updatedAt ? ` on ${new Date(post.updatedAt).toLocaleString()}` : ""}.</div>
+    <div class="handoff-actions"><button id="downloadOriginalAsset" class="ghost" type="button">↓ Download original asset</button><button id="downloadAssetDetails" class="ghost" type="button">↓ Download content details (.txt)</button></div>
     <div id="conflictPanelMount"></div>
     </div>
     <div class="actions"><button id="saveEdit" class="primary">Save</button><button id="deleteEdit" class="danger">Delete</button></div>
@@ -1945,6 +1903,10 @@ function renderInspector(hostSelector = "#inspector") {
   q("#copyCaption").onclick = () => copyText(post.caption, "Caption");
   q("#copyHashtags").onclick = () => copyText(post.hashtags, "Hashtags");
   q("#downloadOriginalAsset").onclick = () => downloadAsset(post);
+  if (q("#downloadOriginalAssetOverlay")) {
+    q("#downloadOriginalAssetOverlay").onpointerdown = event => event.stopPropagation();
+    q("#downloadOriginalAssetOverlay").onclick = () => downloadAsset(post);
+  }
   q("#downloadAssetDetails").onclick = () => downloadMetaTextFile(post);
   if (q("#refreshCanva")) q("#refreshCanva").onclick = () => refreshCanvaPreview(post, q("#refreshCanva"));
   if (q("#carouselPrev")) q("#carouselPrev").onclick = () => { carouselSlide = Math.max(0, carouselSlide - 1); renderInspector(hostSelector); };
@@ -1982,15 +1944,6 @@ function renderInspector(hostSelector = "#inspector") {
     applyWorkflow(updated, "ready-meta");
     const saved = await saveQuickAssetChanges(post, assetEditorChanges(assetEditorBaseline(post), updated), "marked content ready for Meta Business Suite");
     if (saved) { renderAll(); notify("Ready for Meta Business Suite"); }
-  };
-  q("#readLocationMetadata").onclick = async () => {
-    if (assetSourceOf(post) !== "uploaded" || assetKindOf(post) !== "image") return notify("GPS metadata is available for uploaded photos");
-    const gps = await readExifGpsFromUrl(post.image);
-    if (!gps) return notify("No location metadata found in this photo");
-    q("#eLocation").value = "Photo location";
-    q("#locationHelp").textContent = "Location metadata found. Replace this with the place name you want displayed.";
-    post.locationTag = { ...(post.locationTag || {}), source: "metadata" };
-    notify("Photo location found");
   };
   q("#addComment").onclick = async () => {
     const value = q("#commentText").value.trim();
@@ -2501,7 +2454,6 @@ $("#upload").onchange = async event => {
   try {
     for (const [index, file] of validFiles.entries()) {
       uploadStatus.textContent = "Uploading " + (index + 1) + " of " + validFiles.length + "…";
-      const photoGps = file.type.startsWith("image/") ? await readExifGps(file) : null;
       const uploaded = await uploadAssetFile(file);
       const id = crypto.randomUUID();
       firstId ||= id;
@@ -2519,8 +2471,8 @@ $("#upload").onchange = async event => {
         scheduleState: "draft",
         caption: "",
         notes: "",
-        location: photoGps ? "Photo location" : "",
-        locationTag: photoGps ? { name: "Photo location", latitude: photoGps.latitude, longitude: photoGps.longitude, source: "metadata" } : null,
+        location: "",
+        locationTag: null,
         tags: [],
         comments: [],
         updatedBy: currentUser.name,

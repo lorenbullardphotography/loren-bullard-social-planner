@@ -44,3 +44,14 @@ test("video previews carry a hidden fallback message and an error handler that r
   const css = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.preview-wrap \.video-fallback\{/);
 });
+
+test("preview-wrap and carousel-preview include a download overlay icon button with desktop hover and mobile display styles", () => {
+  const overlayButtons = appJs.match(/id="downloadOriginalAssetOverlay"/g) || [];
+  assert.ok(overlayButtons.length >= 2, "expected overlay button in both editable and posted previews");
+  assert.match(appJs, /class="preview-download-btn"/);
+  const css = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.preview-download-btn\{/);
+  assert.match(css, /\.preview-wrap:hover \.preview-download-btn/);
+  assert.match(css, /@media\(hover:none\)\{\.preview-download-btn\{opacity:1/);
+});
+
