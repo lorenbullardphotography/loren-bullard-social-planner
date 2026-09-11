@@ -64,9 +64,10 @@ async function uploadAssetFile(file) {
 
 Behavior:
 1. If `file.size > 30 * 1024 * 1024`, throw immediately (existing app-wide ceiling, unchanged).
-2. Attempt the direct-to-Blob path: generate `pathname = planner/${crypto.randomUUID()}.${extensionFor(file.type)}`, call `upload(pathname, file, { access: "public", handleUploadUrl: "/api/assets/upload-token", contentType: file.type, clientPayload: file.type })`. On success, return `{ url: result.url, kind: file.type.startsWith("video/") ? "video" : "image" }`.
-3. If the token endpoint responds `503` (Blob not configured — local dev without `BLOB_READ_WRITE_TOKEN`), fall back to today's path unchanged: `prepareUploadFile()` (still compresses images >3MB, still rejects videos >3MB) then `POST /api/assets` with base64 JSON. This fallback is a local-dev safety net, not the primary path, and is not expected to run in production once `BLOB_READ_WRITE_TOKEN` is set.
-4. Any other error (quota exceeded, disallowed type, network failure) surfaces to the caller as today.
+2. Check whether Blob is available by calling the existing `GET /api/storage/usage` endpoint (cached for the session after the first call), which already reports `{ configured, usedBytes, limitBytes }`. This decides the path up front rather than reacting to an error, because `@vercel/blob/client`'s browser `upload()` helper discards the real HTTP status/message when its internal token request fails — any non-2xx from `/api/assets/upload-token` surfaces to calling code only as a generic `"Failed to retrieve the client token"`, which is not something to pattern-match on.
+3. If `usage.configured` is `false` (Blob not configured — local dev without `BLOB_READ_WRITE_TOKEN`), fall back to today's path unchanged: `prepareUploadFile()` (still compresses images >3MB, still rejects videos >3MB) then `POST /api/assets` with base64 JSON. This fallback is a local-dev safety net, not the primary path, and is not expected to run in production once `BLOB_READ_WRITE_TOKEN` is set.
+4. If `usage.configured` is `true` but `usage.usedBytes + file.size > usage.limitBytes`, throw a clear client-side error ("Storage limit reached...") before attempting the upload, rather than letting that fail deep inside the SDK with the generic message above.
+5. Otherwise, attempt the direct-to-Blob path: generate `pathname = planner/${crypto.randomUUID()}.${extensionFor(file.type)}`, call `upload(pathname, file, { access: "public", handleUploadUrl: "/api/assets/upload-token", contentType: file.type, clientPayload: file.type })`. On success, return `{ url: result.url, kind: file.type.startsWith("video/") ? "video" : "image" }`. Any error this throws (network failure, or the rare race where quota was exceeded between the check in step 4 and now) surfaces via its own message, which may be the SDK's generic one in that edge case — acceptable since the common cases are caught earlier with clearer messages.
 
 All three call sites swap their existing upload logic for a call to `uploadAssetFile(file)` and keep their existing post-upload behavior (building the post object, attaching the cover image URL, pushing into `scratchAttachedImages`) unchanged.
 
@@ -124,7 +125,7 @@ This replaces `exportMetaData()`/`metaExportData()` (JSON), which are removed �
 ## Error handling
 
 - Direct-to-Blob upload failure (network, quota, disallowed type) surfaces the same way upload failures do today: a `notify(error.message)` toast, no post created.
-- `503` from `/api/assets/upload-token` is the *only* condition that triggers the base64 fallback; any other non-2xx response is treated as a real failure and surfaced to the user.
+- `usage.configured === false` from `GET /api/storage/usage` is the *only* condition that triggers the base64 fallback; any failure once the direct-to-Blob path has been chosen is treated as a real failure and surfaced to the user, not retried via the fallback.
 - Asset download failure (e.g. the stored file 404s) keeps today's behavior: `notify("The media file could not be downloaded")`.
 - Metadata text download has no network dependency (built from in-memory post data), so it has no failure path beyond the browser's own file-save mechanics.
 
