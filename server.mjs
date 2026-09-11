@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { deleteStored, getDatabaseClient, hasDirectDatabase, readStored, readStoredIds, storageMode, writeStored } from "./lib/store.mjs";
+import { deleteStored, getDatabaseClient, hasDirectDatabase, readStored, readStoredField, readStoredIds, storageMode, writeStored, writeStoredField } from "./lib/store.mjs";
 import { applyWorkflowAutomations, normalizeWorkflowAutomations } from "./lib/workflow-automations.mjs";
 import { createPlannerRepository } from "./lib/planner-repository.mjs";
 import { createPlannerService } from "./lib/planner-service.mjs";
@@ -721,18 +721,39 @@ async function readPlanner() {
   };
 }
 
-function upsertTeamMember(planner, actor = {}) {
-  if (!actor?.name) return;
+function nextTeamRoster(team, actor = {}) {
+  if (!actor?.name) return team;
   const name = String(actor.name).slice(0, 80);
   const role = String(actor.role || "Admin").slice(0, 40);
-  const existing = planner.team.find(member => member.name.toLowerCase() === name.toLowerCase());
+  const existing = team.find(member => member.name.toLowerCase() === name.toLowerCase());
   if (existing) {
-    existing.role = role;
-    existing.lastSeenAt = new Date().toISOString();
-    return;
+    return team.map(member => member === existing ? { ...member, role, lastSeenAt: new Date().toISOString() } : member);
   }
-  planner.team.unshift({ name, role, lastSeenAt: new Date().toISOString() });
-  planner.team = planner.team.slice(0, 12);
+  return [{ name, role, lastSeenAt: new Date().toISOString() }, ...team].slice(0, 12);
+}
+
+function upsertTeamMember(planner, actor = {}) {
+  planner.team = nextTeamRoster(planner.team, actor);
+}
+
+// The "recently active" roster (shown as "N teammates in this planner") only
+// ever got refreshed by legacy whole-document writes — every row-storage
+// save (which is every ordinary save now that writes are active) never
+// touched it, so it went stale the moment someone's activity was entirely
+// row-storage saves. Reads/writes just the `team` field of the legacy
+// document via readStoredField/writeStoredField rather than the whole
+// planner-data document, which real production data has grown to hundreds
+// of KB — doing a full read+write here on every single save would undo the
+// egress fix made for exactly this class of cost. Best-effort: this is a
+// cosmetic presence indicator, never worth failing an actual content save
+// over.
+async function touchTeamPresence(actor) {
+  if (!actor?.name) return;
+  try {
+    const currentTeam = await readStoredField("planner-data", "team", []);
+    const nextTeam = nextTeamRoster(Array.isArray(currentTeam) ? currentTeam : [], actor);
+    await writeStoredField("planner-data", "team", nextTeam);
+  } catch {}
 }
 
 function addActivity(planner, text) {
@@ -1384,6 +1405,7 @@ export async function handleRequest(req, res) {
         if (result.error === "not-found") return sendJson(res, 404, { error: "This asset was removed by a teammate." });
         if (result.error === "no-changes") return sendJson(res, 400, { error: "Choose at least one asset field to update." });
         if (result.error === "conflict") return sendJson(res, 409, { error: "This asset changed while you were editing it.", code: "ASSET_FIELD_CONFLICT", asset: result.asset, conflicts: result.conflicts });
+        await touchTeamPresence(body.actor || account);
         return sendJson(res, 200, { asset: result.asset, merged: result.merged });
       }
       return withPlannerMutation(async () => {
@@ -1417,6 +1439,7 @@ export async function handleRequest(req, res) {
       if (!body?.asset || typeof body.asset !== "object") return sendJson(res, 400, { error: "An asset payload is required." });
       const result = await withPlannerDiagnostics("asset.create", () => plannerService.createAsset({ asset: body.asset, actor: body.actor || account, reason: body.reason }));
       if (result.error === "id-in-use") return sendJson(res, 409, { error: "An asset with that id already exists." });
+      await touchTeamPresence(body.actor || account);
       return sendJson(res, 201, { asset: result.asset });
     }
 
@@ -1428,6 +1451,7 @@ export async function handleRequest(req, res) {
       const body = await readBody(req);
       const result = await withPlannerDiagnostics("asset.delete", () => plannerService.deleteAsset({ id: assetId, actor: body.actor || account, reason: body.reason }));
       if (result.error === "not-found") return sendJson(res, 404, { error: "This asset was already removed." });
+      await touchTeamPresence(body.actor || account);
       return sendJson(res, 200, { ok: true, id: result.id });
     }
 
@@ -1442,6 +1466,7 @@ export async function handleRequest(req, res) {
       }));
       if (result.error === "not-found") return sendJson(res, 404, { error: "This asset was removed by a teammate." });
       if (result.error === "neighbor-not-found") return sendJson(res, 409, { error: "The grid changed while you were dragging. Refresh to see the latest order." });
+      await touchTeamPresence(body.actor || account);
       return sendJson(res, 200, { asset: result.asset, affected: result.affected, changeToken: result.changeToken });
     }
 
@@ -1452,6 +1477,7 @@ export async function handleRequest(req, res) {
       const body = await readBody(req);
       if (!body?.idea || typeof body.idea !== "object") return sendJson(res, 400, { error: "An idea payload is required." });
       const result = await withPlannerDiagnostics("idea.create", () => plannerService.createIdea({ idea: body.idea, actor: body.actor || account, reason: body.reason }));
+      await touchTeamPresence(body.actor || account);
       return sendJson(res, 201, { idea: result.idea, revision: result.revision });
     }
 
@@ -1464,6 +1490,7 @@ export async function handleRequest(req, res) {
       const result = await withPlannerDiagnostics("idea.patch", () => plannerService.patchIdea({ id: ideaId, revision: body.revision, changes: body.changes || {}, actor: body.actor || account, reason: body.reason }));
       if (result.error === "not-found") return sendJson(res, 404, { error: "This idea was removed by a teammate." });
       if (result.error === "conflict") return sendJson(res, 409, { error: "This idea changed while you were editing it.", code: "IDEA_CONFLICT", idea: result.idea, revision: result.revision });
+      await touchTeamPresence(body.actor || account);
       return sendJson(res, 200, { idea: result.idea, revision: result.revision });
     }
 
@@ -1475,6 +1502,7 @@ export async function handleRequest(req, res) {
       const body = await readBody(req);
       const result = await withPlannerDiagnostics("idea.delete", () => plannerService.deleteIdea({ id: ideaId, actor: body.actor || account, reason: body.reason }));
       if (result.error === "not-found") return sendJson(res, 404, { error: "This idea was already removed." });
+      await touchTeamPresence(body.actor || account);
       return sendJson(res, 200, { ok: true, id: result.id });
     }
 
@@ -1485,6 +1513,7 @@ export async function handleRequest(req, res) {
       const body = await readBody(req);
       const result = await withPlannerDiagnostics("settings.patch", () => plannerService.patchSettings({ revision: body.revision, changes: body.changes || {}, actor: body.actor || account }));
       if (result.error === "conflict") return sendJson(res, 409, { error: "Settings changed in another browser.", code: "SETTINGS_CONFLICT", settings: result.settings, revision: result.revision });
+      await touchTeamPresence(body.actor || account);
       return sendJson(res, 200, { settings: result.settings, revision: result.revision });
     }
 
@@ -1497,6 +1526,7 @@ export async function handleRequest(req, res) {
       if (result.error === "not-found") return sendJson(res, 404, { error: "That activity could no longer be found." });
       if (result.error === "not-reversible") return sendJson(res, 400, { error: "This activity can no longer be undone.", code: "UNDO_NOT_REVERSIBLE" });
       if (result.error === "stale") return sendJson(res, 409, { error: "This item changed after that action and can no longer be safely undone.", code: "UNDO_STALE" });
+      await touchTeamPresence(account);
       return sendJson(res, 200, result);
     }
 

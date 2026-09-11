@@ -136,6 +136,21 @@ if (scenario === "concurrent-different-assets") {
   const put = await call("PUT", "/api/planner", { version: planner.json.version, posts: planner.json.posts, scratch: planner.json.scratch, settings: planner.json.settings, actor: { name: "Loren" }, reason: "test" }, cookie);
   const adminImport = await call("PUT", "/api/planner", { version: planner.json.version, posts: planner.json.posts, scratch: planner.json.scratch, settings: planner.json.settings, actor: { name: adminName }, reason: "test", adminImport: true }, adminCookie);
   console.log(JSON.stringify({ ordinaryPut: put.status, adminImportPut: adminImport.status }));
+} else if (scenario === "row-storage-save-updates-team-presence") {
+  // Regression test: the "N teammates in this planner" roster only ever
+  // got refreshed by legacy whole-document writes. Every ordinary save now
+  // goes through row storage instead, which never touched it - so it went
+  // stale the moment someone's activity was entirely row-storage saves.
+  const actorName = `Presence Test Actor ${Date.now()}`;
+  const before = await call("GET", "/api/planner", undefined, cookie);
+  const created = await call("POST", "/api/planner/assets", { asset: { image: "/team-presence.jpg", caption: "x" }, actor: { name: actorName, role: "Social Media Manager" } }, cookie);
+  const after = await call("GET", "/api/planner", undefined, cookie);
+  console.log(JSON.stringify({
+    createStatus: created.status,
+    actorName,
+    inRosterBefore: (before.json.team || []).some(m => m.name === actorName),
+    inRosterAfter: (after.json.team || []).some(m => m.name === actorName)
+  }));
 } else if (scenario === "asset-patch-appears-in-activity-feed") {
   // Regression test: a real caption edit through the row-storage endpoints
   // must show up in GET /api/planner/activity, the feed the Team Activity

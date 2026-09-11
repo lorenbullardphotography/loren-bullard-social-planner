@@ -192,6 +192,14 @@ test("row storage: an Admin's imported backup actually shows up after reload", {
   assert.equal(result.postCountAfter, 1, "the import should have replaced the planner's posts, not left row storage's untouched");
 });
 
+test("row storage: a save touches the 'recently active teammates' roster", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema();
+  const result = runScenario("row-storage-save-updates-team-presence");
+  assert.equal(result.createStatus, 201);
+  assert.equal(result.inRosterBefore, false);
+  assert.equal(result.inRosterAfter, true, `expected the actor to appear in the roster after their save, got: ${JSON.stringify(result)}`);
+});
+
 // --- Task 10: safe operation diagnostics ---
 
 test("buildPlannerDiagnostic contains only operation name, duration, outcome, and feature-flag state", () => {
