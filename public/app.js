@@ -1243,46 +1243,42 @@ function renderGrid() {
         // On desktop, editing a tile should never accidentally start a reorder.
         // The drag handle is the explicit affordance for mouse and trackpad input.
         if (event.pointerType === "mouse" && !event.target.closest(".handle")) return;
-        touchDrag = { id: post.id, node, x: event.clientX, y: event.clientY, moved: false, timer: null };
-        const delay = event.pointerType === "mouse" ? 100 : 220;
+        touchDrag = {
+          id: post.id,
+          node,
+          x: event.clientX,
+          y: event.clientY,
+          moved: false,
+          timer: null,
+          pointerId: event.pointerId
+        };
+        const delay = event.pointerType === "mouse" ? 80 : 220;
         touchDrag.timer = setTimeout(() => {
           if (!touchDrag || touchDrag.node !== node) return;
-          touchDrag.active = true;
-          node.classList.add("dragging");
-          node.setPointerCapture(event.pointerId);
-          event.preventDefault();
+          activateGridDrag(touchDrag, event);
         }, delay);
       });
       node.addEventListener("pointermove", event => {
         if (!touchDrag || touchDrag.node !== node) return;
         const distance = Math.hypot(event.clientX - touchDrag.x, event.clientY - touchDrag.y);
         if (!touchDrag.active) {
-          if (event.pointerType === "mouse" && distance > 6) {
+          if (event.pointerType === "mouse" && distance > 4) {
             clearTimeout(touchDrag.timer);
-            touchDrag.active = true;
-            node.classList.add("dragging");
-            node.setPointerCapture(event.pointerId);
-          } else if (distance > 10) clearTimeout(touchDrag.timer);
+            activateGridDrag(touchDrag, event);
+          } else if (distance > 10) {
+            clearTimeout(touchDrag.timer);
+          }
           return;
         }
-        touchDrag.moved = true;
-        event.preventDefault();
-        $$(".tile").forEach(tile => tile.classList.remove("target"));
-        const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".tile");
-        if (target && target !== node && target.dataset.status !== "posted") target.classList.add("target");
+        updateGridDragMove(touchDrag, event);
       });
       const finishTouchDrag = async event => {
         if (!touchDrag || touchDrag.node !== node) return;
         clearTimeout(touchDrag.timer);
         const state = touchDrag;
         touchDrag = null;
-        node.classList.remove("dragging");
-        $$(".tile").forEach(tile => tile.classList.remove("target"));
         if (!state.active) return;
-        suppressTileClickUntil = Date.now() + 450;
-        event.preventDefault();
-        const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".tile");
-        if (target && target.dataset.status !== "posted") await reorder(state.id, target.dataset.id);
+        await completeGridDrag(state, event);
       };
       node.addEventListener("pointerup", finishTouchDrag);
       node.addEventListener("pointercancel", finishTouchDrag);
@@ -1290,6 +1286,120 @@ function renderGrid() {
     grid.appendChild(node);
   }
   $("#gridEmpty").classList.toggle("hidden", ordered().length > 0);
+}
+
+function activateGridDrag(state, event) {
+  const futureTiles = $$("#grid .tile:not([data-status='posted'])");
+  const slotRects = futureTiles.map(el => el.getBoundingClientRect());
+  const fromIndex = futureTiles.findIndex(el => el === state.node);
+  if (fromIndex < 0 || !slotRects[fromIndex]) return;
+
+  state.active = true;
+  state.futureTiles = futureTiles;
+  state.slotRects = slotRects;
+  state.fromIndex = fromIndex;
+  state.currentIndex = fromIndex;
+  state.originRect = slotRects[fromIndex];
+
+  state.node.classList.add("dragging");
+  $("#grid")?.classList.add("is-reordering");
+  state.node.style.transition = "none";
+  state.node.style.zIndex = "50";
+  try {
+    state.node.setPointerCapture(state.pointerId);
+  } catch {}
+  if (navigator.vibrate) {
+    try { navigator.vibrate(15); } catch {}
+  }
+}
+
+function updateGridDragMove(state, event) {
+  state.moved = true;
+  event.preventDefault();
+  const dx = event.clientX - state.x;
+  const dy = event.clientY - state.y;
+
+  state.node.style.transform = `translate3d(${dx}px, ${dy}px, 0) scale(1.05)`;
+
+  const dragCenterX = state.originRect.left + dx + state.originRect.width / 2;
+  const dragCenterY = state.originRect.top + dy + state.originRect.height / 2;
+
+  let bestIndex = state.fromIndex;
+  let bestDistSq = Infinity;
+
+  for (let k = 0; k < state.slotRects.length; k++) {
+    const rect = state.slotRects[k];
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const distSq = (dragCenterX - centerX) ** 2 + (dragCenterY - centerY) ** 2;
+    if (distSq < bestDistSq) {
+      bestDistSq = distSq;
+      bestIndex = k;
+    }
+  }
+
+  if (bestIndex !== state.currentIndex) {
+    state.currentIndex = bestIndex;
+
+    state.futureTiles.forEach((tileEl, i) => {
+      if (i === state.fromIndex) return;
+      let targetSlot = i;
+      if (state.fromIndex < state.currentIndex) {
+        if (i > state.fromIndex && i <= state.currentIndex) targetSlot = i - 1;
+      } else if (state.fromIndex > state.currentIndex) {
+        if (i >= state.currentIndex && i < state.fromIndex) targetSlot = i + 1;
+      }
+
+      if (targetSlot === i) {
+        tileEl.style.transform = "";
+      } else {
+        const shiftX = state.slotRects[targetSlot].left - state.slotRects[i].left;
+        const shiftY = state.slotRects[targetSlot].top - state.slotRects[i].top;
+        tileEl.style.transform = `translate3d(${shiftX}px, ${shiftY}px, 0)`;
+      }
+    });
+  }
+}
+
+async function completeGridDrag(state, event) {
+  try {
+    state.node.releasePointerCapture(state.pointerId);
+  } catch {}
+  $("#grid")?.classList.remove("is-reordering");
+  suppressTileClickUntil = Date.now() + 450;
+  if (event) event.preventDefault();
+
+  const fromIndex = state.fromIndex;
+  const toIndex = state.currentIndex;
+
+  if (toIndex === fromIndex || toIndex < 0 || toIndex >= (state.futureTiles?.length || 0)) {
+    state.node.style.transition = "transform 0.22s cubic-bezier(.2,.8,.2,1), box-shadow 0.22s ease";
+    state.node.style.transform = "";
+    state.node.style.boxShadow = "";
+    setTimeout(() => {
+      state.node.classList.remove("dragging");
+      state.node.style.transition = "";
+      state.node.style.zIndex = "";
+      state.futureTiles?.forEach(t => { t.style.transform = ""; });
+    }, 220);
+    return;
+  }
+
+  const landX = state.slotRects[toIndex].left - state.slotRects[fromIndex].left;
+  const landY = state.slotRects[toIndex].top - state.slotRects[fromIndex].top;
+
+  state.node.style.transition = "transform 0.22s cubic-bezier(.2,.8,.2,1), box-shadow 0.22s ease";
+  state.node.style.transform = `translate3d(${landX}px, ${landY}px, 0) scale(1)`;
+  state.node.style.boxShadow = "";
+
+  setTimeout(async () => {
+    state.node.classList.remove("dragging");
+    state.node.style.transition = "";
+    state.node.style.zIndex = "";
+    state.node.style.transform = "";
+    state.futureTiles?.forEach(t => { t.style.transform = ""; });
+    await reorder(state.id, toIndex);
+  }, 220);
 }
 
 function setGridEditorOpen(open) {
@@ -1305,21 +1415,24 @@ function closeGridEditor() {
 }
 
 async function reorder(a, b) {
-  if (!a || a === b) return;
+  if (!a) return;
   const futurePosts = future();
   const donePosts = posted();
   const fromIndex = futurePosts.findIndex(post => post.id === a);
-  const toIndex = futurePosts.findIndex(post => post.id === b);
-  if (fromIndex < 0 || toIndex < 0) return;
+  if (fromIndex < 0) return;
+
+  const toIndex = typeof b === "number"
+    ? Math.max(0, Math.min(futurePosts.length - 1, b))
+    : futurePosts.findIndex(post => post.id === b);
+  if (toIndex < 0 || fromIndex === toIndex) return;
 
   // Neighbor ids for the server-authoritative reorder call, computed from
   // the drop target's position with the moved tile conceptually removed
   // first (so it's correct regardless of whether a started before or
   // after b in the list).
   const withoutMoved = futurePosts.filter(post => post.id !== a).map(post => post.id);
-  const targetIndex = withoutMoved.indexOf(b);
-  const beforeId = targetIndex > 0 ? withoutMoved[targetIndex - 1] : null;
-  const afterId = b;
+  const beforeId = toIndex > 0 ? withoutMoved[toIndex - 1] : null;
+  const afterId = toIndex < withoutMoved.length ? withoutMoved[toIndex] : null;
 
   const [moved] = futurePosts.splice(fromIndex, 1);
   futurePosts.splice(toIndex, 0, { ...moved, updatedBy: currentUser.name, updatedAt: new Date().toISOString() });
