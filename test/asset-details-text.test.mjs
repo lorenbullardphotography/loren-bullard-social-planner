@@ -14,7 +14,7 @@ function appJsHelpers() {
     URL,
     Date
   };
-  vm.runInNewContext(`${helpers}\nthis.helpers = { assetDetailsText };`, context);
+  vm.runInNewContext(`${helpers}\nthis.helpers = { assetDetailsText, extensionForMime };`, context);
   return context.helpers;
 }
 
@@ -44,4 +44,12 @@ test("assetDetailsText falls back to the location tag name when location is unse
   const { assetDetailsText } = appJsHelpers();
   const text = assetDetailsText({ type: "IMAGE", locationTag: { name: "Crystal Bridges" } });
   assert.match(text, /^Location: Crystal Bridges$/m);
+});
+
+test("extensionForMime maps common mime types to file extensions", () => {
+  const { extensionForMime } = appJsHelpers();
+  assert.equal(extensionForMime("image/jpeg"), "jpeg");
+  assert.equal(extensionForMime("image/png"), "png");
+  assert.equal(extensionForMime("video/mp4"), "mp4");
+  assert.equal(extensionForMime("video/quicktime"), "mov");
 });

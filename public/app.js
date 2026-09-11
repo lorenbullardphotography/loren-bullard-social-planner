@@ -84,6 +84,10 @@ function assetTypeLabel(post) {
   const type = (post.canvaDesignTypes || []).map(value => labels[value] || value).filter(Boolean)[0];
   return type || (assetSourceOf(post) === "canva" ? "Canva Design" : "Image");
 }
+function extensionForMime(mime) {
+  if (mime === "video/quicktime") return "mov";
+  return (mime.split("/")[1] || "bin").replace(/[^a-z0-9]/g, "");
+}
 function needsCanvaPreviewRefresh(post) {
   if (assetSourceOf(post) !== "canva") return false;
   if (!post.image || !post.canvaPreviewUpdatedAt) return true;
@@ -2281,9 +2285,12 @@ async function readFile(file) {
 }
 
 async function prepareUploadFile(file) {
-  // Vercel Functions accept only a 4.5 MB request body. Because the upload is
-  // sent as base64 JSON, keep browser-compressed photos below 3 MB so normal
-  // camera images do not hit that platform limit.
+  // Only reached as uploadAssetFile()'s local-dev fallback when Vercel Blob
+  // isn't configured. That path still proxies through the serverless
+  // function as base64 JSON, which caps request bodies at 4.5 MB — so
+  // browser-compressed photos need to stay below 3 MB. The primary path
+  // (Blob configured) uploads directly to Blob storage at full quality;
+  // see uploadAssetFile() below.
   if (!file.type.startsWith("image/") || file.size <= 3 * 1024 * 1024) return file;
   try {
     const bitmap = await createImageBitmap(file);
@@ -2297,6 +2304,40 @@ async function prepareUploadFile(file) {
     if (blob && blob.size < file.size) return new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" });
   } catch {}
   return file;
+}
+
+let blobUploadPromise = null;
+function loadBlobUpload() {
+  if (!blobUploadPromise) blobUploadPromise = import("https://esm.sh/@vercel/blob@2.8.0/client").then(mod => mod.upload);
+  return blobUploadPromise;
+}
+
+let storageUsagePromise = null;
+function getStorageUsage() {
+  if (!storageUsagePromise) storageUsagePromise = api("/api/storage/usage").catch(() => ({ configured: false, usedBytes: 0, limitBytes: 0 }));
+  return storageUsagePromise;
+}
+
+async function uploadAssetFile(file) {
+  if (file.size > 30 * 1024 * 1024) throw new Error("Assets must be 30 MB or smaller.");
+  const usage = await getStorageUsage();
+  if (usage.configured) {
+    if (usage.usedBytes + file.size > usage.limitBytes) {
+      throw new Error(`Storage limit reached. ${Math.max(0, usage.limitBytes - usage.usedBytes)} bytes remain.`);
+    }
+    const upload = await loadBlobUpload();
+    const pathname = `planner/${crypto.randomUUID()}.${extensionForMime(file.type)}`;
+    const result = await upload(pathname, file, {
+      access: "public",
+      handleUploadUrl: "/api/assets/upload-token",
+      contentType: file.type,
+      clientPayload: file.type
+    });
+    return { url: result.url, kind: file.type.startsWith("video/") ? "video" : "image" };
+  }
+  const uploadFile = await prepareUploadFile(file);
+  if (uploadFile.size > 3 * 1024 * 1024) throw new Error("This asset is too large for the hosted upload connection. Photos are compressed automatically; videos must be under 3 MB.");
+  return api("/api/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: uploadFile.name, data: await readFile(uploadFile) }) });
 }
 
 $("#upload").onchange = async event => {

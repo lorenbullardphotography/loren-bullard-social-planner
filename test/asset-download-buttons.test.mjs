@@ -18,3 +18,8 @@ test("removes the redundant approval-gated Meta handoff download/export code", (
   assert.doesNotMatch(appJs, /id="downloadApprovedAsset"/);
   assert.doesNotMatch(appJs, /id="exportMetaData"/);
 });
+
+test("loads the Vercel Blob client upload helper via esm.sh, pinned to the installed package version", () => {
+  const { version } = JSON.parse(fs.readFileSync(new URL("../node_modules/@vercel/blob/package.json", import.meta.url)));
+  assert.match(appJs, new RegExp(`https://esm\\.sh/@vercel/blob@${version}/client`));
+});
