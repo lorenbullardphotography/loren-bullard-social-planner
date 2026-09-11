@@ -1556,9 +1556,12 @@ function renderInspector(hostSelector = "#inspector") {
   if (post.status === "posted") {
     host.innerHTML = `<div class="editor"><button class="mobile-editor-close" type="button" aria-label="Close asset editor">×</button>
       <div class="preview-wrap">${assetPreview(post)}<button id="downloadOriginalAssetOverlay" class="preview-download-btn" type="button" aria-label="Download original asset" title="Download original asset"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button></div>
-      <div class="posted-lock">This post is live on Instagram and stays locked in the grid.<br><br><b>${post.timestamp ? new Date(post.timestamp).toLocaleDateString() : "Posted"}</b>${post.permalink ? ` · <a href="${esc(post.permalink)}" target="_blank" rel="noopener noreferrer">Open on Instagram</a>` : ""}<br>${esc(formatSchedule(post))}${locationSummary(post)}</div>
       <label class="field">Caption<textarea rows="8" readonly>${esc(post.caption || "")}</textarea></label>
-      <div class="handoff-actions"><button id="downloadOriginalAsset" class="ghost" type="button">↓ Download original asset</button><button id="downloadAssetDetails" class="ghost" type="button">↓ Download content details (.txt)</button></div>
+      <div class="asset-downloads-card">
+        <button id="downloadOriginalAsset" class="download-action-btn" type="button"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download original asset</span></button>
+        <button id="downloadAssetDetails" class="download-action-btn" type="button"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg><span>Download content details (.txt)</span></button>
+      </div>
+      <div class="posted-lock">This post is live on Instagram and stays locked in the grid.<br><br><b>${post.timestamp ? new Date(post.timestamp).toLocaleDateString() : "Posted"}</b>${post.permalink ? ` · <a href="${esc(post.permalink)}" target="_blank" rel="noopener noreferrer">Open on Instagram</a>` : ""}<br>${esc(formatSchedule(post))}${locationSummary(post)}</div>
     </div>`;
     wireVideoFallback(host);
     q(".mobile-editor-close")?.addEventListener("click", closeGridEditor);
@@ -1604,8 +1607,11 @@ function renderInspector(hostSelector = "#inspector") {
       <div style="display:flex;gap:6px"><input id="commentText" placeholder="Add feedback as ${esc(currentUser.name)}…" style="flex:1"><button id="addComment" class="ghost">Add</button></div>
     </div>
     <div class="handoff"><b>Meta Business Suite handoff</b><span>Use Meta for final scheduling and publishing.</span><div class="handoff-actions"><button id="copyCaption" class="ghost">Copy caption</button><button id="copyHashtags" class="ghost">Copy hashtags</button></div><button id="markMeta" class="primary">Mark ready for Meta</button></div>
+    <div class="asset-downloads-card">
+      <button id="downloadOriginalAsset" class="download-action-btn" type="button"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download original asset</span></button>
+      <button id="downloadAssetDetails" class="download-action-btn" type="button"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg><span>Download content details (.txt)</span></button>
+    </div>
     <div class="posted-lock">Last updated${post.updatedBy ? ` by <b>${esc(post.updatedBy)}</b>` : ""}${post.updatedAt ? ` on ${new Date(post.updatedAt).toLocaleString()}` : ""}.</div>
-    <div class="handoff-actions"><button id="downloadOriginalAsset" class="ghost" type="button">↓ Download original asset</button><button id="downloadAssetDetails" class="ghost" type="button">↓ Download content details (.txt)</button></div>
     <div id="conflictPanelMount"></div>
     </div>
     <div class="actions"><button id="saveEdit" class="primary">Save</button><button id="deleteEdit" class="danger">Delete</button></div>
