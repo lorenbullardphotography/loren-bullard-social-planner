@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { deleteStored, getDatabaseClient, hasDirectDatabase, readStored, storageMode, writeStored } from "./lib/store.mjs";
+import { deleteStored, getDatabaseClient, hasDirectDatabase, readStored, readStoredIds, storageMode, writeStored } from "./lib/store.mjs";
 import { applyWorkflowAutomations, normalizeWorkflowAutomations } from "./lib/workflow-automations.mjs";
 import { createPlannerRepository } from "./lib/planner-repository.mjs";
 import { createPlannerService } from "./lib/planner-service.mjs";
@@ -1125,10 +1125,17 @@ export async function handleRequest(req, res) {
 
     if (url.pathname === "/api/planner" && req.method === "GET") {
       const planner = await readPlanner();
-      const rollbackHistory = await readRollbackHistory();
+      // Every reversible activity's rollback snapshot is a full deep clone
+      // of the entire planner (see saveRollbackSnapshot) — with real
+      // production content that made planner-rollback-history several
+      // megabytes, and this route runs on every single page load. Only the
+      // *existence* of a still-current snapshot is needed here (to decide
+      // whether to show an Undo button), never its contents, so this reads
+      // just the ids instead of the full history — see readStoredIds.
+      const rollbackIds = new Set(await readStoredIds("planner-rollback-history"));
       planner.activity = planner.activity.map(item => ({
         ...item,
-        reversible: Boolean(item.reversible && rollbackHistory.some(record => record.id === item.rollbackId))
+        reversible: Boolean(item.reversible && rollbackIds.has(item.rollbackId))
       }));
       // Once row storage is serving reads, it's the source of truth for
       // everything ordinary saves touch (assets/ideas/settings) — the
