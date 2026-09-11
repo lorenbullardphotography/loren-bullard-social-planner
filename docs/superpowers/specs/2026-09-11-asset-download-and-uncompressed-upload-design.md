@@ -6,13 +6,14 @@ Let users download the original asset file (image or reel) and a human-readable 
 
 ## Scope
 
-Covers: the upload path for grid assets, reel cover photos, and Scratch Book reference photos; the shared editor UI (`renderInspector`, used for both the grid's docked inspector and the standalone "Asset Workspace" view); a new metadata text export. Does not change the existing approval-gated "Meta Business Suite handoff" JSON export (`exportMetaData`), Canva-sourced asset handling, or the 30MB per-file storage ceiling.
+Covers: the upload path for grid assets, reel cover photos, and Scratch Book reference photos; the shared editor UI (`renderInspector`, used for both the grid's docked inspector and the standalone "Asset Workspace" view); a new metadata text export; simplifying the "Meta Business Suite handoff" section's now-redundant download/export buttons. Does not change Canva-sourced asset handling or the 30MB per-file storage ceiling.
 
 ## Current problem
 
 1. **Upload compression.** `prepareUploadFile()` in `public/app.js` resizes and re-encodes (JPEG quality 0.84) any image over 3MB before upload, and rejects any video over 3MB outright. This exists only because uploads are sent as base64 JSON to a Vercel serverless function, which caps request bodies at 4.5MB. It is not a deliberate quality decision — it is a side effect of the transport mechanism.
 2. **No general download.** `downloadAsset()` and `exportMetaData()` already exist and are already lossless (they fetch the stored blob directly, no re-encoding), but both are hidden behind `approvedForMeta(post)` inside the Meta handoff section — so most assets, at most workflow stages, have no download option at all.
 3. **No human-readable metadata export.** The only metadata export today is JSON shaped for a Meta Business Suite handoff, not for someone who just wants to read the caption/tags/notes in a text file.
+4. **Redundant handoff buttons once the above ship.** Once asset download is available everywhere and unapproval-gated, the Meta handoff section's "Download approved media" button becomes a byte-for-byte duplicate of it (same underlying `downloadAsset()` call, just gated). Its "Export Meta data" (JSON) button covers the same fields as the new metadata text file, just in a different, machine-oriented shape that nothing in this codebase reads back in. Keeping both pairs around would be confusing and contradictory (two "download the media" buttons that may or may not be visible depending on approval status, doing the same thing).
 
 ## Part 1: Uncompressed uploads via direct-to-Blob upload
 
@@ -75,12 +76,20 @@ All three call sites swap their existing upload logic for a call to `uploadAsset
 
 Inside `renderInspector()` in `public/app.js`, which renders the same editor markup into both `#inspector` (grid view's docked panel) and `#postEditor` (standalone "Asset Workspace" view) — adding it once covers both surfaces the user referred to as "grid view edit" and "asset edit view". Also added to the read-only markup shown for `post.status === "posted"`, since downloading the original of something already live is a common need.
 
-Two buttons, shown for every post regardless of approval/workflow state (unlike the existing Meta-handoff buttons, which stay approval-gated and unchanged):
+Two buttons, shown for every post regardless of approval/workflow state:
 
 - **"↓ Download original asset"**
 - **"↓ Download content details (.txt)"**
 
-Placed in their own small section near the asset preview, separate from the approval-gated "Meta Business Suite handoff" block.
+Placed in their own small section near the asset preview, separate from the "Meta Business Suite handoff" block.
+
+### Simplifying the Meta handoff section
+
+The handoff section's `approvedForMeta(post) ? '<button id="downloadApprovedAsset">...</button><button id="exportMetaData">...</button>' : ""` block is removed entirely, along with:
+- The `downloadApprovedAsset` button and its click handler (`downloadAsset(post)` is still used — just called from the new universal button instead).
+- The `exportMetaData` button, its click handler, and the `exportMetaData()`/`metaExportData()` functions (dead code once nothing calls them).
+
+The Meta handoff section keeps Copy caption, Copy hashtags, the "Open Meta" link, and "Mark ready for Meta" — none of those are duplicated by the new buttons and none of them call `approvedForMeta()` (the `markMeta` handler just applies the `ready-meta` workflow directly). With both of its call sites gone, `approvedForMeta()` itself is dead code and is removed too.
 
 ### Asset download
 
@@ -110,7 +119,7 @@ Content pillar: ...
 
 Saved as `loren-{type}-{id}-details.txt` via the existing `downloadFile(name, content, type)` helper with `type: "text/plain"`.
 
-This is a separate function from `exportMetaData()` (JSON), which is left untouched and stays part of the approval-gated Meta handoff flow.
+This replaces `exportMetaData()`/`metaExportData()` (JSON), which are removed — see "Simplifying the Meta handoff section" above.
 
 ## Error handling
 
@@ -129,10 +138,10 @@ This is a separate function from `exportMetaData()` (JSON), which is left untouc
   4. Download the metadata `.txt` for a post with every field populated; confirm all fields appear correctly labeled and formatted.
   5. Download both files for a carousel post; confirm every carousel image downloads.
   6. Temporarily unset `BLOB_READ_WRITE_TOKEN` locally; confirm upload still succeeds via the base64 fallback path.
+  7. Open the Meta handoff section on an approved post; confirm only Copy caption / Copy hashtags / Open Meta / Mark ready remain there, and that the two new universal buttons are what's used to get the asset and its metadata.
 
 ## Out of scope
 
 - Zipping multiple carousel images into a single download (no zip library in the project; sequential downloads are acceptable for the carousel sizes this app handles).
 - Changing the existing 30MB per-file ceiling or the `ASSET_STORAGE_LIMIT_MB` total storage budget.
-- Changing `exportMetaData()`'s JSON shape or its approval gate.
 - Canva-sourced asset download behavior beyond what `downloadAsset()` already does (it already works for Canva-hosted URLs today since it's a plain fetch).
