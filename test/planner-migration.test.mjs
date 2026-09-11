@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { createPlannerRepository } from "../lib/planner-repository.mjs";
-import { handleRequest } from "../server.mjs";
+import { setupIsolatedDataDir } from "./fixtures/isolated-data-dir.mjs";
+
+setupIsolatedDataDir();
+const { handleRequest } = await import("../server.mjs");
 
 function createMockReqRes({ method = "GET", url = "/", headers = {}, body = null }) {
   const req = new EventEmitter();
@@ -28,11 +31,11 @@ async function signIn(login, password) {
   return { cookie: attempt.res.headers["set-cookie"]?.split(";")[0] || "", status: attempt.res.statusCode };
 }
 
-// This repo's tests run against the real local .data/ files rather than an
-// isolated fixture (a pre-existing quirk, not something to fix here), so a
-// seeded account's role (e.g. "Loren") can have been mutated by other test
-// runs or manual use. Create fresh, uniquely-named accounts with known
-// roles for each case instead of assuming any existing account's role.
+// Each test file gets its own isolated .data directory (see
+// setupIsolatedDataDir above), but within this file "Loren" is still a
+// shared seeded account across tests — create fresh, uniquely-named
+// accounts with known roles for each case instead of assuming any
+// existing account's role.
 async function signInAs(role) {
   const bootstrap = await signIn("Loren", "admin");
   const name = `Migration Test ${role} ${Date.now()}${Math.random().toString(36).slice(2, 6)}`;

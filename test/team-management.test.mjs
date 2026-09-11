@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { EventEmitter } from "node:events";
-import { handleRequest } from "../server.mjs";
+import { setupIsolatedDataDir } from "./fixtures/isolated-data-dir.mjs";
+
+setupIsolatedDataDir();
+const { handleRequest } = await import("../server.mjs");
 
 const html = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
@@ -95,11 +98,6 @@ test("team member API workflow: list, add, edit, password reset, and remove", as
     assert.ok(m.id && m.name && m.role);
   }
 
-  // This repo's tests run against the real local .data/ files rather than an
-  // isolated fixture (a pre-existing quirk, not something to fix here — see
-  // the same note in test/planner-migration.test.mjs), so a hardcoded name
-  // can permanently collide with a leftover record from an earlier
-  // interrupted run. Use a unique name per run instead.
   const uniqueSuffix = `${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
   const memberName = `Team Workflow Test Admin ${uniqueSuffix}`;
   const renamedMemberName = `Team Workflow Test Editor ${uniqueSuffix}`;

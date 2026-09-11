@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { handleRequest } from "../server.mjs";
+import { setupIsolatedDataDir } from "./fixtures/isolated-data-dir.mjs";
+
+setupIsolatedDataDir();
+const { handleRequest } = await import("../server.mjs");
 
 function createMockReqRes({ method = "GET", url = "/", headers = {}, body = null }) {
   const req = new EventEmitter();

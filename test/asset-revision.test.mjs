@@ -1,12 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
+import { EventEmitter } from "node:events";
+import { setupIsolatedDataDir } from "./fixtures/isolated-data-dir.mjs";
+
+setupIsolatedDataDir();
+const {
   normalizePost,
   normalizeAssetChanges,
   applyAssetChanges,
   assetConflicts,
-  ASSET_EDITABLE_FIELDS
-} from "../server.mjs";
+  ASSET_EDITABLE_FIELDS,
+  handleRequest
+} = await import("../server.mjs");
+const { writeStored } = await import("../lib/store.mjs");
 
 test("normalizes a legacy post with an initial revision", () => {
   const normalized = normalizePost({ id: "asset-1", image: "/photo.jpg" });
@@ -61,27 +67,6 @@ test("detects same-field conflicts when fieldUpdatedRevision is newer than submi
   assert.equal(conflicts.caption.updatedBy, "Brooke");
   assert.equal(conflicts.caption.updatedAt, "2026-09-08T20:00:00.000Z");
   assert.equal(conflicts.notes, undefined);
-});
-
-import { EventEmitter } from "node:events";
-import fs from "node:fs";
-import path from "node:path";
-import { handleRequest } from "../server.mjs";
-import { writeStored } from "../lib/store.mjs";
-
-const plannerDataFile = path.join(process.cwd(), ".data", "planner-data.json");
-let originalPlannerData = null;
-
-test.before(() => {
-  if (fs.existsSync(plannerDataFile)) {
-    originalPlannerData = fs.readFileSync(plannerDataFile, "utf8");
-  }
-});
-
-test.after(() => {
-  if (originalPlannerData != null) {
-    fs.writeFileSync(plannerDataFile, originalPlannerData, "utf8");
-  }
 });
 
 function createMockReq({ method = "GET", url = "/", body = null, headers = {} }) {

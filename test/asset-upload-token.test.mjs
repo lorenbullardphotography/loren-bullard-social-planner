@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { handleRequest, isPlannerUploadPathname, allowedUploadContentType, remainingUploadBytes } from "../server.mjs";
+import { setupIsolatedDataDir } from "./fixtures/isolated-data-dir.mjs";
+
+setupIsolatedDataDir();
+const { handleRequest, isPlannerUploadPathname, allowedUploadContentType, remainingUploadBytes } = await import("../server.mjs");
 
 test("isPlannerUploadPathname accepts only paths under planner/", () => {
   assert.equal(isPlannerUploadPathname("planner/abc.jpg"), true);
