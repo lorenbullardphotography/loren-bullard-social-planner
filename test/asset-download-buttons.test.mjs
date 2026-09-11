@@ -23,3 +23,10 @@ test("loads the Vercel Blob client upload helper via esm.sh, pinned to the insta
   const { version } = JSON.parse(fs.readFileSync(new URL("../node_modules/@vercel/blob/package.json", import.meta.url)));
   assert.match(appJs, new RegExp(`https://esm\\.sh/@vercel/blob@${version}/client`));
 });
+
+test("every upload call site routes through the shared uploadAssetFile helper", () => {
+  const callSites = appJs.match(/await uploadAssetFile\(file\)/g) || [];
+  assert.equal(callSites.length, 3, "expected the main upload, cover photo upload, and Scratch Book upload to all call uploadAssetFile");
+  const fallbackSites = appJs.match(/await prepareUploadFile\(file\)/g) || [];
+  assert.equal(fallbackSites.length, 1, "prepareUploadFile should now only run inside uploadAssetFile's local-dev fallback");
+});

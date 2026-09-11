@@ -1821,9 +1821,7 @@ function renderInspector(hostSelector = "#inspector") {
     const help = q("#coverHelp");
     if (help) help.textContent = "Uploading cover photo…";
     try {
-      const uploadFile = await prepareUploadFile(file);
-      if (uploadFile.size > 3 * 1024 * 1024) throw new Error("This asset is too large for the hosted upload connection. Photos are compressed automatically; videos must be under 3 MB.");
-      const uploaded = await api("/api/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: uploadFile.name, data: await readFile(uploadFile) }) });
+      const uploaded = await uploadAssetFile(file);
       const saved = await saveQuickAssetChanges(post, { coverImage: uploaded.url }, "added a reel cover photo");
       if (saved) { renderAll(); notify("Reel cover photo attached"); }
     } catch (error) { if (help) help.textContent = "Cover upload failed"; notify(error.message || "Cover photo upload failed"); }
@@ -2358,9 +2356,7 @@ $("#upload").onchange = async event => {
     for (const [index, file] of validFiles.entries()) {
       uploadStatus.textContent = "Uploading " + (index + 1) + " of " + validFiles.length + "…";
       const photoGps = file.type.startsWith("image/") ? await readExifGps(file) : null;
-      const uploadFile = await prepareUploadFile(file);
-      if (uploadFile.size > 3 * 1024 * 1024) throw new Error("This asset is too large for the hosted upload connection. Photos are compressed automatically; videos must be under 3 MB.");
-      const uploaded = await api("/api/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: uploadFile.name, data: await readFile(uploadFile) }) });
+      const uploaded = await uploadAssetFile(file);
       const id = crypto.randomUUID();
       firstId ||= id;
       const uploadedPost = {
@@ -2652,13 +2648,7 @@ if ($("#scratchPhotoInput")) {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         if (statusEl) statusEl.textContent = `Uploading photo ${i + 1} of ${files.length}…`;
-        const uploadFile = await prepareUploadFile(file);
-        if (uploadFile.size > 3 * 1024 * 1024) throw new Error("Photos must be under 3 MB");
-        const uploaded = await api("/api/assets", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: uploadFile.name, data: await readFile(uploadFile) })
-        });
+        const uploaded = await uploadAssetFile(file);
         if (uploaded?.url) {
           scratchAttachedImages.push(uploaded.url);
         }
