@@ -1242,7 +1242,8 @@ export async function handleRequest(req, res) {
       // from normal UI flows — every route above it now saves one row at a
       // time. It still exists for an explicit, authenticated administrator
       // import (adminImport: true), never for an ordinary client save.
-      if ((await getPlannerWriteService()) && !(account?.role === "Admin" && body.adminImport === true)) {
+      const plannerServiceForImport = await getPlannerWriteService();
+      if (plannerServiceForImport && !(account?.role === "Admin" && body.adminImport === true)) {
         return sendJson(res, 403, { error: "Whole-planner saves are disabled. This planner now saves each change individually." });
       }
       const planner = await readPlanner();
@@ -1260,7 +1261,21 @@ export async function handleRequest(req, res) {
       upsertTeamMember(planner, body.actor);
       const rollbackActivity = body.reason ? addReversibleActivity(planner, `${body?.actor?.name || "Team"} ${body.reason}`) : null;
       if (automationChanges) addActivity(planner, `${body?.actor?.name || "Team"} automatically assigned ${automationChanges} workflow ${automationChanges === 1 ? "task" : "tasks"}`);
-      return sendJson(res, 200, await writePlanner(planner, { rollbackSnapshot: rollbackActivity ? rollbackSnapshot : null, rollbackActivity }));
+      const saved = await writePlanner(planner, { rollbackSnapshot: rollbackActivity ? rollbackSnapshot : null, rollbackActivity });
+      // An Admin restoring a backup while row storage is active: the legacy
+      // write above keeps the whole-document audit trail intact, but GET
+      // /api/planner sources posts/scratch/settings from row storage once
+      // it's serving reads — without also replacing that, the restore
+      // would report success here and then have no visible effect on the
+      // next load, forever (see replaceAllFromImport for why this is a
+      // deliberate overwrite rather than the one-way migration guard).
+      if (plannerServiceForImport) {
+        await plannerServiceForImport.importPlanner({
+          posts: planner.posts, scratch: planner.scratch, settings: planner.settings,
+          actor: body?.actor?.name || account?.name || ""
+        });
+      }
+      return sendJson(res, 200, saved);
     }
 
     if (url.pathname === "/api/instagram/status") {

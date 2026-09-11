@@ -183,6 +183,15 @@ test("row storage: a reorder survives a full page reload (GET /api/planner)", { 
   assert.equal(result.bIndex, 2);
 });
 
+test("row storage: an Admin's imported backup actually shows up after reload", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema();
+  const result = runScenario("admin-import-takes-effect-once-row-storage-active");
+  assert.equal(result.importStatus, 200);
+  assert.equal(result.reloadStatus, 200);
+  assert.equal(result.importedPostPresent, true, `expected the imported post to survive a reload, got: ${JSON.stringify(result)}`);
+  assert.equal(result.postCountAfter, 1, "the import should have replaced the planner's posts, not left row storage's untouched");
+});
+
 // --- Task 10: safe operation diagnostics ---
 
 test("buildPlannerDiagnostic contains only operation name, duration, outcome, and feature-flag state", () => {

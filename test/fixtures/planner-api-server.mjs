@@ -173,6 +173,32 @@ if (scenario === "concurrent-different-assets") {
     aIndex: order.indexOf(a.json.asset.id),
     bIndex: order.indexOf(b.json.asset.id)
   }));
+} else if (scenario === "admin-import-takes-effect-once-row-storage-active") {
+  // Regression test for the same bug class as reorder-survives-reload:
+  // an Admin restoring a JSON backup (PUT /api/planner with
+  // adminImport:true) only ever wrote the legacy whole-document, which
+  // GET /api/planner ignores for posts/scratch/settings once row storage
+  // is serving reads - so a restore would appear to succeed (200) but
+  // have literally no visible effect, the exact shape of bug this
+  // fixture already exists to catch.
+  const adminName = `Import Test Admin ${Date.now()}`;
+  await call("POST", "/api/team/members", { name: adminName, role: "Admin", password: "testpassword123" }, cookie);
+  const adminLogin = await call("POST", "/auth/login", { login: adminName, password: "testpassword123" });
+  const adminCookie = adminLogin.cookie;
+
+  const before = await call("GET", "/api/planner", undefined, cookie);
+  const importedPost = { id: crypto.randomUUID(), image: "/imported.jpg", caption: "restored from backup", status: "draft" };
+  const importResult = await call("PUT", "/api/planner", {
+    version: before.json.version, posts: [importedPost], scratch: [], settings: before.json.settings,
+    actor: { name: adminName }, reason: "restored a planner backup", adminImport: true
+  }, adminCookie);
+  const after = await call("GET", "/api/planner", undefined, cookie);
+  console.log(JSON.stringify({
+    importStatus: importResult.status,
+    reloadStatus: after.status,
+    importedPostPresent: (after.json.posts || []).some(p => p.id === importedPost.id),
+    postCountAfter: (after.json.posts || []).length
+  }));
 }
 
 server.close();
