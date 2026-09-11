@@ -150,6 +150,29 @@ if (scenario === "concurrent-different-assets") {
     activityStatus: activity.status,
     entries: activity.json?.activity?.map(item => item.text) || []
   }));
+} else if (scenario === "reorder-survives-reload") {
+  // Regression test for the exact bug reported in production: drag to
+  // reorder in the Grid Planner, reload the page, and the moved photo is
+  // back where it was. GET /api/planner (what a page load/reload calls)
+  // always read the legacy whole-document, which stops being written to
+  // the moment row storage writes activate — so a reorder (or any
+  // create/edit/delete) was only ever visible for the rest of that one
+  // browser tab's session via its own delta poll, and reverted to
+  // whatever the planner looked like at migration time on every reload.
+  const a = await call("POST", "/api/planner/assets", { asset: { image: "/h.jpg", caption: "first" }, actor: { name: "Loren" } }, cookie);
+  const b = await call("POST", "/api/planner/assets", { asset: { image: "/i.jpg", caption: "second" }, actor: { name: "Loren" } }, cookie);
+  const c = await call("POST", "/api/planner/assets", { asset: { image: "/j.jpg", caption: "third" }, actor: { name: "Loren" } }, cookie);
+  // Move c (created last, so currently last) to the front.
+  const reorderResult = await call("POST", `/api/assets/${c.json.asset.id}/reorder`, { beforeId: null, afterId: a.json.asset.id }, cookie);
+  const reloaded = await call("GET", "/api/planner", undefined, cookie);
+  const order = reloaded.json.posts.map(post => post.id);
+  console.log(JSON.stringify({
+    reorderStatus: reorderResult.status,
+    reloadStatus: reloaded.status,
+    cIndex: order.indexOf(c.json.asset.id),
+    aIndex: order.indexOf(a.json.asset.id),
+    bIndex: order.indexOf(b.json.asset.id)
+  }));
 }
 
 server.close();

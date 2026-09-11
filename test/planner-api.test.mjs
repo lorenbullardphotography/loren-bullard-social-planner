@@ -173,6 +173,16 @@ test("row storage: a saved asset edit appears in GET /api/planner/activity", { s
   assert.ok(result.entries.some(text => text.includes("updated planned content")), `expected the patch's activity entry in the feed, got: ${JSON.stringify(result.entries)}`);
 });
 
+test("row storage: a reorder survives a full page reload (GET /api/planner)", { skip: !testDatabaseUrl && "set TEST_DATABASE_URL to run against a real Postgres database" }, async () => {
+  await resetSchema();
+  const result = runScenario("reorder-survives-reload");
+  assert.equal(result.reorderStatus, 200);
+  assert.equal(result.reloadStatus, 200);
+  assert.equal(result.cIndex, 0, `expected the reordered asset first after reload, got: ${JSON.stringify(result)}`);
+  assert.equal(result.aIndex, 1);
+  assert.equal(result.bIndex, 2);
+});
+
 // --- Task 10: safe operation diagnostics ---
 
 test("buildPlannerDiagnostic contains only operation name, duration, outcome, and feature-flag state", () => {

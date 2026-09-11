@@ -1130,6 +1130,26 @@ export async function handleRequest(req, res) {
         ...item,
         reversible: Boolean(item.reversible && rollbackHistory.some(record => record.id === item.rollbackId))
       }));
+      // Once row storage is serving reads, it's the source of truth for
+      // everything ordinary saves touch (assets/ideas/settings) — the
+      // legacy document stops being written to the moment row storage
+      // writes activate, so without this it would keep serving whatever
+      // the planner looked like at migration time forever, no matter how
+      // many reorders/edits/creates happened since (only ever patched over
+      // live, in-memory, by that one browser tab's own delta poll — gone
+      // on the next reload). Instagram-synced ("posted") content is the
+      // one exception: /api/instagram/sync only ever writes the legacy
+      // document, never row storage, so it's kept from there — everything
+      // else comes from row storage.
+      const plannerService = await getPlannerReadService();
+      if (plannerService) {
+        const snapshot = await plannerService.readSnapshot();
+        const legacyPosted = planner.posts.filter(post => post.status === "posted");
+        const legacyPostedIds = new Set(legacyPosted.map(post => post.id));
+        planner.posts = [...snapshot.posts.filter(post => !legacyPostedIds.has(post.id)).map(normalizePost), ...legacyPosted];
+        planner.scratch = snapshot.scratch.map(normalizeScratchEntry);
+        if (snapshot.settings) planner.settings = snapshot.settings;
+      }
       return sendJson(res, 200, planner);
     }
 
