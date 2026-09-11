@@ -1557,6 +1557,7 @@ function renderInspector(hostSelector = "#inspector") {
   if (assigneePicker) {
     const pickerButton = q("#assigneePickerButton");
     const pickerMenu = q("#assigneePickerMenu");
+    const pickerRow = assigneePicker.closest(".two");
     const positionAssigneeMenu = () => {
       const rect = pickerButton.getBoundingClientRect();
       pickerMenu.style.left = `${rect.left}px`;
@@ -1565,17 +1566,39 @@ function renderInspector(hostSelector = "#inspector") {
       const menuBottom = rect.bottom + 6 + pickerMenu.offsetHeight;
       if (menuBottom > window.innerHeight - 8 && rect.top > pickerMenu.offsetHeight + 14) pickerMenu.style.top = `${rect.top - pickerMenu.offsetHeight - 6}px`;
     };
-    pickerButton.onclick = () => {
-      assigneePicker.classList.toggle("open");
-      if (assigneePicker.classList.contains("open")) requestAnimationFrame(positionAssigneeMenu);
+    const closeAssigneePicker = () => {
+      assigneePicker.classList.remove("open");
+      pickerRow?.classList.remove("has-open-picker");
     };
-    q(".editor-scroll")?.addEventListener("scroll", () => assigneePicker.classList.remove("open"), { passive: true });
-    qq(".assignee-option").forEach(option => option.onclick = () => {
+    const openAssigneePicker = () => {
+      assigneePicker.classList.add("open");
+      pickerRow?.classList.add("has-open-picker");
+      requestAnimationFrame(positionAssigneeMenu);
+    };
+    pickerButton.onclick = (e) => {
+      e.stopPropagation();
+      if (assigneePicker.classList.contains("open")) {
+        closeAssigneePicker();
+      } else {
+        openAssigneePicker();
+      }
+    };
+    q(".editor-scroll")?.addEventListener("scroll", closeAssigneePicker, { passive: true });
+    window.addEventListener("resize", () => {
+      if (assigneePicker.classList.contains("open")) positionAssigneeMenu();
+    }, { passive: true });
+    document.addEventListener("click", (e) => {
+      if (assigneePicker.classList.contains("open") && !assigneePicker.contains(e.target)) {
+        closeAssigneePicker();
+      }
+    });
+    qq(".assignee-option").forEach(option => option.onclick = (e) => {
+      e.stopPropagation();
       const value = option.dataset.assignee || "";
       q("#eAssignee").value = value;
       q("#assigneePickerName").textContent = value || "Unassigned";
       q("#assigneePickerButton .person-avatar").textContent = personInitials(value || "Unassigned");
-      assigneePicker.classList.remove("open");
+      closeAssigneePicker();
       editorDirty = true;
     });
   }
