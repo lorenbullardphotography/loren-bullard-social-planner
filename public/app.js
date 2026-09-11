@@ -1476,8 +1476,11 @@ function renderInspector(hostSelector = "#inspector") {
       <div class="preview-wrap">${assetPreview(post)}</div>
       <div class="posted-lock">This post is live on Instagram and stays locked in the grid.<br><br><b>${post.timestamp ? new Date(post.timestamp).toLocaleDateString() : "Posted"}</b>${post.permalink ? ` · <a href="${esc(post.permalink)}" target="_blank" rel="noopener noreferrer">Open on Instagram</a>` : ""}<br>${esc(formatSchedule(post))}${locationSummary(post)}</div>
       <label class="field">Caption<textarea rows="8" readonly>${esc(post.caption || "")}</textarea></label>
+      <div class="handoff-actions"><button id="downloadOriginalAsset" class="ghost" type="button">↓ Download original asset</button><button id="downloadAssetDetails" class="ghost" type="button">↓ Download content details (.txt)</button></div>
     </div>`;
     q(".mobile-editor-close")?.addEventListener("click", closeGridEditor);
+    q("#downloadOriginalAsset").onclick = () => downloadAsset(post);
+    q("#downloadAssetDetails").onclick = () => downloadMetaTextFile(post);
     return;
   }
   const cropLocked = assetKindOf(post) === "video" || post.type === "REEL" || assetSourceOf(post) === "canva";
@@ -1487,6 +1490,7 @@ function renderInspector(hostSelector = "#inspector") {
   host.innerHTML = `<div class="editor editable-editor"><button class="mobile-editor-close" type="button" aria-label="Close asset editor">×</button><div class="editor-mobile-heading"><div><span class="eyebrow">EDITING SELECTED POST</span><b>${esc(post.caption || post.notes || assetTypeLabel(post))}</b></div><span>Swipe through fields below</span></div><div class="editor-scroll">
     ${isCarousel ? `<div class="carousel-preview" aria-label="Carousel preview"><img class="carousel-slide" src="${esc(carouselImages(post)[carouselSlide] || post.image)}" alt="Carousel image ${carouselSlide + 1} of ${carouselCount}"><button id="carouselPrev" class="carousel-arrow carousel-prev" type="button" aria-label="Previous carousel image" ${carouselSlide === 0 ? "disabled" : ""}>‹</button><button id="carouselNext" class="carousel-arrow carousel-next" type="button" aria-label="Next carousel image" ${carouselSlide >= carouselCount - 1 ? "disabled" : ""}>›</button><span class="carousel-counter" aria-live="polite">${carouselSlide + 1} / ${carouselCount}</span></div>` : `<div class="preview-wrap${cropLocked ? "" : " crop-preview"}" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post, cropLocked)}${cropLocked ? "" : '<div class="crop-grid" aria-hidden="true"></div><span class="crop-hint">Drag to reposition</span><div class="crop-zoom-overlay"><span>Zoom</span><input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="' + Math.max(1, Math.min(3, Number(post.cropZoom) || 1)) + '" aria-label="Crop zoom"><output id="cropOverlayZoom">100%</output><button id="resetCrop" class="crop-overlay-reset" type="button" aria-label="Reset crop" title="Reset crop">↺</button></div>'}</div>`}
     <div class="asset-meta"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva" : "Uploaded"}</span>${hasReelCover(post) ? '<span class="asset-badge cover-badge">Cover attached</span>' : ""}</div>
+    <div class="handoff-actions"><button id="downloadOriginalAsset" class="ghost" type="button">↓ Download original asset</button><button id="downloadAssetDetails" class="ghost" type="button">↓ Download content details (.txt)</button></div>
     ${post.type === "REEL" || assetKindOf(post) === "video" ? `<div class="cover-card"><div><b>Reel cover photo</b><small>${post.coverImage ? "This image appears on the grid instead of the video frame." : "Add an image to choose the frame shown on the grid."}</small></div>${post.coverImage ? `<img class="cover-thumb" src="${esc(post.coverImage)}" alt="Reel cover photo">` : ""}<div class="handoff-actions"><label class="ghost button-link cover-upload-label">${post.coverImage ? "Replace cover" : "Upload cover photo"}<input id="coverInput" type="file" accept="image/*" hidden></label>${post.coverImage ? '<button id="removeCover" class="ghost" type="button">Remove cover</button>' : ""}</div><small id="coverHelp" class="field-help"></small></div>` : ""}
     <div class="location-card"><div><b>Location tag</b><small>Add the place where this content was created.</small></div><label class="field nested">Location<input id="eLocation" maxlength="120" value="${esc(post.location || post.locationTag?.name || "")}" placeholder="Crystal Bridges, Bentonville"></label><button id="readLocationMetadata" class="ghost" type="button">⌖ Check photo metadata</button><small id="locationHelp" class="field-help">We’ll use the photo’s embedded location when available.</small></div>
     ${post.canvaUrl ? `<div class="canva-source"><b>Canva working draft</b><span>Preview refreshes from Canva when connected.</span><div class="handoff-actions"><a class="ghost button-link" href="${esc(post.canvaUrl)}" target="_blank" rel="noopener noreferrer">Open in Canva</a><button id="refreshCanva" class="ghost">Refresh preview</button></div></div>` : ""}
@@ -1516,7 +1520,7 @@ function renderInspector(hostSelector = "#inspector") {
     <div class="field">Comments<div class="comment-list">${comments || `<span style="text-transform:none;font-weight:400">No feedback yet.</span>`}</div>
       <div style="display:flex;gap:6px"><input id="commentText" placeholder="Add feedback as ${esc(currentUser.name)}…" style="flex:1"><button id="addComment" class="ghost">Add</button></div>
     </div>
-    <div class="handoff"><b>Meta Business Suite handoff</b><span>Use Meta for final scheduling and publishing.</span><div class="handoff-actions"><button id="copyCaption" class="ghost">Copy caption</button><button id="copyHashtags" class="ghost">Copy hashtags</button><a class="ghost button-link" href="https://business.facebook.com/latest/home" target="_blank" rel="noopener noreferrer">Open Meta</a>${approvedForMeta(post) ? '<button id="downloadApprovedAsset" class="ghost">↓ Download approved media</button><button id="exportMetaData" class="ghost">↓ Export Meta data</button>' : ""}</div><button id="markMeta" class="primary">Mark ready for Meta</button></div>
+    <div class="handoff"><b>Meta Business Suite handoff</b><span>Use Meta for final scheduling and publishing.</span><div class="handoff-actions"><button id="copyCaption" class="ghost">Copy caption</button><button id="copyHashtags" class="ghost">Copy hashtags</button><a class="ghost button-link" href="https://business.facebook.com/latest/home" target="_blank" rel="noopener noreferrer">Open Meta</a></div><button id="markMeta" class="primary">Mark ready for Meta</button></div>
     <div class="posted-lock">Last updated${post.updatedBy ? ` by <b>${esc(post.updatedBy)}</b>` : ""}${post.updatedAt ? ` on ${new Date(post.updatedAt).toLocaleString()}` : ""}.</div>
     <div id="conflictPanelMount"></div>
     </div>
@@ -1790,8 +1794,8 @@ function renderInspector(hostSelector = "#inspector") {
   };
   q("#copyCaption").onclick = () => copyText(post.caption, "Caption");
   q("#copyHashtags").onclick = () => copyText(post.hashtags, "Hashtags");
-  if (q("#downloadApprovedAsset")) q("#downloadApprovedAsset").onclick = () => downloadAsset(post);
-  if (q("#exportMetaData")) q("#exportMetaData").onclick = () => exportMetaData(post);
+  q("#downloadOriginalAsset").onclick = () => downloadAsset(post);
+  q("#downloadAssetDetails").onclick = () => downloadMetaTextFile(post);
   if (q("#refreshCanva")) q("#refreshCanva").onclick = () => refreshCanvaPreview(post, q("#refreshCanva"));
   if (q("#carouselPrev")) q("#carouselPrev").onclick = () => { carouselSlide = Math.max(0, carouselSlide - 1); renderInspector(hostSelector); };
   if (q("#carouselNext")) q("#carouselNext").onclick = async () => {
