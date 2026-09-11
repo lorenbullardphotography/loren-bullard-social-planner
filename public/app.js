@@ -2865,9 +2865,20 @@ $("#saveTeamMemberBtn").onclick = async () => {
   }
 };
 
+// The Instagram session is shared across the whole team (see publicInstagramStatus's
+// `shared: true`), so last_synced_at is one server-wide timestamp, not per-browser.
+// getInstagramMedia() deliberately re-fetches the *entire* media history on every
+// sync call (see layout.test.mjs's "syncs all instagram media without restricting
+// by syncPhotoCount"), so firing that on every page load — for every teammate, every
+// refresh — hammered the Graph API into rate-limit errors. This cooldown makes the
+// automatic page-load sync a no-op if anyone synced recently; the manual Sync
+// buttons bypass it since those are explicit requests.
+const INSTAGRAM_AUTO_SYNC_COOLDOWN_MS = 30 * 60 * 1000;
+
 const query = new URLSearchParams(location.search);
 if (query.get("meta") === "connected") {
   history.replaceState({}, "", "/");
+  initialInstagramSyncDone = true;
   setTimeout(() => syncInstagram(), 250);
 }
 if (query.get("meta") === "config") {
@@ -2895,7 +2906,10 @@ async function init() {
   checkInstagram().then(async () => {
     if (igStatus.connected && !initialInstagramSyncDone) {
       initialInstagramSyncDone = true;
-      await syncInstagram({silent: true});
+      const lastSyncedAt = igStatus.last_synced_at ? new Date(igStatus.last_synced_at).getTime() : 0;
+      if (Date.now() - lastSyncedAt > INSTAGRAM_AUTO_SYNC_COOLDOWN_MS) {
+        await syncInstagram({silent: true});
+      }
     }
   }).catch(() => {});
 }
