@@ -30,3 +30,8 @@ test("every upload call site routes through the shared uploadAssetFile helper", 
   const fallbackSites = appJs.match(/await prepareUploadFile\(file\)/g) || [];
   assert.equal(fallbackSites.length, 1, "prepareUploadFile should now only run inside uploadAssetFile's local-dev fallback");
 });
+
+test("bumps the app.js cache-busting version", () => {
+  const html = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.match(html, /<script src="\/app\.js\?v=20260911-/);
+});
