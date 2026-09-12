@@ -901,49 +901,6 @@ function contentBriefMarkup(post) {
     </div>`;
 }
 
-async function readExifGps(file) {
-  try {
-    const bytes = new DataView(await file.arrayBuffer());
-    if (bytes.getUint16(0) !== 0xffd8) return null;
-    let offset = 2;
-    while (offset + 4 < bytes.byteLength) {
-      if (bytes.getUint8(offset) !== 0xff || bytes.getUint8(offset + 1) === 0xda) break;
-      const marker = bytes.getUint8(offset + 1), length = bytes.getUint16(offset + 2);
-      if (marker === 0xe1 && new TextDecoder().decode(new Uint8Array(bytes.buffer, bytes.byteOffset + offset + 4, 6)) === "Exif\0\0") {
-        return parseExifGps(bytes, offset + 10);
-      }
-      offset += 2 + length;
-    }
-  } catch {}
-  return null;
-}
-function parseExifGps(view, tiff) {
-  const little = view.getUint16(tiff) === 0x4949;
-  const u16 = o => view.getUint16(o, little), u32 = o => view.getUint32(o, little);
-  if (u16(tiff + 2) !== 42) return null;
-  const readIfd = at => {
-    const out = {};
-    if (!at || at + 2 > view.byteLength) return out;
-    const count = u16(at);
-    for (let i = 0; i < count; i++) {
-      const entry = at + 2 + i * 12; if (entry + 12 > view.byteLength) break;
-      const tag = u16(entry), type = u16(entry + 2), countValue = u32(entry + 4), size = type === 3 ? 2 : type === 4 ? 4 : type === 5 ? 8 : 1;
-      const valueAt = size * countValue <= 4 ? entry + 8 : tiff + u32(entry + 8);
-      if (tag === 0x8825) out.gps = tiff + u32(valueAt);
-      else if (tag === 1 || tag === 3) out[tag] = String.fromCharCode(...new Uint8Array(view.buffer, view.byteOffset + valueAt, Math.min(countValue, 2))).replace(/\0/g, "");
-      else if (tag === 2 || tag === 4) out[tag] = [0, 1, 2].map(i => { const p = valueAt + i * 8; return p + 8 <= view.byteLength ? u32(p) / (u32(p + 4) || 1) : 0; });
-    }
-    return out;
-  };
-  const main = readIfd(tiff + u32(tiff + 4)), gps = readIfd(main.gps);
-  if (!gps[1] || !gps[3] || !gps[2]?.length || !gps[4]?.length) return null;
-  const latitude = (gps[2][0] + gps[2][1] / 60 + gps[2][2] / 3600) * (gps[1] === "S" ? -1 : 1);
-  const longitude = (gps[4][0] + gps[4][1] / 60 + gps[4][2] / 3600) * (gps[3] === "W" ? -1 : 1);
-  return Number.isFinite(latitude) && Number.isFinite(longitude) ? { latitude, longitude } : null;
-}
-async function readExifGpsFromUrl(url) {
-  try { return readExifGps(new File([await (await fetch(url)).arrayBuffer()], "asset.jpg", { type: "image/jpeg" })); } catch { return null; }
-}
 function renderPlannerSettings() {
   const pillars = $("#settingsPillars");
   if (!pillars) return;
@@ -1243,46 +1200,42 @@ function renderGrid() {
         // On desktop, editing a tile should never accidentally start a reorder.
         // The drag handle is the explicit affordance for mouse and trackpad input.
         if (event.pointerType === "mouse" && !event.target.closest(".handle")) return;
-        touchDrag = { id: post.id, node, x: event.clientX, y: event.clientY, moved: false, timer: null };
-        const delay = event.pointerType === "mouse" ? 100 : 220;
+        touchDrag = {
+          id: post.id,
+          node,
+          x: event.clientX,
+          y: event.clientY,
+          moved: false,
+          timer: null,
+          pointerId: event.pointerId
+        };
+        const delay = event.pointerType === "mouse" ? 80 : 220;
         touchDrag.timer = setTimeout(() => {
           if (!touchDrag || touchDrag.node !== node) return;
-          touchDrag.active = true;
-          node.classList.add("dragging");
-          node.setPointerCapture(event.pointerId);
-          event.preventDefault();
+          activateGridDrag(touchDrag, event);
         }, delay);
       });
       node.addEventListener("pointermove", event => {
         if (!touchDrag || touchDrag.node !== node) return;
         const distance = Math.hypot(event.clientX - touchDrag.x, event.clientY - touchDrag.y);
         if (!touchDrag.active) {
-          if (event.pointerType === "mouse" && distance > 6) {
+          if (event.pointerType === "mouse" && distance > 4) {
             clearTimeout(touchDrag.timer);
-            touchDrag.active = true;
-            node.classList.add("dragging");
-            node.setPointerCapture(event.pointerId);
-          } else if (distance > 10) clearTimeout(touchDrag.timer);
+            activateGridDrag(touchDrag, event);
+          } else if (distance > 10) {
+            clearTimeout(touchDrag.timer);
+          }
           return;
         }
-        touchDrag.moved = true;
-        event.preventDefault();
-        $$(".tile").forEach(tile => tile.classList.remove("target"));
-        const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".tile");
-        if (target && target !== node && target.dataset.status !== "posted") target.classList.add("target");
+        updateGridDragMove(touchDrag, event);
       });
       const finishTouchDrag = async event => {
         if (!touchDrag || touchDrag.node !== node) return;
         clearTimeout(touchDrag.timer);
         const state = touchDrag;
         touchDrag = null;
-        node.classList.remove("dragging");
-        $$(".tile").forEach(tile => tile.classList.remove("target"));
         if (!state.active) return;
-        suppressTileClickUntil = Date.now() + 450;
-        event.preventDefault();
-        const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".tile");
-        if (target && target.dataset.status !== "posted") await reorder(state.id, target.dataset.id);
+        await completeGridDrag(state, event);
       };
       node.addEventListener("pointerup", finishTouchDrag);
       node.addEventListener("pointercancel", finishTouchDrag);
@@ -1290,6 +1243,120 @@ function renderGrid() {
     grid.appendChild(node);
   }
   $("#gridEmpty").classList.toggle("hidden", ordered().length > 0);
+}
+
+function activateGridDrag(state, event) {
+  const futureTiles = $$("#grid .tile:not([data-status='posted'])");
+  const slotRects = futureTiles.map(el => el.getBoundingClientRect());
+  const fromIndex = futureTiles.findIndex(el => el === state.node);
+  if (fromIndex < 0 || !slotRects[fromIndex]) return;
+
+  state.active = true;
+  state.futureTiles = futureTiles;
+  state.slotRects = slotRects;
+  state.fromIndex = fromIndex;
+  state.currentIndex = fromIndex;
+  state.originRect = slotRects[fromIndex];
+
+  state.node.classList.add("dragging");
+  $("#grid")?.classList.add("is-reordering");
+  state.node.style.transition = "none";
+  state.node.style.zIndex = "50";
+  try {
+    state.node.setPointerCapture(state.pointerId);
+  } catch {}
+  if (navigator.vibrate) {
+    try { navigator.vibrate(15); } catch {}
+  }
+}
+
+function updateGridDragMove(state, event) {
+  state.moved = true;
+  event.preventDefault();
+  const dx = event.clientX - state.x;
+  const dy = event.clientY - state.y;
+
+  state.node.style.transform = `translate3d(${dx}px, ${dy}px, 0) scale(1.05)`;
+
+  const dragCenterX = state.originRect.left + dx + state.originRect.width / 2;
+  const dragCenterY = state.originRect.top + dy + state.originRect.height / 2;
+
+  let bestIndex = state.fromIndex;
+  let bestDistSq = Infinity;
+
+  for (let k = 0; k < state.slotRects.length; k++) {
+    const rect = state.slotRects[k];
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const distSq = (dragCenterX - centerX) ** 2 + (dragCenterY - centerY) ** 2;
+    if (distSq < bestDistSq) {
+      bestDistSq = distSq;
+      bestIndex = k;
+    }
+  }
+
+  if (bestIndex !== state.currentIndex) {
+    state.currentIndex = bestIndex;
+
+    state.futureTiles.forEach((tileEl, i) => {
+      if (i === state.fromIndex) return;
+      let targetSlot = i;
+      if (state.fromIndex < state.currentIndex) {
+        if (i > state.fromIndex && i <= state.currentIndex) targetSlot = i - 1;
+      } else if (state.fromIndex > state.currentIndex) {
+        if (i >= state.currentIndex && i < state.fromIndex) targetSlot = i + 1;
+      }
+
+      if (targetSlot === i) {
+        tileEl.style.transform = "";
+      } else {
+        const shiftX = state.slotRects[targetSlot].left - state.slotRects[i].left;
+        const shiftY = state.slotRects[targetSlot].top - state.slotRects[i].top;
+        tileEl.style.transform = `translate3d(${shiftX}px, ${shiftY}px, 0)`;
+      }
+    });
+  }
+}
+
+async function completeGridDrag(state, event) {
+  try {
+    state.node.releasePointerCapture(state.pointerId);
+  } catch {}
+  $("#grid")?.classList.remove("is-reordering");
+  suppressTileClickUntil = Date.now() + 450;
+  if (event) event.preventDefault();
+
+  const fromIndex = state.fromIndex;
+  const toIndex = state.currentIndex;
+
+  if (toIndex === fromIndex || toIndex < 0 || toIndex >= (state.futureTiles?.length || 0)) {
+    state.node.style.transition = "transform 0.22s cubic-bezier(.2,.8,.2,1), box-shadow 0.22s ease";
+    state.node.style.transform = "";
+    state.node.style.boxShadow = "";
+    setTimeout(() => {
+      state.node.classList.remove("dragging");
+      state.node.style.transition = "";
+      state.node.style.zIndex = "";
+      state.futureTiles?.forEach(t => { t.style.transform = ""; });
+    }, 220);
+    return;
+  }
+
+  const landX = state.slotRects[toIndex].left - state.slotRects[fromIndex].left;
+  const landY = state.slotRects[toIndex].top - state.slotRects[fromIndex].top;
+
+  state.node.style.transition = "transform 0.22s cubic-bezier(.2,.8,.2,1), box-shadow 0.22s ease";
+  state.node.style.transform = `translate3d(${landX}px, ${landY}px, 0) scale(1)`;
+  state.node.style.boxShadow = "";
+
+  setTimeout(async () => {
+    state.node.classList.remove("dragging");
+    state.node.style.transition = "";
+    state.node.style.zIndex = "";
+    state.node.style.transform = "";
+    state.futureTiles?.forEach(t => { t.style.transform = ""; });
+    await reorder(state.id, toIndex);
+  }, 220);
 }
 
 function setGridEditorOpen(open) {
@@ -1305,21 +1372,24 @@ function closeGridEditor() {
 }
 
 async function reorder(a, b) {
-  if (!a || a === b) return;
+  if (!a) return;
   const futurePosts = future();
   const donePosts = posted();
   const fromIndex = futurePosts.findIndex(post => post.id === a);
-  const toIndex = futurePosts.findIndex(post => post.id === b);
-  if (fromIndex < 0 || toIndex < 0) return;
+  if (fromIndex < 0) return;
+
+  const toIndex = typeof b === "number"
+    ? Math.max(0, Math.min(futurePosts.length - 1, b))
+    : futurePosts.findIndex(post => post.id === b);
+  if (toIndex < 0 || fromIndex === toIndex) return;
 
   // Neighbor ids for the server-authoritative reorder call, computed from
   // the drop target's position with the moved tile conceptually removed
   // first (so it's correct regardless of whether a started before or
   // after b in the list).
   const withoutMoved = futurePosts.filter(post => post.id !== a).map(post => post.id);
-  const targetIndex = withoutMoved.indexOf(b);
-  const beforeId = targetIndex > 0 ? withoutMoved[targetIndex - 1] : null;
-  const afterId = b;
+  const beforeId = toIndex > 0 ? withoutMoved[toIndex - 1] : null;
+  const afterId = toIndex < withoutMoved.length ? withoutMoved[toIndex] : null;
 
   const [moved] = futurePosts.splice(fromIndex, 1);
   futurePosts.splice(toIndex, 0, { ...moved, updatedBy: currentUser.name, updatedAt: new Date().toISOString() });
@@ -1485,14 +1555,18 @@ function renderInspector(hostSelector = "#inspector") {
   if (isCarousel) carouselSlide = Math.max(0, Math.min(carouselSlide, carouselImages(post).length - 1));
   if (post.status === "posted") {
     host.innerHTML = `<div class="editor"><button class="mobile-editor-close" type="button" aria-label="Close asset editor">×</button>
-      <div class="preview-wrap">${assetPreview(post)}</div>
-      <div class="posted-lock">This post is live on Instagram and stays locked in the grid.<br><br><b>${post.timestamp ? new Date(post.timestamp).toLocaleDateString() : "Posted"}</b>${post.permalink ? ` · <a href="${esc(post.permalink)}" target="_blank" rel="noopener noreferrer">Open on Instagram</a>` : ""}<br>${esc(formatSchedule(post))}${locationSummary(post)}</div>
+      <div class="preview-wrap">${assetPreview(post)}<button id="downloadOriginalAssetOverlay" class="preview-download-btn" type="button" aria-label="Download original asset" title="Download original asset"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button></div>
       <label class="field">Caption<textarea rows="8" readonly>${esc(post.caption || "")}</textarea></label>
-      <div class="handoff-actions"><button id="downloadOriginalAsset" class="ghost" type="button">↓ Download original asset</button><button id="downloadAssetDetails" class="ghost" type="button">↓ Download content details (.txt)</button></div>
+      <div class="asset-downloads-card">
+        <button id="downloadOriginalAsset" class="download-action-btn" type="button"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download original asset</span></button>
+        <button id="downloadAssetDetails" class="download-action-btn" type="button"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg><span>Download content details (.txt)</span></button>
+      </div>
+      <div class="posted-lock">This post is live on Instagram and stays locked in the grid.<br><br><b>${post.timestamp ? new Date(post.timestamp).toLocaleDateString() : "Posted"}</b>${post.permalink ? ` · <a href="${esc(post.permalink)}" target="_blank" rel="noopener noreferrer">Open on Instagram</a>` : ""}<br>${esc(formatSchedule(post))}${locationSummary(post)}</div>
     </div>`;
     wireVideoFallback(host);
     q(".mobile-editor-close")?.addEventListener("click", closeGridEditor);
     q("#downloadOriginalAsset").onclick = () => downloadAsset(post);
+    if (q("#downloadOriginalAssetOverlay")) q("#downloadOriginalAssetOverlay").onclick = () => downloadAsset(post);
     q("#downloadAssetDetails").onclick = () => downloadMetaTextFile(post);
     return;
   }
@@ -1501,11 +1575,10 @@ function renderInspector(hostSelector = "#inspector") {
   const workflowOptions = Object.entries(WORKFLOW_LABELS).map(([key, label]) => `<option value="${key}" ${workflowOf(post) === key ? "selected" : ""}>${label}</option>`).join("");
   const pillarOptions = `<option value="">Choose a pillar</option>` + settings.pillars.map(pillar => `<option ${post.pillar === pillar ? "selected" : ""}>${esc(pillar)}</option>`).join("");
   host.innerHTML = `<div class="editor editable-editor"><button class="mobile-editor-close" type="button" aria-label="Close asset editor">×</button><div class="editor-mobile-heading"><div><span class="eyebrow">EDITING SELECTED POST</span><b>${esc(post.caption || post.notes || assetTypeLabel(post))}</b></div><span>Swipe through fields below</span></div><div class="editor-scroll">
-    ${isCarousel ? `<div class="carousel-preview" aria-label="Carousel preview"><img class="carousel-slide" src="${esc(carouselImages(post)[carouselSlide] || post.image)}" alt="Carousel image ${carouselSlide + 1} of ${carouselCount}"><button id="carouselPrev" class="carousel-arrow carousel-prev" type="button" aria-label="Previous carousel image" ${carouselSlide === 0 ? "disabled" : ""}>‹</button><button id="carouselNext" class="carousel-arrow carousel-next" type="button" aria-label="Next carousel image" ${carouselSlide >= carouselCount - 1 ? "disabled" : ""}>›</button><span class="carousel-counter" aria-live="polite">${carouselSlide + 1} / ${carouselCount}</span></div>` : `<div class="preview-wrap${cropLocked ? "" : " crop-preview"}" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post, cropLocked)}${cropLocked ? "" : '<div class="crop-grid" aria-hidden="true"></div><span class="crop-hint">Drag to reposition</span><div class="crop-zoom-overlay"><span>Zoom</span><input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="' + Math.max(1, Math.min(3, Number(post.cropZoom) || 1)) + '" aria-label="Crop zoom"><output id="cropOverlayZoom">100%</output><button id="resetCrop" class="crop-overlay-reset" type="button" aria-label="Reset crop" title="Reset crop">↺</button></div>'}</div>`}
+    ${isCarousel ? `<div class="carousel-preview" aria-label="Carousel preview"><img class="carousel-slide" src="${esc(carouselImages(post)[carouselSlide] || post.image)}" alt="Carousel image ${carouselSlide + 1} of ${carouselCount}"><button id="carouselPrev" class="carousel-arrow carousel-prev" type="button" aria-label="Previous carousel image" ${carouselSlide === 0 ? "disabled" : ""}>‹</button><button id="carouselNext" class="carousel-arrow carousel-next" type="button" aria-label="Next carousel image" ${carouselSlide >= carouselCount - 1 ? "disabled" : ""}>›</button><span class="carousel-counter" aria-live="polite">${carouselSlide + 1} / ${carouselCount}</span><button id="downloadOriginalAssetOverlay" class="preview-download-btn" type="button" aria-label="Download original asset" title="Download original asset"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button></div>` : `<div class="preview-wrap${cropLocked ? "" : " crop-preview"}" style="aspect-ratio:${cropFrameRatio(post)}">${assetPreview(post, cropLocked)}${cropLocked ? "" : '<div class="crop-grid" aria-hidden="true"></div><span class="crop-hint">Drag to reposition</span><div class="crop-zoom-overlay"><span>Zoom</span><input id="eCropZoom" type="range" min="1" max="3" step="0.05" value="' + Math.max(1, Math.min(3, Number(post.cropZoom) || 1)) + '" aria-label="Crop zoom"><output id="cropOverlayZoom">100%</output><button id="resetCrop" class="crop-overlay-reset" type="button" aria-label="Reset crop" title="Reset crop">↺</button></div>'}<button id="downloadOriginalAssetOverlay" class="preview-download-btn" type="button" aria-label="Download original asset" title="Download original asset"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button></div>`}
     <div class="asset-meta"><span class="asset-badge">${assetTypeLabel(post)}</span><span class="asset-badge source-${assetSourceOf(post)}">${assetSourceOf(post) === "canva" ? "Canva" : "Uploaded"}</span>${hasReelCover(post) ? '<span class="asset-badge cover-badge">Cover attached</span>' : ""}</div>
-    <div class="handoff-actions"><button id="downloadOriginalAsset" class="ghost" type="button">↓ Download original asset</button><button id="downloadAssetDetails" class="ghost" type="button">↓ Download content details (.txt)</button></div>
     ${post.type === "REEL" || assetKindOf(post) === "video" ? `<div class="cover-card"><div><b>Reel cover photo</b><small>${post.coverImage ? "This image appears on the grid instead of the video frame." : "Add an image to choose the frame shown on the grid."}</small></div>${post.coverImage ? `<img class="cover-thumb" src="${esc(post.coverImage)}" alt="Reel cover photo">` : ""}<div class="handoff-actions"><label class="ghost button-link cover-upload-label">${post.coverImage ? "Replace cover" : "Upload cover photo"}<input id="coverInput" type="file" accept="image/*" hidden></label>${post.coverImage ? '<button id="removeCover" class="ghost" type="button">Remove cover</button>' : ""}</div><small id="coverHelp" class="field-help"></small></div>` : ""}
-    <div class="location-card"><div><b>Location tag</b><small>Add the place where this content was created.</small></div><label class="field nested">Location<input id="eLocation" maxlength="120" value="${esc(post.location || post.locationTag?.name || "")}" placeholder="Crystal Bridges, Bentonville"></label><button id="readLocationMetadata" class="ghost" type="button">⌖ Check photo metadata</button><small id="locationHelp" class="field-help">We’ll use the photo’s embedded location when available.</small></div>
+    <div class="location-card"><div><b>Location tag</b><small>Add the place where this content was created.</small></div><label class="field nested">Location<input id="eLocation" maxlength="120" value="${esc(post.location || post.locationTag?.name || "")}" placeholder="Crystal Bridges, Bentonville"></label></div>
     ${post.canvaUrl ? `<div class="canva-source"><b>Canva working draft</b><span>Preview refreshes from Canva when connected.</span><div class="handoff-actions"><a class="ghost button-link" href="${esc(post.canvaUrl)}" target="_blank" rel="noopener noreferrer">Open in Canva</a><button id="refreshCanva" class="ghost">Refresh preview</button></div></div>` : ""}
     <div class="two">
       <label class="field">Workflow<select id="eWorkflow">${workflowOptions}</select></label>
@@ -1533,7 +1606,11 @@ function renderInspector(hostSelector = "#inspector") {
     <div class="field">Comments<div class="comment-list">${comments || `<span style="text-transform:none;font-weight:400">No feedback yet.</span>`}</div>
       <div style="display:flex;gap:6px"><input id="commentText" placeholder="Add feedback as ${esc(currentUser.name)}…" style="flex:1"><button id="addComment" class="ghost">Add</button></div>
     </div>
-    <div class="handoff"><b>Meta Business Suite handoff</b><span>Use Meta for final scheduling and publishing.</span><div class="handoff-actions"><button id="copyCaption" class="ghost">Copy caption</button><button id="copyHashtags" class="ghost">Copy hashtags</button><a class="ghost button-link" href="https://business.facebook.com/latest/home" target="_blank" rel="noopener noreferrer">Open Meta</a></div><button id="markMeta" class="primary">Mark ready for Meta</button></div>
+    <div class="handoff"><b>Meta Business Suite handoff</b><span>Use Meta for final scheduling and publishing.</span><div class="handoff-actions"><button id="copyCaption" class="ghost">Copy caption</button><button id="copyHashtags" class="ghost">Copy hashtags</button></div><button id="markMeta" class="primary">Mark ready for Meta</button></div>
+    <div class="asset-downloads-card">
+      <button id="downloadOriginalAsset" class="download-action-btn" type="button"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download original asset</span></button>
+      <button id="downloadAssetDetails" class="download-action-btn" type="button"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg><span>Download content details (.txt)</span></button>
+    </div>
     <div class="posted-lock">Last updated${post.updatedBy ? ` by <b>${esc(post.updatedBy)}</b>` : ""}${post.updatedAt ? ` on ${new Date(post.updatedAt).toLocaleString()}` : ""}.</div>
     <div id="conflictPanelMount"></div>
     </div>
@@ -1832,6 +1909,10 @@ function renderInspector(hostSelector = "#inspector") {
   q("#copyCaption").onclick = () => copyText(post.caption, "Caption");
   q("#copyHashtags").onclick = () => copyText(post.hashtags, "Hashtags");
   q("#downloadOriginalAsset").onclick = () => downloadAsset(post);
+  if (q("#downloadOriginalAssetOverlay")) {
+    q("#downloadOriginalAssetOverlay").onpointerdown = event => event.stopPropagation();
+    q("#downloadOriginalAssetOverlay").onclick = () => downloadAsset(post);
+  }
   q("#downloadAssetDetails").onclick = () => downloadMetaTextFile(post);
   if (q("#refreshCanva")) q("#refreshCanva").onclick = () => refreshCanvaPreview(post, q("#refreshCanva"));
   if (q("#carouselPrev")) q("#carouselPrev").onclick = () => { carouselSlide = Math.max(0, carouselSlide - 1); renderInspector(hostSelector); };
@@ -1869,15 +1950,6 @@ function renderInspector(hostSelector = "#inspector") {
     applyWorkflow(updated, "ready-meta");
     const saved = await saveQuickAssetChanges(post, assetEditorChanges(assetEditorBaseline(post), updated), "marked content ready for Meta Business Suite");
     if (saved) { renderAll(); notify("Ready for Meta Business Suite"); }
-  };
-  q("#readLocationMetadata").onclick = async () => {
-    if (assetSourceOf(post) !== "uploaded" || assetKindOf(post) !== "image") return notify("GPS metadata is available for uploaded photos");
-    const gps = await readExifGpsFromUrl(post.image);
-    if (!gps) return notify("No location metadata found in this photo");
-    q("#eLocation").value = "Photo location";
-    q("#locationHelp").textContent = "Location metadata found. Replace this with the place name you want displayed.";
-    post.locationTag = { ...(post.locationTag || {}), source: "metadata" };
-    notify("Photo location found");
   };
   q("#addComment").onclick = async () => {
     const value = q("#commentText").value.trim();
@@ -2388,7 +2460,6 @@ $("#upload").onchange = async event => {
   try {
     for (const [index, file] of validFiles.entries()) {
       uploadStatus.textContent = "Uploading " + (index + 1) + " of " + validFiles.length + "…";
-      const photoGps = file.type.startsWith("image/") ? await readExifGps(file) : null;
       const uploaded = await uploadAssetFile(file);
       const id = crypto.randomUUID();
       firstId ||= id;
@@ -2406,8 +2477,8 @@ $("#upload").onchange = async event => {
         scheduleState: "draft",
         caption: "",
         notes: "",
-        location: photoGps ? "Photo location" : "",
-        locationTag: photoGps ? { name: "Photo location", latitude: photoGps.latitude, longitude: photoGps.longitude, source: "metadata" } : null,
+        location: "",
+        locationTag: null,
         tags: [],
         comments: [],
         updatedBy: currentUser.name,

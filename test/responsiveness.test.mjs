@@ -55,6 +55,14 @@ test("grid reorder animates tiles into their new positions", () => {
   assert.match(app, /animateGridReorder/);
 });
 
+test("live rearranging animates surrounding tiles as asset is dragged", () => {
+  assert.match(app, /activateGridDrag/);
+  assert.match(app, /updateGridDragMove/);
+  assert.match(app, /completeGridDrag/);
+  assert.match(css, /\.tile\.dragging\{[^}]*box-shadow/);
+  assert.match(css, /#grid\.is-reordering/);
+});
+
 test("mobile drag surfaces suppress native text selection and narrow calendar overflow", () => {
   assert.match(css, /\.tile,\.tile \*.*-webkit-user-select:none/);
   assert.match(css, /\.cal-post,\.cal-post \*.*-webkit-user-select:none/);
