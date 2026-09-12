@@ -146,6 +146,20 @@ test("migrateLegacyPlanner and compareLegacyPlanner (real Postgres)", { skip: !t
     assert.equal(changeRows.length, 4); // one change event per migrated asset/idea, not per activity row
   });
 
+  await t.test("listActiveNonPostedAssets excludes posted assets - GET /api/planner's only caller always sources those from the legacy document instead", async () => {
+    // Regression test for a Shared Pooler Egress contributor: GET
+    // /api/planner discards row storage's "posted" assets in favor of the
+    // legacy document's copy of them (see server.mjs), so fetching them
+    // from row storage at all was wasted transfer - in real production
+    // data, the vast majority of rows (~980 published Instagram posts vs.
+    // ~30-70 active drafts).
+    const repository = await freshRepository();
+    await repository.migrateLegacyPlanner(legacyPlanner);
+    const nonPosted = await repository.listActiveNonPostedAssets();
+    assert.deepEqual(nonPosted.map(post => post.id).sort(), ["a1", "a2"]);
+    assert.ok(!nonPosted.some(post => post.status === "posted"));
+  });
+
   await t.test("re-running migration with the same source is idempotent (no duplicate rows or change events)", async () => {
     const repository = await freshRepository();
     await repository.migrateLegacyPlanner(legacyPlanner);
