@@ -1,4 +1,6 @@
 const USER_KEY = "lb-content-planner-user-v1";
+const EDITOR_DRAFT_PREFIX = "lb-content-planner-editor-draft-v1:";
+const EDITOR_DRAFT_FIELDS = ["eWorkflow", "eAssignee", "ePriority", "ePillar", "eType", "eScheduleDate", "eScheduleState", "eCaption", "eNotes", "eGoal", "eHook", "eCta", "eAudio", "eHashtags", "eTagNotes", "eAltText", "eLocation"];
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 let selected = null, dragId = null, touchDrag = null, calendarTouch = null, suppressTileClickUntil = 0, suppressCalendarClickUntil = 0, currentView = "grid", editorReturnView = "grid", libraryFilter = "all", librarySearch = "";
 let settings = { pillars: [], formats: ["IMAGE", "REEL", "CAROUSEL"], goals: [], syncPhotoCount: 12 };
@@ -19,6 +21,62 @@ let igStatus = { connected: false };
 let plannerVersion = 0;
 let currentUser = loadUser();
 let initialInstagramSyncDone = false;
+
+function editorDraftKey(postId) { return `${EDITOR_DRAFT_PREFIX}${postId}`; }
+function saveEditorDraft(postId, host) {
+  try {
+    const fields = Object.fromEntries(EDITOR_DRAFT_FIELDS.map(id => [id, host.querySelector(`#${id}`)?.value ?? ""]));
+    localStorage.setItem(editorDraftKey(postId), JSON.stringify({ savedAt: new Date().toISOString(), fields }));
+  } catch {}
+}
+function restoreEditorDraft(postId, host) {
+  try {
+    const draft = JSON.parse(localStorage.getItem(editorDraftKey(postId)) || "null");
+    if (!draft?.fields) return false;
+    for (const [id, value] of Object.entries(draft.fields)) {
+      const field = host.querySelector(`#${id}`);
+      if (field) field.value = value;
+    }
+    return true;
+  } catch { return false; }
+}
+function clearEditorDraft(postId) {
+  try { localStorage.removeItem(editorDraftKey(postId)); } catch {}
+}
+async function loadRevisions() {
+  const host = $("#revisionList");
+  if (!host) return;
+  host.textContent = "Loading recovery points…";
+  try {
+    const data = await api("/api/planner/revisions");
+    const revisions = Array.isArray(data.revisions) ? data.revisions : [];
+    host.innerHTML = revisions.length
+      ? revisions.map(revision => `<div class="revision-row"><span><b>Version ${revision.version}</b><small>${new Date(revision.savedAt || revision.updatedAt).toLocaleString()}${revision.savedBy ? ` · ${esc(revision.savedBy)}` : ""}${revision.reason ? ` · ${esc(revision.reason)}` : ""}</small></span><button class="ghost" data-restore-revision="${esc(revision.id)}">Restore</button></div>`).join("")
+      : `<small>No automatic recovery points yet.</small>`;
+    host.querySelectorAll("[data-restore-revision]").forEach(button => {
+      button.onclick = async () => {
+        if (!window.confirm("Restore this recovery point? The current planner will be backed up first.")) return;
+        button.disabled = true;
+        try {
+          const restored = await api("/api/planner/restore", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ revisionId: button.dataset.restoreRevision, version: plannerVersion, actor: currentUser })
+          });
+          setPlanner(restored);
+          renderAll();
+          await loadRevisions();
+          notify("Planner restored");
+        } catch (error) {
+          button.disabled = false;
+          notify(error.message || "The planner could not be restored");
+        }
+      };
+    });
+  } catch (error) {
+    host.textContent = error.message || "Recovery points are unavailable.";
+  }
+}
 
 async function loadAccount() {
   const data = await api("/api/auth/me");
@@ -676,6 +734,14 @@ function renderInspector(hostSelector = "#inspector") {
     </div>
     <div class="actions"><button id="saveEdit" class="primary">Save</button><button id="deleteEdit" class="danger">Delete</button></div>
   </div>`;
+  restoreEditorDraft(post.id, host);
+  EDITOR_DRAFT_FIELDS.forEach(id => {
+    const field = q(`#${id}`);
+    if (!field) return;
+    const saveDraft = () => saveEditorDraft(post.id, host);
+    field.addEventListener("input", saveDraft);
+    field.addEventListener("change", saveDraft);
+  });
   qq("[data-ap]").forEach(button => {
     button.onclick = async () => {
       applyWorkflow(post, button.dataset.ap === "draft" ? "drafting" : button.dataset.ap);
@@ -771,6 +837,7 @@ function renderInspector(hostSelector = "#inspector") {
     post.updatedAt = new Date().toISOString();
     try {
       await persistPlanner("updated planned content");
+      clearEditorDraft(post.id);
       renderAll();
       notify("Post updated");
     } catch (error) {
@@ -1126,6 +1193,7 @@ $("#addCanvaBtn").onclick = async () => {
 $("#closeCanva").onclick = () => $("#canvaModal").classList.add("hidden");
 $("#canvaSearch").oninput = event => { clearTimeout(loadCanvaDesigns.timer); loadCanvaDesigns.timer = setTimeout(() => loadCanvaDesigns(event.target.value.trim()), 300); };
 $("#exportBtn").onclick = exportBackup;
+$("#loadRevisions").onclick = loadRevisions;
 $("#importInput").onchange = async event => {
   const [file] = event.target.files;
   if (!file) return;

@@ -533,7 +533,7 @@ function addActivity(planner, text) {
   planner.activity = planner.activity.slice(0, 40);
 }
 
-async function writePlanner(nextPlanner) {
+async function writePlanner(nextPlanner, meta = {}) {
   const normalized = {
     version: Number(nextPlanner?.version || 0) + 1,
     posts: Array.isArray(nextPlanner?.posts) ? nextPlanner.posts.map(normalizePost) : [],
@@ -542,6 +542,41 @@ async function writePlanner(nextPlanner) {
     settings: normalizeSettings(nextPlanner?.settings),
     updatedAt: new Date().toISOString()
   };
+
+  // Keep a recoverable copy of the version we are replacing. This is
+  // intentionally stored separately from the live planner document so a
+  // bad save or stale browser cannot destroy the last known-good state.
+  if (Number(nextPlanner?.version || 0) > 0) {
+    const previous = {
+      id: crypto.randomUUID(),
+      version: Number(nextPlanner.version || 0),
+      savedAt: nextPlanner.updatedAt || new Date().toISOString(),
+      savedBy: String(meta?.actor?.name || "").slice(0, 80),
+      reason: String(meta?.reason || "").slice(0, 180),
+      posts: Array.isArray(nextPlanner.posts) ? nextPlanner.posts.map(normalizePost) : [],
+      team: Array.isArray(nextPlanner.team) ? nextPlanner.team : [],
+      activity: Array.isArray(nextPlanner.activity) ? nextPlanner.activity.slice(0, 40) : [],
+      settings: normalizeSettings(nextPlanner.settings),
+      updatedAt: nextPlanner.updatedAt || null
+    };
+    const index = await readStored("planner-revision-index", []);
+    const history = Array.isArray(index) ? index : [];
+    const nextIndex = [
+      {
+        id: previous.id,
+        version: previous.version,
+        savedAt: previous.savedAt,
+        updatedAt: previous.updatedAt,
+        savedBy: previous.savedBy,
+        reason: previous.reason,
+        postCount: previous.posts.length
+      },
+      ...history
+    ].slice(0, 50);
+    await writeStored(`planner-revision-${previous.id}`, previous);
+    await writeStored("planner-revision-index", nextIndex);
+    await Promise.all(history.slice(49).map(item => deleteStored(`planner-revision-${item.id}`)));
+  }
   return writeStored("planner-data", normalized);
 }
 async function readPresence() {
@@ -687,9 +722,36 @@ export async function handleRequest(req, res) {
       }
       if (body?.actor?.name) {
         upsertTeamMember(planner, body.actor);
-        return sendJson(res, 200, await writePlanner(planner));
+        // Do not rewrite an existing planner during page load. A stale tab
+        // could otherwise replace newer captions/edits with its old copy.
+        return sendJson(res, 200, planner);
       }
       return sendJson(res, 200, planner);
+    }
+
+    if (url.pathname === "/api/planner/revisions" && req.method === "GET") {
+      const revisions = await readStored("planner-revision-index", []);
+      return sendJson(res, 200, { revisions: Array.isArray(revisions) ? revisions : [] });
+    }
+
+    if (url.pathname === "/api/planner/restore" && req.method === "POST") {
+      const body = await readBody(req);
+      const current = await readPlanner();
+      if (Number.isFinite(Number(body.version)) && Number(body.version) !== current.version) {
+        return sendJson(res, 409, { error: "This planner changed in another browser. Refresh before restoring a revision.", planner: current });
+      }
+      const revisions = await readStored("planner-revision-index", []);
+      const revisionInfo = (Array.isArray(revisions) ? revisions : []).find(item => item.id === body.revisionId);
+      const revision = revisionInfo ? await readStored(`planner-revision-${revisionInfo.id}`, null) : null;
+      if (!revision) return sendJson(res, 404, { error: "That planner revision is no longer available." });
+      const restored = await writePlanner({
+        ...revision,
+        // The restore itself becomes a new planner version and the current
+        // live document is backed up by writePlanner before replacement.
+        version: current.version,
+        updatedAt: new Date().toISOString()
+      }, { actor: body.actor, reason: `restored planner version ${revision.version}` });
+      return sendJson(res, 200, restored);
     }
 
     if (url.pathname === "/api/planner" && req.method === "PUT") {
@@ -705,7 +767,7 @@ export async function handleRequest(req, res) {
       planner.settings = normalizeSettings(body.settings || planner.settings);
       upsertTeamMember(planner, body.actor);
       addActivity(planner, body.reason ? `${body?.actor?.name || "Team"} ${body.reason}` : "");
-      return sendJson(res, 200, await writePlanner(planner));
+      return sendJson(res, 200, await writePlanner(planner, { actor: body.actor, reason: body.reason }));
     }
 
     if (url.pathname === "/api/instagram/status") {
