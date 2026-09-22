@@ -10,7 +10,7 @@ A Planoly/Planable-style local content planner customized for **@lorenbullardpho
 - **Sync already-published Instagram content through Meta's Instagram API**
 - Calendar view
 - Content library
-- Draft / Needs Review / Approved workflow
+- Review / Feedback / Approved workflow
 - Team feedback/comments on planned content
 - Post format: Image / Reel / Carousel
 - Caption, notes, and publish-date fields
@@ -81,6 +81,120 @@ Set the Meta callback URL to:
 `https://your-planner-domain.com/auth/instagram/callback`
 
 The local JSON files remain available as a development fallback when `DATABASE_URL` is absent.
+
+## Collaborative planner row storage (advanced)
+
+By default the planner saves as one whole JSON document per change. An
+additive, opt-in row-storage system exists behind feature flags: each
+asset, idea, and the settings object save as independent database rows
+instead, so two people editing different things never overwrite each
+other and dragging the grid doesn't snap back. This section is for
+whoever activates it in production — normal day-to-day use of the planner
+needs none of this.
+
+### Requirements
+
+- **Direct Postgres.** Row storage requires a real Postgres connection —
+  `DATABASE_URL`, `POSTGRES_URL_NON_POOLING`, or `POSTGRES_URL` (checked in
+  that order). The Supabase REST/key-value path used for the legacy
+  document is not supported for row storage; if only Supabase REST
+  credentials are present, row storage stays inactive regardless of the
+  feature flags below.
+- **Vercel Blob**, for media uploads, is unrelated to row storage but
+  already required for uploads to work at all — see "Publish the planner
+  on Vercel" above.
+
+### Feature flags
+
+Two separate flags, both off by default:
+
+- `PLANNER_ROW_STORAGE_ENABLED=true` — turns on row-storage **reads**
+  (the `GET /api/planner/changes` sync endpoint). Meant for a preview
+  verification pass before writes go live.
+- `PLANNER_ROW_WRITES_ENABLED=true` — turns on row-storage **writes**
+  (every create/edit/delete/reorder/undo endpoint). Requires
+  `PLANNER_ROW_STORAGE_ENABLED` to also be on — writes never activate on
+  their own.
+
+Neither flag is trusted at face value: every request re-checks that a
+migration has actually run and passed its parity review (next section).
+Turning a flag on before that has happened does nothing except leave the
+legacy whole-document save path exactly as it was.
+
+### Shadow migration and parity review
+
+Row storage starts empty. Before either flag can do anything, an Admin
+must run a one-way copy of the existing planner into the new tables and
+have its output reviewed:
+
+1. Sign in as an Admin and call `POST /api/admin/planner-row-migration`
+   with `{ "mode": "shadow" }`. This copies every current asset, idea,
+   the settings object, and existing activity history into the row
+   tables, and reports a parity comparison — it never changes what the
+   app actually reads or writes.
+2. Read the returned `parity` report. `ok: true` with an empty
+   `mismatches` array means every asset ID, field, order position,
+   idea, and setting matches exactly. Any mismatch blocks activation —
+   re-run the migration (it's safe to repeat; a matching source checksum
+   is a no-op) or investigate the specific mismatched IDs/fields before
+   proceeding.
+3. Only a human reviewing that report and deciding it's clean should
+   proceed to flip a flag. Nothing does this automatically.
+
+### Activation order
+
+1. Confirm direct Postgres is configured (above).
+2. Run the shadow migration and get a clean parity report (above).
+3. Set `PLANNER_ROW_STORAGE_ENABLED=true` and redeploy. Verify in a
+   preview/production session that every existing asset, idea, setting,
+   and the grid order all appear correctly — this stage only enables
+   reads, so there is nothing to roll back if something looks wrong
+   (just leave writes off and investigate).
+4. Only after that read-side check is accepted, set
+   `PLANNER_ROW_WRITES_ENABLED=true` and redeploy. From this point,
+   ordinary saves route through the narrow per-row endpoints; the
+   whole-document `PUT /api/planner` is rejected for normal use and only
+   accepts an explicit, authenticated Admin import
+   (`{ "adminImport": true }` in the request body).
+
+### Forward-fix recovery
+
+Once row writes are active, row storage is the source of truth going
+forward — there is deliberately no "copy rows back into the shared
+document" rollback, because that would recreate the exact
+whole-document-overwrite problem this system replaces. If something goes
+wrong after activation, fix it forward (correct the affected row(s)
+directly) rather than reverting to the legacy document. The legacy
+document and the pre-migration backup are retained, so nothing is
+destroyed by activation — they simply stop being written to once writes
+are enabled.
+
+### Release diagnostics and retiring the legacy fallback
+
+Every row-storage request (asset/idea/settings create/patch/delete,
+reorder, undo, and the change-feed poll) logs one line to stdout after
+activation:
+
+```json
+{"plannerDiagnostic":{"operation":"asset.patch","durationMs":12,"outcome":"ok","flags":{"rowStorageEnabled":true,"rowWritesEnabled":true}}}
+```
+
+This is deliberately narrow — only the operation name, how long it took,
+its outcome (`"ok"`, a specific error/conflict code, or `"exception"`),
+and the current flag state. It never includes captions, media URLs,
+request bodies, cookies, or passwords, so it's safe to leave on and to
+ship to whatever log aggregation this deployment already uses.
+
+Use this to decide when it's safe to remove the legacy whole-document
+read fallback and any leftover presence storage keys: after activation,
+once **seven days** have passed with no parity mismatch, no
+whole-planner conflict, and no persistence 500 in these logs, the legacy
+normal-read fallback path in `server.mjs`/`lib/store.mjs` can be removed.
+This is a manual judgment call for whoever is running the deployment at
+the time, informed by these logs — it isn't something that happens on
+its own. Keep the exported pre-migration backup and the migration record
+in `planner_migrations` regardless of when (or whether) that cleanup
+happens.
 
 ## Connect Canva working drafts
 
