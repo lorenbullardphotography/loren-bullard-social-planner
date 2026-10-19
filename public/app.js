@@ -80,7 +80,19 @@ function notify(msg) {
   clearTimeout(notify.t);
   notify.t = setTimeout(() => t.classList.add("hidden"), 2600);
 }
-function future() { return posts.filter(post => post.status !== "posted" && workflowOf(post) !== "archived"); }
+function future() {
+  return posts
+    .filter(post => post.status !== "posted" && workflowOf(post) !== "archived")
+    .sort((a, b) => {
+      const aKey = Number(a.gridSortKey);
+      const bKey = Number(b.gridSortKey);
+      const aHasKey = Number.isFinite(aKey);
+      const bHasKey = Number.isFinite(bKey);
+      if (aHasKey && bHasKey && aKey !== bKey) return aKey - bKey;
+      if (aHasKey !== bHasKey) return aHasKey ? -1 : 1;
+      return 0;
+    });
+}
 function posted() { return posts.filter(post => post.status === "posted"); }
 function visiblePosted() {
   return posted()
@@ -568,8 +580,11 @@ function assetEditorChanges(baseline, edited) {
 }
 
 function replaceAsset(postsList, savedAsset) {
-  const normalized = { ...savedAsset, assetKind: assetKindOf(savedAsset), assetSource: assetSourceOf(savedAsset) };
-  return (postsList || []).map(post => post.id === savedAsset.id ? normalized : post);
+  return (postsList || []).map(post => {
+    if (post.id !== savedAsset.id) return post;
+    const merged = { ...post, ...savedAsset };
+    return { ...merged, assetKind: assetKindOf(merged), assetSource: assetSourceOf(merged) };
+  });
 }
 
 function mergeFreshAssets(localPosts = [], latestPosts = [], { preserveMissing = true } = {}) {
@@ -653,7 +668,7 @@ function applyPlannerDelta(delta) {
         if (exists) { posts = posts.filter(post => post.id !== change.entityId); changed = true; }
         if (selected === change.entityId) selected = null;
       } else {
-        const normalized = { ...change.data, assetKind: assetKindOf(change.data), assetSource: assetSourceOf(change.data) };
+        const normalized = { ...change.data, gridSortKey: change.sortKey ?? change.data?.gridSortKey, assetKind: assetKindOf(change.data), assetSource: assetSourceOf(change.data) };
         posts = exists ? replaceAsset(posts, normalized) : [normalized, ...posts];
         changed = true;
       }
@@ -670,6 +685,11 @@ function applyPlannerDelta(delta) {
       changed = true;
     }
   }
+  // A change-feed update can arrive after the optimistic local reorder, or
+  // while another browser is editing the planner. The server's sort key is
+  // the only stable ordering signal in either case, so always normalize the
+  // in-memory order after applying a batch.
+  posts = [...future(), ...posted()];
   if (Number.isFinite(delta.nextToken)) plannerChangeToken = delta.nextToken;
   if (changed) renderAll();
 }

@@ -1185,7 +1185,12 @@ export async function handleRequest(req, res) {
         const snapshot = await plannerService.readSnapshot();
         const legacyPosted = planner.posts.filter(post => post.status === "posted");
         const legacyPostedIds = new Set(legacyPosted.map(post => post.id));
-        planner.posts = [...snapshot.posts.filter(post => !legacyPostedIds.has(post.id)).map(normalizePost), ...legacyPosted];
+        planner.posts = [
+          ...snapshot.posts
+            .filter(post => !legacyPostedIds.has(post.id))
+            .map(post => ({ ...normalizePost(post), gridSortKey: Number(post.gridSortKey) })),
+          ...legacyPosted
+        ];
         planner.scratch = snapshot.scratch.map(normalizeScratchEntry);
         if (snapshot.settings) planner.settings = snapshot.settings;
       }

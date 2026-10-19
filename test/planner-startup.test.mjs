@@ -49,3 +49,14 @@ test("retains unsaved local edits on the selected asset instead of overwriting t
   assert.match(applyPlannerDelta, /if \(change\.entityId === selected && editorDirty\)/);
   assert.doesNotMatch(applyPlannerDelta, /replaceAsset\(posts, .*\);\s*continue/);
 });
+
+test("keeps grid order stable when a background change-feed update arrives", () => {
+  const source = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const repository = fs.readFileSync(new URL("../lib/planner-repository.mjs", import.meta.url), "utf8");
+  const service = fs.readFileSync(new URL("../lib/planner-service.mjs", import.meta.url), "utf8");
+
+  assert.match(source, /gridSortKey/);
+  assert.match(source, /posts = \[\.\.\.future\(\), \.\.\.posted\(\)\];/);
+  assert.match(repository, /sort_key, deleted_at FROM planner_assets/);
+  assert.match(service, /gridSortKey: Number\(updated\.sort_key\)/);
+});
