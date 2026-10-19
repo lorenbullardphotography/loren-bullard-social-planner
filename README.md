@@ -108,13 +108,11 @@ needs none of this.
 
 Two separate flags, both off by default:
 
-- `PLANNER_ROW_STORAGE_ENABLED=true` — turns on row-storage **reads**
-  (the `GET /api/planner/changes` sync endpoint). Meant for a preview
-  verification pass before writes go live.
+- `PLANNER_ROW_STORAGE_ENABLED=true` — enables row-storage readiness checks.
 - `PLANNER_ROW_WRITES_ENABLED=true` — turns on row-storage **writes**
-  (every create/edit/delete/reorder/undo endpoint). Requires
-  `PLANNER_ROW_STORAGE_ENABLED` to also be on — writes never activate on
-  their own.
+  (every create/edit/delete/reorder/undo endpoint). Row-backed reads and the
+  change feed activate only when both flags are on, so a legacy fallback write
+  can never be followed by a stale row-backed page load.
 
 Neither flag is trusted at face value: every request re-checks that a
 migration has actually run and passed its parity review (next section).

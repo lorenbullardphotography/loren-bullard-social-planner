@@ -902,16 +902,19 @@ async function getPlannerRepository() {
   return plannerRepositoryPromise;
 }
 
-// Returns null when row storage isn't enabled/configured/verified, so
+// Returns null when row storage isn't fully enabled/configured/verified, so
 // callers can fall back to the legacy whole-document path without a
 // special case for "flag off" vs "Postgres unavailable" vs "migration not
 // yet reviewed" — all of those just mean "no service." The flag alone is
 // deliberately not trusted: hasVerifiedMigrationParity() re-checks against
 // planner_migrations on every call, so someone flipping the env var before
 // running (or after a failed) migration can't accidentally serve reads
-// from row tables that don't yet match the legacy document.
+// from row tables that don't yet match the legacy document. Reads stay on
+// the legacy document until row writes are active too; otherwise a legacy
+// fallback write (for example, a reorder) would be invisible on the next
+// row-backed page load.
 async function getPlannerReadService() {
-  if (!PLANNER_ROW_STORAGE_ENABLED) return null;
+  if (!PLANNER_ROW_STORAGE_ENABLED || !PLANNER_ROW_WRITES_ENABLED) return null;
   const repository = await getPlannerRepository();
   if (!repository) return null;
   if (!(await repository.hasVerifiedMigrationParity())) return null;

@@ -60,3 +60,8 @@ test("keeps grid order stable when a background change-feed update arrives", () 
   assert.match(repository, /sort_key, deleted_at FROM planner_assets/);
   assert.match(service, /gridSortKey: Number\(updated\.sort_key\)/);
 });
+
+test("does not serve row-backed reads while writes still fall back to the legacy planner", () => {
+  const source = fs.readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(source, /if \(!PLANNER_ROW_STORAGE_ENABLED \|\| !PLANNER_ROW_WRITES_ENABLED\) return null;/);
+});
