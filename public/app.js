@@ -93,6 +93,9 @@ function future() {
       return 0;
     });
 }
+function newestGridSortKey() {
+  return Math.min(0, ...future().map(post => Number(post.gridSortKey)).filter(Number.isFinite)) - 1024;
+}
 function posted() { return posts.filter(post => post.status === "posted"); }
 function visiblePosted() {
   return posted()
@@ -2539,6 +2542,7 @@ $("#upload").onchange = async event => {
         updatedAt: new Date().toISOString()
       };
       uploadedPosts.push(uploadedPost);
+      uploadedPost.gridSortKey = newestGridSortKey();
       posts.unshift(uploadedPost);
       // Create the planner row right after this upload's Blob step succeeds,
       // independent of the other files in this batch. Falls back to a
@@ -2602,6 +2606,7 @@ async function addCanvaDesign(design) {
   }
   const isCanvaVideo = contentType === "video";
   const post = { id, image: images[0] || mediaUrl, images, assetSource: "canva", canvaUrl: design.editUrl || design.viewUrl, canvaDesignId: design.id, canvaDoctypeName: design.doctypeName || "", canvaDesignTypes: design.designTypes || [], canvaAssetType: isCanvaVideo ? "video" : "image", canvaPageCount: design.pageCount || 0, assetKind: isCanvaVideo ? "video" : "image", cropRatio: "4:5", status: "draft", approval: "feedback", type: contentType === "carousel" ? "CAROUSEL" : isCanvaVideo ? "REEL" : "IMAGE", date: "", time: "", scheduleState: "draft", caption: "", notes: design.title, comments: [], updatedBy: currentUser.name, updatedAt: new Date().toISOString() };
+  post.gridSortKey = newestGridSortKey();
   posts.unshift(post); selected = id; $("#canvaModal").classList.add("hidden"); renderAll();
   narrowOrFallback(() => api("/api/planner/assets", {
     method: "POST", headers: { "Content-Type": "application/json" },

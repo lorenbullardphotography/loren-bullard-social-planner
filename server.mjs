@@ -513,7 +513,7 @@ export function normalizePost(post) {
           ? "approved"
           : post?.status === "draft" ? "drafting" : "idea";
   const images = Array.isArray(post?.images) ? post.images.map(image => String(image || "").slice(0, 2000)).filter(Boolean).slice(0, 100) : [];
-  const image = String(post?.image || images[0] || "").slice(0, 2000);
+  const image = post?.metaId ? `/api/instagram/image/${encodeURIComponent(String(post.metaId))}` : String(post?.image || images[0] || "").slice(0, 2000);
   const revision = Math.max(1, Number(post?.revision) || 1);
   const fieldUpdatedRevision = sanitizeFieldMap(post?.fieldUpdatedRevision, v => {
     const n = Number(v);
@@ -526,7 +526,7 @@ export function normalizePost(post) {
     id: String(post?.id || crypto.randomUUID()),
     metaId: post?.metaId ? String(post.metaId) : "",
     image,
-    images: images.length ? images : (image ? [image] : []),
+    images: post?.metaId ? [image] : images.length ? images : (image ? [image] : []),
     coverImage: String(post?.coverImage || ""),
     canvaUrl: String(post?.canvaUrl || "").slice(0, 2000),
     canvaDesignId: String(post?.canvaDesignId || "").slice(0, 200),
@@ -1382,6 +1382,25 @@ export async function handleRequest(req, res) {
       if (query) params.set("query", query.slice(0, 255));
       const data = await fetchJson(`https://api.canva.com/rest/v1/designs?${params}`, { headers: { Authorization: `Bearer ${token}` } });
       return sendJson(res, 200, { designs: (data.items || []).map(design => ({ id: design.id, title: design.title || "Untitled design", updatedAt: design.updated_at || null, thumbnail: design.thumbnail?.url || "", editUrl: design.urls?.edit_url || "", viewUrl: design.urls?.view_url || "", doctypeName: design.doctype_name || "", designTypes: Array.isArray(design.design_types) ? design.design_types : [], pageCount: design.page_count || 0 })), continuation: data.continuation || null });
+    }
+
+    if (url.pathname.startsWith("/api/instagram/image/") && req.method === "GET") {
+      const id = url.pathname.slice("/api/instagram/image/".length);
+      if (!/^\d+$/.test(id)) return sendJson(res, 400, { error: "Invalid Instagram media id." });
+      const session = await readSession();
+      if (!session.access_token) return sendJson(res, 401, { error: "Instagram is not connected yet." });
+      const mediaUrl = new URL(`https://graph.instagram.com/${API_VERSION}/${id}`);
+      mediaUrl.searchParams.set("fields", "media_type,media_url,thumbnail_url");
+      mediaUrl.searchParams.set("access_token", session.access_token);
+      const media = await fetchJson(mediaUrl);
+      const imageUrl = media.thumbnail_url || (media.media_type !== "VIDEO" ? media.media_url : "");
+      if (!imageUrl) return sendJson(res, 404, { error: "Instagram photo is unavailable." });
+      const response = await fetch(imageUrl);
+      if (!response.ok) return sendJson(res, 502, { error: "Instagram photo could not be loaded." });
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.startsWith("image/")) return sendJson(res, 502, { error: "Instagram did not return a photo." });
+      res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "private, max-age=3600" });
+      return res.end(Buffer.from(await response.arrayBuffer()));
     }
 
     if (url.pathname === "/api/instagram/media") {
