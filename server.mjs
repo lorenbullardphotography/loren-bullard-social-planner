@@ -460,6 +460,17 @@ async function deleteBlobUrl(url) {
   }
 }
 
+export function instagramConnectionError(error) {
+  const requiresReconnect = Number(error?.details?.error?.code) === 190;
+  return {
+    connected: !requiresReconnect,
+    requiresReconnect,
+    error: requiresReconnect
+      ? "Your Instagram connection has expired. Reconnect Instagram to restore live photos."
+      : error.message
+  };
+}
+
 function publicInstagramStatus(session, extra = {}) {
   return {
     connected: Boolean(session?.access_token),
@@ -1331,7 +1342,7 @@ export async function handleRequest(req, res) {
         return sendJson(res, 200, publicInstagramStatus(session, {profile}));
       } catch (e) {
         console.error("Instagram profile lookup failed:", e.message);
-        return sendJson(res, 200, publicInstagramStatus(session, {connected:true, error:e.message}));
+        return sendJson(res, 200, publicInstagramStatus(session, instagramConnectionError(e)));
       }
     }
 

@@ -961,7 +961,7 @@ function renderPlannerSettings() {
     automationHost.innerHTML = Object.entries(WORKFLOW_LABELS).filter(([workflow]) => !["published", "archived"].includes(workflow)).map(([workflow, label]) => `<label class="automation-row"><span><b>${esc(label)}</b><small>Automatically assign when a post enters this workflow.</small></span><select data-automation-workflow="${workflow}"><option value="">No automatic assignment</option>${people.map(person => `<option value="${esc(person.name)}" ${settings.workflowAutomations?.[workflow] === person.name ? "selected" : ""}>${esc(person.name)}</option>`).join("")}</select></label>`).join("");
   }
   const connected = igStatus.connected;
-  $("#settingsConnection").innerHTML = connected ? "<b>Connected ✓</b><br>@" + esc(igStatus.profile?.username || "lorenbullardphotography") + " · " + (igStatus.profile?.media_count ?? "—") + " published items" : "<b>Instagram not connected</b><br>Connect it to sync live posts into the shared planner.";
+  $("#settingsConnection").innerHTML = connected ? "<b>Connected ✓</b><br>@" + esc(igStatus.profile?.username || "lorenbullardphotography") + " · " + (igStatus.profile?.media_count ?? "—") + " published items" : "<b>Instagram not connected</b><br>" + esc(igStatus.error || "Connect it to sync live posts into the shared planner.");
   $("#settingsConnectLink").classList.toggle("hidden", connected);
   $("#settingsSync").classList.toggle("hidden", !connected);
   $("#settingsDisconnect").classList.toggle("hidden", !connected);
@@ -2835,7 +2835,7 @@ async function checkInstagram() {
     igStatus = await api("/api/instagram/status");
     const connected = igStatus.connected;
     $("#liveBadge").classList.toggle("offline", !connected);
-    $("#liveBadge").textContent = connected ? "Instagram connected" : "Not connected";
+    $("#liveBadge").textContent = connected ? "Instagram connected" : igStatus.requiresReconnect ? "Reconnect Instagram" : "Not connected";
     if (connected) {
       $("#profileUsername").textContent = `@${igStatus.profile?.username || "lorenbullardphotography"}`;
       const pieces = [];
