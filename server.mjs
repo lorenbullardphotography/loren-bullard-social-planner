@@ -342,13 +342,13 @@ function contentType(file) {
     ,".webm":"video/webm"
   })[ext] || "application/octet-stream";
 }
-async function fetchJson(url, options={}) {
+export async function fetchJson(url, options={}) {
   const response = await fetch(url, options);
   const text = await response.text();
   let data;
   try { data = JSON.parse(text); } catch { data = {raw:text}; }
   if (!response.ok || data?.error) {
-    const service = url.includes("api.canva.com") ? "Canva" : "Instagram";
+    const service = String(url).includes("api.canva.com") ? "Canva" : "Instagram";
     const message = data?.error?.message || data?.message || data?.error_description || `${service} request failed (${response.status})`;
     const err = new Error(message);
     err.details = data;
