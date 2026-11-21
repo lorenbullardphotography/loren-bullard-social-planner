@@ -963,11 +963,24 @@ async function importBackup(file) {
   notify("Backup restored");
 }
 
+// Only the visible view renders its media: rebuilding the grid, calendar,
+// library and approvals on every change meant every poll or click re-created
+// every image/video element in views nobody was looking at. switchView()
+// renders the target view, so a hidden view is never stale when shown.
+const VIEW_RENDERERS = {
+  grid: () => renderGrid(),
+  calendar: () => renderCalendar(),
+  library: () => { renderLibrary(); renderScratch(); },
+  tasks: () => { renderTasks(); renderApprovals(); },
+  approvals: () => { renderTasks(); renderApprovals(); }
+};
+function renderViewContent(name) {
+  VIEW_RENDERERS[name]?.();
+}
 function renderAll() {
   syncTopActions(currentView);
   renderStats();
-  renderTasks();
-  renderGrid();
+  renderViewContent(currentView);
   // Only render the editor that is currently visible. Rendering both produced
   // duplicate control IDs, so document-wide selectors could bind to the hidden
   // grid inspector instead of the standalone asset editor.
@@ -975,10 +988,6 @@ function renderAll() {
   else $("#inspector").innerHTML = "";
   if (currentView === "editor") renderInspector("#postEditor");
   else $("#postEditor").innerHTML = "";
-  renderCalendar();
-  renderLibrary();
-  renderScratch();
-  renderApprovals();
   renderTeam();
   renderActivity();
   renderPlannerSettings();
@@ -1223,10 +1232,26 @@ function renderActivity() {
     }).join("")
     : `<div class="empty">Shared activity will appear here as the team edits, approves, and syncs content.</div>`;
 }
-function renderGrid() {
-  const grid = $("#grid");
-  grid.innerHTML = "";
-  for (const post of ordered()) {
+// Tiles are cached by post id and reused while the post is unchanged, so
+// selecting a tile or applying a poll delta to one asset does not re-create
+// (and re-request) the media of every other tile.
+const gridTileCache = new Map();
+function reconcileTileNodes(cache, items, { signatureOf, create }) {
+  const seen = new Set();
+  const nodes = items.map(item => {
+    seen.add(item.id);
+    const signature = signatureOf(item);
+    const cached = cache.get(item.id);
+    if (cached && cached.signature === signature) return cached.node;
+    const node = create(item);
+    cache.set(item.id, { signature, node });
+    return node;
+  });
+  for (const id of [...cache.keys()]) if (!seen.has(id)) cache.delete(id);
+  return nodes;
+}
+function createGridTile(post) {
+  {
     const node = $("#tileTpl").content.firstElementChild.cloneNode(true);
     node.dataset.id = post.id;
     node.dataset.status = post.status;
@@ -1374,9 +1399,21 @@ function renderGrid() {
       node.addEventListener("pointerup", finishTouchDrag);
       node.addEventListener("pointercancel", finishTouchDrag);
     }
-    grid.appendChild(node);
+    return node;
   }
-  $("#gridEmpty").classList.toggle("hidden", ordered().length > 0);
+}
+function renderGrid() {
+  const grid = $("#grid");
+  const posts = ordered();
+  const nodes = reconcileTileNodes(gridTileCache, posts, { signatureOf: post => JSON.stringify(post), create: createGridTile });
+  nodes.forEach((node, index) => {
+    // Reused nodes may carry transient state from a finished drag.
+    node.classList.remove("dragging", "target", "reorder-pending");
+    node.style.cssText = "";
+    node.classList.toggle("selected", selected === posts[index].id);
+  });
+  grid.replaceChildren(...nodes);
+  $("#gridEmpty").classList.toggle("hidden", posts.length > 0);
 }
 
 function activateGridDrag(state, event) {
@@ -2497,8 +2534,9 @@ function switchView(name) {
   }
   if (name === "settings") renderPlannerSettings();
   if (name === "activity") { renderActivity(); refreshActivityFeed().then(refreshed => refreshed && renderActivity()); }
-  if (name === "tasks") { renderTasks(); renderActivity(); refreshActivityFeed().then(refreshed => refreshed && renderActivity()); }
-  if (name === "library") { setLibrarySection(librarySection); renderLibrary(); }
+  if (name === "tasks") { renderActivity(); refreshActivityFeed().then(refreshed => refreshed && renderActivity()); }
+  if (name === "library") setLibrarySection(librarySection);
+  renderViewContent(name);
   if (name === "grid") renderInspector();
   if (name === "editor") renderInspector("#postEditor");
   closeMobileMenu();
