@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "dev": "node server.mjs"
+    "dev": "node server.mjs",
+    "backfill:thumbs": "node --env-file=.env scripts/backfill-thumbnails.mjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.0.0",
@@ -13,5 +14,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "sharp": "^0.35.5"
   }
 }
