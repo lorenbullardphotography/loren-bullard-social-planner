@@ -500,6 +500,20 @@ export function allowedUploadContentType(clientPayload) {
   const mime = String(clientPayload || "").toLowerCase();
   return mime.startsWith("image/") || mime.startsWith("video/") ? mime : null;
 }
+// Uploaded files have unique UUID keys and are never overwritten, so browsers
+// and the CDN may cache them for a year instead of Blob's one-month default.
+export const UPLOAD_CACHE_MAX_AGE_SECONDS = 31536000;
+export function uploadTokenOptions(pathname, clientPayload, usage) {
+  if (!isPlannerUploadPathname(pathname)) throw new Error("Invalid upload path.");
+  const mime = allowedUploadContentType(clientPayload);
+  if (!mime) throw new Error("Only images and reels are supported.");
+  return {
+    allowedContentTypes: [mime],
+    addRandomSuffix: false,
+    cacheControlMaxAge: UPLOAD_CACHE_MAX_AGE_SECONDS,
+    maximumSizeInBytes: remainingUploadBytes(usage)
+  };
+}
 export function remainingUploadBytes(usage) {
   return Math.max(0, Number(usage?.limitBytes || 0) - Number(usage?.usedBytes || 0));
 }
@@ -1668,16 +1682,7 @@ export async function handleRequest(req, res) {
         const responseBody = await handleUpload({
           body,
           request: req,
-          onBeforeGenerateToken: async (pathname, clientPayload) => {
-            if (!isPlannerUploadPathname(pathname)) throw new Error("Invalid upload path.");
-            const mime = allowedUploadContentType(clientPayload);
-            if (!mime) throw new Error("Only images and reels are supported.");
-            return {
-              allowedContentTypes: [mime],
-              addRandomSuffix: false,
-              maximumSizeInBytes: remainingUploadBytes(usage)
-            };
-          }
+          onBeforeGenerateToken: async (pathname, clientPayload) => uploadTokenOptions(pathname, clientPayload, usage)
         });
         return sendJson(res, 200, responseBody);
       } catch (error) {

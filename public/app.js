@@ -2514,6 +2514,69 @@ function getStorageUsage() {
   return storageUsagePromise;
 }
 
+// Thumbnail convention (mirrors lib/thumbnail-urls.mjs, which public/app.js
+// cannot import): planner/<uuid>.<ext> -> planner/thumbs/<uuid>.jpg.
+const THUMB_MIN_SOURCE_BYTES = 150 * 1024;
+const THUMB_MAX_EDGE = 640;
+const THUMB_TIMEOUT_MS = 5000;
+function thumbKeyFor(key) {
+  const value = String(key || "");
+  if (value.startsWith("planner/thumbs/")) return value;
+  if (!value.startsWith("planner/")) return "";
+  const name = value.slice("planner/".length).replace(/\.[^./]+$/, "");
+  return name ? "planner/thumbs/" + name + ".jpg" : "";
+}
+function thumbUrlFor(url) {
+  let parsed;
+  try { parsed = new URL(String(url || "")); } catch { return ""; }
+  if (!/^https?:$/.test(parsed.protocol)) return "";
+  const key = thumbKeyFor(parsed.pathname.replace(/^\//, ""));
+  if (!key) return "";
+  parsed.pathname = "/" + key;
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.toString();
+}
+function canvasToThumbBlob(source, width, height) {
+  const scale = Math.min(1, THUMB_MAX_EDGE / Math.max(width, height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  canvas.getContext("2d").drawImage(source, 0, 0, canvas.width, canvas.height);
+  return new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.8));
+}
+// Returns a small JPEG preview of an image or video file, or null when the
+// browser cannot decode it (HEIC, corrupt files) — callers treat null as
+// "no thumbnail" and carry on with the original only.
+async function makeThumbnailBlob(file) {
+  const work = (async () => {
+    if (file.type.startsWith("image/")) {
+      const bitmap = await createImageBitmap(file);
+      try { return await canvasToThumbBlob(bitmap, bitmap.width, bitmap.height); } finally { bitmap.close(); }
+    }
+    if (file.type.startsWith("video/")) {
+      const objectUrl = URL.createObjectURL(file);
+      try {
+        const video = document.createElement("video");
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = "auto";
+        video.src = objectUrl;
+        await new Promise((resolve, reject) => {
+          video.onloadeddata = resolve;
+          video.onerror = () => reject(new Error("video decode failed"));
+        });
+        video.currentTime = Math.min(0.1, (video.duration || 0.1) / 2);
+        await new Promise(resolve => { video.onseeked = resolve; setTimeout(resolve, 1500); });
+        return video.videoWidth ? await canvasToThumbBlob(video, video.videoWidth, video.videoHeight) : null;
+      } finally { URL.revokeObjectURL(objectUrl); }
+    }
+    return null;
+  })();
+  const timeout = new Promise(resolve => setTimeout(() => resolve(null), THUMB_TIMEOUT_MS));
+  try { return await Promise.race([work, timeout]); } catch { return null; }
+}
+
 async function uploadAssetFile(file) {
   if (file.size > 30 * 1024 * 1024) throw new Error("Assets must be 30 MB or smaller.");
   const usage = await getStorageUsage();
@@ -2529,6 +2592,22 @@ async function uploadAssetFile(file) {
       contentType: file.type,
       clientPayload: file.type
     });
+    // Best effort: a missing thumbnail only means tiles fall back to the
+    // original, so nothing here may fail the asset upload.
+    if (file.size >= THUMB_MIN_SOURCE_BYTES) {
+      try {
+        const thumb = await makeThumbnailBlob(file);
+        const thumbPath = thumbKeyFor(pathname);
+        if (thumb && thumbPath) {
+          await upload(thumbPath, thumb, {
+            access: "public",
+            handleUploadUrl: "/api/assets/upload-token",
+            contentType: "image/jpeg",
+            clientPayload: "image/jpeg"
+          });
+        }
+      } catch {}
+    }
     return { url: result.url, kind: file.type.startsWith("video/") ? "video" : "image" };
   }
   const uploadFile = await prepareUploadFile(file);
