@@ -14,13 +14,36 @@ let calCursor = new Date();
 // — so this covers every image in the app, present and future, without
 // needing an onerror attribute on each one.
 const BROKEN_IMAGE_PLACEHOLDER = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect width="100%" height="100%" fill="#e4e4e4"/><g fill="none" stroke="#9a9a9a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><rect x="38" y="48" width="124" height="94" rx="8"/><circle cx="72" cy="80" r="10"/><path d="M38 128l34-34 24 24 30-36 36 44"/></g><text x="100" y="172" text-anchor="middle" font-family="system-ui,sans-serif" font-size="14" fill="#8a8a8a">Image unavailable</text></svg>`)}`;
+// Tiles load a small thumbnail first (see tileImageMarkup). On failure the
+// original is tried once (or, for videos, a metadata-only <video>), and only
+// then the placeholder, so a missing thumbnail never shows as a broken image.
+function resolveImageError(img) {
+  if (img.dataset.fallbackApplied) return "ignored";
+  if (img.dataset.fallbackVideo) {
+    const video = document.createElement("video");
+    video.src = img.dataset.fallbackVideo;
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    video.className = img.className;
+    video.style.cssText = img.style.cssText;
+    img.replaceWith(video);
+    return "video";
+  }
+  if (img.dataset.fallbackSrc) {
+    const original = img.dataset.fallbackSrc;
+    delete img.dataset.fallbackSrc;
+    img.src = original;
+    return "fallback";
+  }
+  img.dataset.fallbackApplied = "true";
+  img.classList.add("img-broken");
+  img.src = BROKEN_IMAGE_PLACEHOLDER;
+  return "placeholder";
+}
 if (typeof document.addEventListener === "function") {
   document.addEventListener("error", event => {
-    const img = event.target;
-    if (!(img instanceof HTMLImageElement) || img.dataset.fallbackApplied) return;
-    img.dataset.fallbackApplied = "true";
-    img.classList.add("img-broken");
-    img.src = BROKEN_IMAGE_PLACEHOLDER;
+    if (event.target instanceof HTMLImageElement) resolveImageError(event.target);
   }, true);
 }
 
@@ -159,10 +182,30 @@ function carouselImages(post) {
   const images = Array.isArray(post.images) ? post.images.filter(Boolean) : [];
   return images.length ? images : (post.image ? [post.image] : []);
 }
+// Tiles show a ~640px thumbnail stored beside each upload (planner/thumbs/),
+// lazily loaded, instead of the full-size original. Instagram, data: and
+// local /uploads/ images have no thumbnail and are used as-is.
+function isVideoTile(post) {
+  return !hasReelCover(post) && (post.assetKind === "video" || post.type === "REEL" && /\.((mp4)|(mov)|(webm))($|\?)/i.test(post.image));
+}
+function tileImageAttrs(url, { video = false } = {}) {
+  const src = String(url || "");
+  const thumb = thumbUrlFor(src);
+  if (!thumb) return { src, fallbackSrc: "", fallbackVideo: "", nativeVideo: video };
+  return video
+    ? { src: thumb, fallbackSrc: "", fallbackVideo: src, nativeVideo: false }
+    : { src: thumb, fallbackSrc: src, fallbackVideo: "", nativeVideo: false };
+}
+function tileImageMarkup(post, className = "", { url = gridImageOf(post), video, allowVideo = false } = {}) {
+  const isVideo = video ?? (url === post.image && assetKindOf(post) === "video");
+  const attrs = tileImageAttrs(url, { video: isVideo });
+  if (attrs.nativeVideo && allowVideo) {
+    return `<video class="${className}" src="${esc(attrs.src)}" muted playsinline preload="metadata"></video>`;
+  }
+  return `<img class="${className}" src="${esc(attrs.src)}"${attrs.fallbackSrc ? ` data-fallback-src="${esc(attrs.fallbackSrc)}"` : ""}${attrs.fallbackVideo ? ` data-fallback-video="${esc(attrs.fallbackVideo)}"` : ""} loading="lazy" decoding="async" alt="">`;
+}
 function assetMediaMarkup(post, className = "") {
-  return assetKindOf(post) === "video"
-    ? `<video class="${className}" src="${esc(post.image)}" muted playsinline preload="metadata"></video>`
-    : `<img class="${className}" src="${esc(post.image)}" alt="">`;
+  return tileImageMarkup(post, className, { url: post.image, video: assetKindOf(post) === "video", allowVideo: true });
 }
 function libraryAssetBadges(post) {
   const assetKind = assetKindOf(post);
@@ -1147,7 +1190,7 @@ function renderTasks() {
   $("#approvalsTab")?.setAttribute("aria-selected", String(isApprovals));
   $("#activityTab")?.setAttribute("aria-selected", String(taskTab === "activity"));
   if (isApprovals) { renderApprovals(); return; }
-  host.innerHTML = items.length ? items.map(post => `<button class="attention-card task-card" data-open="${post.id}"><img src="${post.image}" alt=""><span><b>${esc(post.notes || post.caption || "Untitled content")}</b><small>${esc(taskReason(post))} · ${esc(post.dueDate || post.date || "No due date")}</small></span><strong class="task-assignee">${esc(post.assignee || "Unassigned")}</strong><i>›</i></button>`).join("") : `<div class="empty">No ${taskTab === "mine" ? "tasks assigned to you" : "team tasks"} right now.</div>`;
+  host.innerHTML = items.length ? items.map(post => `<button class="attention-card task-card" data-open="${post.id}">${tileImageMarkup(post, "", { url: post.image })}<span><b>${esc(post.notes || post.caption || "Untitled content")}</b><small>${esc(taskReason(post))} · ${esc(post.dueDate || post.date || "No due date")}</small></span><strong class="task-assignee">${esc(post.assignee || "Unassigned")}</strong><i>›</i></button>`).join("") : `<div class="empty">No ${taskTab === "mine" ? "tasks assigned to you" : "team tasks"} right now.</div>`;
   $$("#taskList [data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open, true));
 }
 function renderStats() {
@@ -1192,13 +1235,21 @@ function renderGrid() {
     // touch behavior. Native HTML drag events are inconsistent in responsive
     // Chrome and unavailable on many mobile browsers.
     node.draggable = false;
-    if (!hasReelCover(post) && (post.assetKind === "video" || post.type === "REEL" && /\.((mp4)|(mov)|(webm))($|\?)/i.test(post.image))) {
+    const tileAttrs = tileImageAttrs(gridImageOf(post), { video: isVideoTile(post) });
+    if (tileAttrs.nativeVideo) {
       const video = document.createElement("video");
-      video.src = post.image;
+      video.src = tileAttrs.src;
       configureGridVideo(video);
       video.className = "tile-media";
       node.querySelector("img").replaceWith(video);
-    } else node.querySelector("img").src = gridImageOf(post);
+    } else {
+      const tileImg = node.querySelector("img");
+      tileImg.loading = "lazy";
+      tileImg.decoding = "async";
+      if (tileAttrs.fallbackSrc) tileImg.dataset.fallbackSrc = tileAttrs.fallbackSrc;
+      if (tileAttrs.fallbackVideo) { tileImg.dataset.fallbackVideo = tileAttrs.fallbackVideo; tileImg.classList.add("tile-media"); }
+      tileImg.src = tileAttrs.src;
+    }
     const tileMedia = node.querySelector("img, video");
     if (tileMedia) tileMedia.draggable = false;
     const media = node.querySelector(".tile-media") || node.querySelector("img");
@@ -2099,7 +2150,7 @@ function renderCalendar() {
   $$("#calendarViewSwitcher [data-calendar-view]").forEach(button => button.classList.toggle("active", button.dataset.calendarView === calendarView));
   if (calendarView === "year") return renderCalendarYear(year);
   const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const calendarPostMarkup = (post, extraClass = "") => `<div class="cal-post ${extraClass}" data-workflow="${workflowOf(post)}" draggable="true" data-open="${post.id}" data-drag-post="${post.id}" role="button" tabindex="0" aria-label="Edit ${esc(post.notes || post.caption || post.type || "post")}"><img src="${esc(gridImageOf(post))}" alt=""><span>${esc((post.caption || post.notes || post.type || "Post").slice(0, 28))}<small>${esc(post.time || scheduleLabel(post))}</small></span></div>`;
+  const calendarPostMarkup = (post, extraClass = "") => `<div class="cal-post ${extraClass}" data-workflow="${workflowOf(post)}" draggable="true" data-open="${post.id}" data-drag-post="${post.id}" role="button" tabindex="0" aria-label="Edit ${esc(post.notes || post.caption || post.type || "post")}">${tileImageMarkup(post)}<span>${esc((post.caption || post.notes || post.type || "Post").slice(0, 28))}<small>${esc(post.time || scheduleLabel(post))}</small></span></div>`;
   let html = names.map(name => `<div class="cal-head">${name}</div>`).join("");
   for (let i = 0; i < (calendarView === "week" ? 7 : 42); i++) {
     const day = new Date(begin);
@@ -2391,14 +2442,14 @@ function renderApprovals() {
   if (approvalDetail) {
     const section = sections.find(item => item.key === approvalDetail);
     if (!section) { approvalDetail = null; return renderApprovals(); }
-    host.innerHTML = `<div class="approval-detail-head"><div><p class="eyebrow">APPROVAL QUEUE</p><h3>${esc(section.label)}</h3><p>Review every item in this section.</p></div><button id="backToApprovals" class="ghost" type="button">← All approvals</button></div><div class="approval-detail-list">${section.posts.map(post => `<button class="approval-card" data-open="${post.id}" type="button"><img src="${esc(post.image)}" alt=""><span>${workflowPill(section.key)}<b>${esc(post.notes || post.caption || post.type)}</b><small>${esc(formatSchedule(post))}</small></span></button>`).join("") || `<div class="empty">Nothing here.</div>`}</div>`;
+    host.innerHTML = `<div class="approval-detail-head"><div><p class="eyebrow">APPROVAL QUEUE</p><h3>${esc(section.label)}</h3><p>Review every item in this section.</p></div><button id="backToApprovals" class="ghost" type="button">← All approvals</button></div><div class="approval-detail-list">${section.posts.map(post => `<button class="approval-card" data-open="${post.id}" type="button">${tileImageMarkup(post, "", { url: post.image })}<span>${workflowPill(section.key)}<b>${esc(post.notes || post.caption || post.type)}</b><small>${esc(formatSchedule(post))}</small></span></button>`).join("") || `<div class="empty">Nothing here.</div>`}</div>`;
     $("#backToApprovals").onclick = () => { approvalDetail = null; renderTasks(); };
     $$("#approvalPanel [data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open, true));
     return;
   }
   host.innerHTML = `<div class="approval-intro"><div><p class="eyebrow">REVIEW QUEUE</p><h3>Approvals</h3><p>Keep every stage of review visible without stacking the queue.</p></div></div><div class="approval-board">${sections.map(section => {
     const post = section.posts[0];
-    return `<section class="approval-col" data-workflow="${section.key}"><h4>${esc(section.label)}</h4>${post ? `<button class="approval-summary" data-approval-section="${section.key}" type="button"><img src="${esc(post.image)}" alt=""><span>${workflowPill(section.key)}<b>${esc(post.notes || post.caption || post.type)}</b><small>${esc(formatSchedule(post))}</small></span>${section.remaining ? `<strong class="approval-more">+${section.remaining}</strong>` : ""}</button>` : `<div class="empty">Nothing here.</div>`}</section>`;
+    return `<section class="approval-col" data-workflow="${section.key}"><h4>${esc(section.label)}</h4>${post ? `<button class="approval-summary" data-approval-section="${section.key}" type="button">${tileImageMarkup(post, "", { url: post.image })}<span>${workflowPill(section.key)}<b>${esc(post.notes || post.caption || post.type)}</b><small>${esc(formatSchedule(post))}</small></span>${section.remaining ? `<strong class="approval-more">+${section.remaining}</strong>` : ""}</button>` : `<div class="empty">Nothing here.</div>`}</section>`;
   }).join("")}</div>`;
   $$("#approvalPanel [data-approval-section]").forEach(node => node.onclick = () => {
     const section = sections.find(item => item.key === node.dataset.approvalSection);
