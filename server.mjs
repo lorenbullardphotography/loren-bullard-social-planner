@@ -1273,18 +1273,32 @@ export async function handleRequest(req, res) {
       const plannerService = await getPlannerReadService();
       if (!plannerService) return sendJson(res, 503, { error: "Row storage is not enabled in this environment." });
       const since = Number(url.searchParams.get("since")) || 0;
+      // Instagram-synced ("posted") content deliberately stays out of row
+      // storage — see readSnapshot()'s comment in lib/planner-service.mjs —
+      // so it never shows up in `changes` above. Without this, a tab left
+      // open across an Instagram sync would never see the new posts until
+      // it was reloaded. planner-data's `version` field (bumped by
+      // writePlanner on every /api/instagram/sync) is a cheap signal for
+      // "go fetch the legacy posted list again" without putting that
+      // (potentially large) history into the live per-row change feed.
+      const sinceLegacy = Number(url.searchParams.get("sinceLegacy")) || 0;
       const startedAt = Date.now();
-      const latest = await plannerService.latestChangeToken();
-      if (since >= latest) {
+      const [latest, legacyVersionRaw] = await Promise.all([
+        plannerService.latestChangeToken(),
+        readStoredField("planner-data", "version", 0)
+      ]);
+      const legacyVersion = Number(legacyVersionRaw) || 0;
+      const legacyChanged = legacyVersion !== sinceLegacy;
+      if (since >= latest && !legacyChanged) {
         logPlannerDiagnostic(buildPlannerDiagnostic({ operation: "planner.changes", startedAt, outcome: "not-modified" }));
         res.setHeader("ETag", `"seq-${latest}"`);
         res.writeHead(304);
         return res.end();
       }
-      const { changes, nextToken } = await plannerService.changesSince(since);
+      const { changes, nextToken } = since < latest ? await plannerService.changesSince(since) : { changes: [], nextToken: latest };
       logPlannerDiagnostic(buildPlannerDiagnostic({ operation: "planner.changes", startedAt, outcome: "ok" }));
       res.setHeader("ETag", `"seq-${nextToken}"`);
-      return sendJson(res, 200, { changes, nextToken });
+      return sendJson(res, 200, { changes, nextToken, legacyVersion });
     }
 
     // Once row storage is active, ordinary saves record activity into

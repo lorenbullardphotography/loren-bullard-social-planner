@@ -662,12 +662,27 @@ function syncTopActions(view) {
     action.setAttribute("aria-hidden", String(!visible));
   });
 }
-async function fetchPlannerChanges(since) {
-  const response = await fetch(`/api/planner/changes?since=${since}`);
+async function fetchPlannerChanges(since, sinceLegacy) {
+  const response = await fetch(`/api/planner/changes?since=${since}&sinceLegacy=${sinceLegacy}`);
   if (response.status === 304) return { status: 304 };
   if (response.status === 503) return { status: 503 };
   if (!response.ok) throw new Error("Could not check for planner updates.");
   return { status: 200, data: await response.json() };
+}
+
+// Instagram-synced ("posted") content never appears in the row-storage
+// change feed (see the matching comment on GET /api/planner/changes in
+// server.mjs) — so when that endpoint reports a new `legacyVersion`, the
+// only way to pick up the newly-synced posts is to refetch the merged
+// list from GET /api/planner, same as the row-storage-disabled fallback
+// path below already does for every change.
+async function refreshLegacyPostedContent(nextLegacyVersion) {
+  try {
+    const latest = await api("/api/planner");
+    posts = mergeFreshAssets(posts, latest.posts || [], { preserveMissing: false });
+    plannerVersion = Number(nextLegacyVersion) || Number(latest?.version || 0);
+    renderAll();
+  } catch {}
 }
 
 // Applies a row-storage change-feed batch (see fetchPlannerChanges) to local
@@ -743,10 +758,13 @@ async function refreshActivityFeed() {
 async function refreshSharedPlanner() {
   if (!shouldRefreshPlanner({ currentView, selected })) return "skipped";
   try {
-    const result = await fetchPlannerChanges(plannerChangeToken);
+    const result = await fetchPlannerChanges(plannerChangeToken, plannerVersion);
     if (result.status === 304) return "delta";
     if (result.status === 200) {
       applyPlannerDelta(result.data);
+      if (Number.isFinite(result.data.legacyVersion) && result.data.legacyVersion !== plannerVersion) {
+        await refreshLegacyPostedContent(result.data.legacyVersion);
+      }
       if (await refreshActivityFeed()) renderActivity();
       return "delta";
     }

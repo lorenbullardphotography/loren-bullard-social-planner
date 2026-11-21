@@ -31,7 +31,12 @@ async function resetSchema({ seedVerifiedMigration = true } = {}) {
   const { default: postgres } = await import("postgres");
   const { createPlannerRepository } = await import("../lib/planner-repository.mjs");
   const sql = postgres(testDatabaseUrl, { ssl: false });
-  await sql`DROP TABLE IF EXISTS planner_assets, planner_ideas, planner_settings, planner_activity, planner_changes, planner_migrations CASCADE`;
+  // planner_store holds the legacy whole-document, including the `version`
+  // field GET /api/planner/changes now compares against a client's
+  // `sinceLegacy` token (see server.mjs) to know when Instagram-synced
+  // content needs a refetch — leaving it un-reset let one test's writes
+  // leak into another's "no changes yet" expectations.
+  await sql`DROP TABLE IF EXISTS planner_assets, planner_ideas, planner_settings, planner_activity, planner_changes, planner_migrations, planner_store CASCADE`;
   if (seedVerifiedMigration) {
     const repository = createPlannerRepository({ sql, workspaceId: "default" });
     await repository.ensureSchema();

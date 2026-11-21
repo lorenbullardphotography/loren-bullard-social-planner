@@ -24,7 +24,7 @@ test("polls the row-storage change feed only while the tab is visible, and only 
 
   // The delta poll itself must query GET /api/planner/changes, not the
   // whole document.
-  assert.match(source, /fetch\(`\/api\/planner\/changes\?since=\$\{since\}`\)/);
+  assert.match(source, /fetch\(`\/api\/planner\/changes\?since=\$\{since\}&sinceLegacy=\$\{sinceLegacy\}`\)/);
 
   // A poll that had to fall back to the legacy whole-document endpoint
   // (row storage not enabled) must not be rescheduled at the fast delta
