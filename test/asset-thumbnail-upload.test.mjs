@@ -34,7 +34,7 @@ const bigImage = () => new File([new Uint8Array(200 * 1024)], "a.jpg", { type: "
 test("uploadAssetFile uploads a thumbnail beside the original at the thumbs path", async () => {
   const { context, uploads } = makeContext();
   const result = await context.uploadAssetFile(bigImage());
-  assert.equal(result.url, "https://store.public.blob.vercel-storage.com/planner/uuid-1.jpeg".replace(".jpeg", ".jpeg"));
+  assert.equal(result.url, "https://store.public.blob.vercel-storage.com/planner/uuid-1.jpeg");
   assert.equal(result.kind, "image");
   assert.deepEqual(uploads.map(u => u.pathname), ["planner/uuid-1.jpeg", "planner/thumbs/uuid-1.jpg"]);
   assert.equal(uploads[1].options.contentType, "image/jpeg");
