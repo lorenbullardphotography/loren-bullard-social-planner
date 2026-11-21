@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { deleteStored, getDatabaseClient, hasDirectDatabase, readStored, readStoredField, readStoredIds, storageMode, writeStored, writeStoredField } from "./lib/store.mjs";
+import { dataDir, deleteStored, getDatabaseClient, hasDirectDatabase, readStored, readStoredField, readStoredIds, storageMode, writeStored, writeStoredField } from "./lib/store.mjs";
 import { applyWorkflowAutomations, normalizeWorkflowAutomations } from "./lib/workflow-automations.mjs";
 import { createPlannerRepository } from "./lib/planner-repository.mjs";
 import { createPlannerService } from "./lib/planner-service.mjs";
@@ -25,7 +25,34 @@ const PLANNER_ROW_WRITES_ENABLED = String(process.env.PLANNER_ROW_WRITES_ENABLED
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
-const uploadsDir = path.join(publicDir, "uploads");
+// Uploads live under DATA_DIR (the persistent disk in production, e.g.
+// Render's /var/data — see render.yaml and lib/store.mjs), not under the
+// app's own code directory: publicDir gets replaced wholesale on every
+// deploy, so anything written there is gone on the next release.
+const uploadsDir = path.join(dataDir, "uploads");
+const legacyUploadsDir = path.join(publicDir, "uploads");
+
+// One-time migration for files saved under the old, deploy-ephemeral
+// location before this fix: move them under DATA_DIR so existing asset
+// links don't 404. Safe to run on every boot — skips once the old
+// directory is empty/gone, and never overwrites a same-named file.
+function migrateLegacyUploads() {
+  try {
+    if (!fs.existsSync(legacyUploadsDir)) return;
+    const entries = fs.readdirSync(legacyUploadsDir);
+    if (!entries.length) return;
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    for (const entry of entries) {
+      const from = path.join(legacyUploadsDir, entry);
+      const to = path.join(uploadsDir, entry);
+      if (fs.statSync(from).isDirectory() || fs.existsSync(to)) continue;
+      fs.renameSync(from, to);
+    }
+  } catch (error) {
+    console.error("Legacy uploads migration failed:", error.message);
+  }
+}
+migrateLegacyUploads();
 
 function loadDotEnv() {
   const envPath = path.join(__dirname, ".env");
@@ -55,7 +82,11 @@ const CANVA_REDIRECT_URI = process.env.CANVA_REDIRECT_URI || `http://localhost:$
 const API_VERSION = process.env.META_API_VERSION || "v25.0";
 const PLANNER_PASSWORD = process.env.PLANNER_PASSWORD || "";
 const AUTH_SECRET = process.env.AUTH_SECRET || PLANNER_PASSWORD || "planner-development-secret";
-const ASSET_STORAGE_LIMIT_MB = Math.max(50, Number(process.env.ASSET_STORAGE_LIMIT_MB) || 500);
+// Default assumes Vercel Blob's Hobby (free) plan, whose real cap is 1GB —
+// kept a little under that so this app's own check trips before Vercel's
+// does. Set ASSET_STORAGE_LIMIT_MB explicitly if the account is on a
+// different plan.
+const ASSET_STORAGE_LIMIT_MB = Math.max(50, Number(process.env.ASSET_STORAGE_LIMIT_MB) || 950);
 const ACCOUNT_SESSION_DAYS = 14;
 const ROLLBACK_HISTORY_LIMIT = 40;
 
@@ -284,6 +315,7 @@ async function saveCanvaExport(url, formatType) {
   const blob = await blobClient();
   if (blob) {
     const saved = await blob.put(`planner/${filename}`, bytes, { access: "public", contentType, addRandomSuffix: false });
+    recordBlobUsageDelta(bytes.length);
     return saved.url;
   }
   fs.mkdirSync(uploadsDir, { recursive: true });
@@ -428,9 +460,22 @@ async function blobClient() {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
   return import("@vercel/blob");
 }
+// blobUsage() used to re-list every blob in the store (paginating the full
+// result set) on every single upload request, to answer "is there room for
+// this one more file?" — fine with a handful of assets, but it means every
+// upload does O(blob count) Vercel Blob API calls, getting slower and more
+// rate-limit-prone as the library grows. Cached for a short window instead:
+// uploads/deletes we perform ourselves nudge the cached figure immediately
+// (see recordBlobUsageDelta below), so it won't drift for long, and anything
+// else (a blob removed outside this app) is caught at the next refresh.
+const BLOB_USAGE_CACHE_MS = 30_000;
+let blobUsageCache = null;
 async function blobUsage() {
   const client = await blobClient();
   if (!client) return { configured: false, usedBytes: 0, limitBytes: ASSET_STORAGE_LIMIT_MB * 1024 * 1024 };
+  if (blobUsageCache && Date.now() - blobUsageCache.fetchedAt < BLOB_USAGE_CACHE_MS) {
+    return blobUsageCache;
+  }
   let cursor;
   let usedBytes = 0;
   do {
@@ -438,7 +483,15 @@ async function blobUsage() {
     usedBytes += (page.blobs || []).reduce((total, blob) => total + Number(blob.size || 0), 0);
     cursor = page.hasMore ? page.cursor : null;
   } while (cursor);
-  return { configured: true, usedBytes, limitBytes: ASSET_STORAGE_LIMIT_MB * 1024 * 1024 };
+  blobUsageCache = { configured: true, usedBytes, limitBytes: ASSET_STORAGE_LIMIT_MB * 1024 * 1024, fetchedAt: Date.now() };
+  return blobUsageCache;
+}
+// Called right after a put/delete we performed ourselves so the cached
+// total reflects it immediately, rather than waiting out the cache window
+// (during which a burst of uploads could otherwise all under-count usage
+// off the same stale snapshot).
+function recordBlobUsageDelta(bytes) {
+  if (blobUsageCache) blobUsageCache.usedBytes = Math.max(0, blobUsageCache.usedBytes + bytes);
 }
 export function isPlannerUploadPathname(pathname) {
   return typeof pathname === "string" && pathname.startsWith("planner/");
@@ -455,6 +508,10 @@ async function deleteBlobUrl(url) {
   try {
     const client = await blobClient();
     if (client) await client.del(url);
+    // Size of the deleted blob isn't known here cheaply, so rather than
+    // guess, just drop the cache — the next blobUsage() call pays for one
+    // fresh recount instead of drifting low forever.
+    blobUsageCache = null;
   } catch (error) {
     console.error("Blob cleanup failed:", error.message);
   }
@@ -1403,7 +1460,13 @@ export async function handleRequest(req, res) {
       const mediaUrl = new URL(`https://graph.instagram.com/${API_VERSION}/${id}`);
       mediaUrl.searchParams.set("fields", "media_type,media_url,thumbnail_url");
       mediaUrl.searchParams.set("access_token", session.access_token);
-      const media = await fetchJson(mediaUrl);
+      let media;
+      try {
+        media = await fetchJson(mediaUrl);
+      } catch (error) {
+        const connection = instagramConnectionError(error);
+        return sendJson(res, connection.requiresReconnect ? 401 : 502, { error: connection.error, requiresReconnect: connection.requiresReconnect });
+      }
       const imageUrl = media.thumbnail_url || (media.media_type !== "VIDEO" ? media.media_url : "");
       if (!imageUrl) return sendJson(res, 404, { error: "Instagram photo is unavailable." });
       const response = await fetch(imageUrl);
@@ -1628,6 +1691,7 @@ export async function handleRequest(req, res) {
           return sendJson(res, 413, { error: `Storage limit reached. ${Math.max(0, usage.limitBytes - usage.usedBytes)} bytes remain.` });
         }
         const saved = await blob.put(`planner/${filename}`, bytes, { access: "public", contentType: mime, addRandomSuffix: false });
+        recordBlobUsageDelta(bytes.length);
         return sendJson(res, 201, { url: saved.url, kind: mime.startsWith("video/") ? "video" : "image", storage: "blob" });
       }
       try {
@@ -1722,6 +1786,20 @@ export async function handleRequest(req, res) {
         console.error("Instagram OAuth callback token exchange failed:", e.message);
         return redirect(res, `/?meta=error&message=${encodeURIComponent(`Instagram connection failed: ${e.message}`)}`);
       }
+    }
+
+    // Local-fallback uploads now live under DATA_DIR instead of publicDir
+    // (see uploadsDir above), so they need their own route — the generic
+    // static handler below only ever looks inside publicDir.
+    if (url.pathname.startsWith("/uploads/") && req.method === "GET") {
+      const filename = path.basename(decodeURIComponent(url.pathname.slice("/uploads/".length)));
+      const file = path.join(uploadsDir, filename);
+      if (!filename || !file.startsWith(uploadsDir) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+        res.writeHead(404, {"Content-Type":"text/plain; charset=utf-8"});
+        return res.end("Not found");
+      }
+      res.writeHead(200, {"Content-Type":contentType(file)});
+      return fs.createReadStream(file).pipe(res);
     }
 
     let requested = decodeURIComponent(url.pathname);

@@ -6,6 +6,24 @@ let selected = null, dragId = null, touchDrag = null, calendarTouch = null, supp
 let settings = { pillars: [], formats: ["IMAGE", "REEL", "CAROUSEL"], goals: [], syncPhotoCount: 12, workflowAutomations: {} };
 let calCursor = new Date();
 
+// Any <img> whose src 404s or otherwise fails to load (an expired Instagram
+// token, an upload lost before the DATA_DIR fix, a deleted blob) would
+// otherwise show the browser's bare broken-image icon, indistinguishable
+// from a real rendering bug. The "error" event on <img> doesn't bubble, but
+// it can still be caught via a single capturing-phase listener on document
+// — so this covers every image in the app, present and future, without
+// needing an onerror attribute on each one.
+const BROKEN_IMAGE_PLACEHOLDER = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect width="100%" height="100%" fill="#e4e4e4"/><g fill="none" stroke="#9a9a9a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><rect x="38" y="48" width="124" height="94" rx="8"/><circle cx="72" cy="80" r="10"/><path d="M38 128l34-34 24 24 30-36 36 44"/></g><text x="100" y="172" text-anchor="middle" font-family="system-ui,sans-serif" font-size="14" fill="#8a8a8a">Image unavailable</text></svg>`)}`;
+if (typeof document.addEventListener === "function") {
+  document.addEventListener("error", event => {
+    const img = event.target;
+    if (!(img instanceof HTMLImageElement) || img.dataset.fallbackApplied) return;
+    img.dataset.fallbackApplied = "true";
+    img.classList.add("img-broken");
+    img.src = BROKEN_IMAGE_PLACEHOLDER;
+  }, true);
+}
+
 const demo = (text, bg, fg = "#fff") => `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000"><rect width="100%" height="100%" fill="${bg}"/><circle cx="500" cy="390" r="165" fill="rgba(255,255,255,.15)"/><text x="500" y="585" text-anchor="middle" font-family="Georgia" font-size="57" fill="${fg}">${text}</text></svg>`)}`;
 const seed = [
   { id: crypto.randomUUID(), image: "/assets/family-films.jpg", assetSource: "uploaded", assetKind: "image", status: "planned", approval: "needs-review", type: "REEL", date: "2026-09-08", time: "09:00", scheduleState: "ready", caption: "", notes: "Use emotional family hook.", comments: [] },
