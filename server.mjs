@@ -501,9 +501,23 @@ export function allowedUploadContentType(clientPayload) {
 // Uploaded files have unique UUID keys and are never overwritten, so browsers
 // and the CDN may cache them for a year instead of Blob's one-month default.
 export const UPLOAD_CACHE_MAX_AGE_SECONDS = 31536000;
+// Browsers send {"type","size"} so the server can count an upload the moment
+// its token is issued (a direct browser upload never passes through us);
+// a bare mime string is still accepted.
+export function parseUploadPayload(clientPayload) {
+  const raw = String(clientPayload || "");
+  if (raw.trimStart().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(raw);
+      const size = Number(parsed.size);
+      return { mime: String(parsed.type || "").toLowerCase(), size: Number.isFinite(size) && size > 0 ? Math.floor(size) : 0 };
+    } catch {}
+  }
+  return { mime: raw.toLowerCase(), size: 0 };
+}
 export function uploadTokenOptions(pathname, clientPayload, usage) {
   if (!isPlannerUploadPathname(pathname)) throw new Error("Invalid upload path.");
-  const mime = allowedUploadContentType(clientPayload);
+  const mime = allowedUploadContentType(parseUploadPayload(clientPayload).mime);
   if (!mime) throw new Error("Only images and reels are supported.");
   return {
     allowedContentTypes: [mime],
@@ -1685,7 +1699,13 @@ export async function handleRequest(req, res) {
         const responseBody = await handleUpload({
           body,
           request: req,
-          onBeforeGenerateToken: async (pathname, clientPayload) => uploadTokenOptions(pathname, clientPayload, usage)
+          onBeforeGenerateToken: async (pathname, clientPayload) => {
+            const options = uploadTokenOptions(pathname, clientPayload, usage);
+            // Count it now; an upload that never completes is corrected by the next recount.
+            const { size } = parseUploadPayload(clientPayload);
+            if (size) recordBlobUsageDelta(size);
+            return options;
+          }
         });
         return sendJson(res, 200, responseBody);
       } catch (error) {

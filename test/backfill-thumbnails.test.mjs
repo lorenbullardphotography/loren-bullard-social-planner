@@ -16,12 +16,12 @@ test("skips images that already have a thumbnail in the listing", () => {
   assert.deepEqual(plan.map(item => item.pathname), ["planner/b.jpg"]);
 });
 
-test("skips thumbnails themselves, videos, small files and other prefixes", () => {
+test("skips thumbnails themselves, videos and other prefixes, but includes small images", () => {
   const plan = planThumbnails([
-    blob("planner/thumbs/x.jpg"), blob("planner/v.mov"), blob("planner/v.mp4"), blob("planner/small.jpg", 100 * KB),
-    blob("other/a.jpg"), blob("planner/notes.txt")
+    blob("planner/thumbs/x.jpg"), blob("planner/v.mov"), blob("planner/v.mp4"),
+    blob("other/a.jpg"), blob("planner/notes.txt"), blob("planner/small.jpg", 20 * KB)
   ]);
-  assert.deepEqual(plan, []);
+  assert.deepEqual(plan.map(item => item.pathname), ["planner/small.jpg"]);
 });
 
 test("two images that would share a thumbnail name are planned once per source file", () => {

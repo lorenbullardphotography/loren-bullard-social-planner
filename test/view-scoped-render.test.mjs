@@ -76,3 +76,18 @@ test("reconcileTileNodes follows the new order and evicts removed items", () => 
   assert.equal(cache.has("a"), false);
   assert.notEqual(a, undefined);
 });
+
+test("reconcileTileNodes rebuilds a cached node that reports itself stale (e.g. showing the broken-image placeholder)", () => {
+  const context = vm.createContext({});
+  vm.runInContext(slice("function reconcileTileNodes", "function createGridTile"), context);
+  let created = 0;
+  const options = { signatureOf: item => item.v, create: item => ({ id: item.id, made: ++created, broken: false }), isStale: node => node.broken };
+  const cache = new Map();
+  const [first] = context.reconcileTileNodes(cache, [{ id: "a", v: 1 }], options);
+  first.broken = true;
+  const [second] = context.reconcileTileNodes(cache, [{ id: "a", v: 1 }], options);
+  assert.notEqual(second, first);
+  assert.equal(created, 2);
+  const [third] = context.reconcileTileNodes(cache, [{ id: "a", v: 1 }], options);
+  assert.equal(third, second);
+});

@@ -12,7 +12,6 @@ import { pathToFileURL } from "node:url";
 import { thumbKeyFor } from "../lib/thumbnail-urls.mjs";
 
 const IMAGE_EXTENSIONS = /\.(jpe?g|png|webp)$/i;
-const MIN_SOURCE_BYTES = 150 * 1024;
 const THUMB_EDGE = 640;
 const ONE_YEAR_SECONDS = 31536000;
 
@@ -21,8 +20,7 @@ export function planThumbnails(blobs) {
   return blobs
     .filter(blob => blob.pathname.startsWith("planner/")
       && !blob.pathname.startsWith("planner/thumbs/")
-      && IMAGE_EXTENSIONS.test(blob.pathname)
-      && blob.size >= MIN_SOURCE_BYTES)
+      && IMAGE_EXTENSIONS.test(blob.pathname))
     .map(blob => ({ ...blob, thumbPathname: thumbKeyFor(blob.pathname) }))
     .filter(item => item.thumbPathname && !existing.has(item.thumbPathname));
 }

@@ -188,9 +188,9 @@ function carouselImages(post) {
 function isVideoTile(post) {
   return !hasReelCover(post) && (post.assetKind === "video" || post.type === "REEL" && /\.((mp4)|(mov)|(webm))($|\?)/i.test(post.image));
 }
-function tileImageAttrs(url, { video = false } = {}) {
+function tileImageAttrs(url, { video = false, thumb: useThumb = true } = {}) {
   const src = String(url || "");
-  const thumb = thumbUrlFor(src);
+  const thumb = useThumb ? thumbUrlFor(src) : "";
   if (!thumb) return { src, fallbackSrc: "", fallbackVideo: "", nativeVideo: video };
   return video
     ? { src: thumb, fallbackSrc: "", fallbackVideo: src, nativeVideo: false }
@@ -198,11 +198,14 @@ function tileImageAttrs(url, { video = false } = {}) {
 }
 function tileImageMarkup(post, className = "", { url = gridImageOf(post), video, allowVideo = false } = {}) {
   const isVideo = video ?? (url === post.image && assetKindOf(post) === "video");
-  const attrs = tileImageAttrs(url, { video: isVideo });
+  // Canva exports are written by the server, which makes no thumbnail.
+  const attrs = tileImageAttrs(url, { video: isVideo, thumb: assetSourceOf(post) !== "canva" });
   if (attrs.nativeVideo && allowVideo) {
     return `<video class="${className}" src="${esc(attrs.src)}" muted playsinline preload="metadata"></video>`;
   }
-  return `<img class="${className}" src="${esc(attrs.src)}"${attrs.fallbackSrc ? ` data-fallback-src="${esc(attrs.fallbackSrc)}"` : ""}${attrs.fallbackVideo ? ` data-fallback-video="${esc(attrs.fallbackVideo)}"` : ""} loading="lazy" decoding="async" alt="">`;
+  // A failed video thumbnail may only become a <video> where the surrounding
+  // styles size one (grid, library); elsewhere it falls through to the placeholder.
+  return `<img class="${className}" src="${esc(attrs.src)}"${attrs.fallbackSrc ? ` data-fallback-src="${esc(attrs.fallbackSrc)}"` : ""}${attrs.fallbackVideo && allowVideo ? ` data-fallback-video="${esc(attrs.fallbackVideo)}"` : ""} loading="lazy" decoding="async" alt="">`;
 }
 function assetMediaMarkup(post, className = "") {
   return tileImageMarkup(post, className, { url: post.image, video: assetKindOf(post) === "video", allowVideo: true });
@@ -1238,19 +1241,24 @@ function renderActivity() {
 // selecting a tile or applying a poll delta to one asset does not re-create
 // (and re-request) the media of every other tile.
 const gridTileCache = new Map();
-function reconcileTileNodes(cache, items, { signatureOf, create }) {
+function reconcileTileNodes(cache, items, { signatureOf, create, isStale = () => false }) {
   const seen = new Set();
   const nodes = items.map(item => {
     seen.add(item.id);
     const signature = signatureOf(item);
     const cached = cache.get(item.id);
-    if (cached && cached.signature === signature) return cached.node;
+    if (cached && cached.signature === signature && !isStale(cached.node)) return cached.node;
     const node = create(item);
     cache.set(item.id, { signature, node });
     return node;
   });
   for (const id of [...cache.keys()]) if (!seen.has(id)) cache.delete(id);
   return nodes;
+}
+// A failed delete leaves the (reused) tile's button disabled; put it back.
+function resetTileDeleteButton(button) {
+  button.disabled = false;
+  button.setAttribute("aria-label", "Delete asset");
 }
 function createGridTile(post) {
   {
@@ -1262,7 +1270,7 @@ function createGridTile(post) {
     // touch behavior. Native HTML drag events are inconsistent in responsive
     // Chrome and unavailable on many mobile browsers.
     node.draggable = false;
-    const tileAttrs = tileImageAttrs(gridImageOf(post), { video: isVideoTile(post) });
+    const tileAttrs = tileImageAttrs(gridImageOf(post), { video: isVideoTile(post), thumb: assetSourceOf(post) !== "canva" });
     if (tileAttrs.nativeVideo) {
       const video = document.createElement("video");
       video.src = tileAttrs.src;
@@ -1311,6 +1319,7 @@ function createGridTile(post) {
         notify("Post deleted from the shared planner");
       } catch (error) {
         posts = previousPosts;
+        resetTileDeleteButton(quickDelete);
         renderAll();
         notify(error.message || "The post could not be deleted");
       }
@@ -1407,7 +1416,13 @@ function createGridTile(post) {
 function renderGrid() {
   const grid = $("#grid");
   const posts = ordered();
-  const nodes = reconcileTileNodes(gridTileCache, posts, { signatureOf: post => JSON.stringify(post), create: createGridTile });
+  const nodes = reconcileTileNodes(gridTileCache, posts, {
+    signatureOf: post => JSON.stringify(post),
+    create: createGridTile,
+    // A tile showing the "Image unavailable" placeholder (e.g. after a network
+    // blip) is rebuilt so the image is requested again.
+    isStale: node => Boolean(node.querySelector(".img-broken"))
+  });
   nodes.forEach((node, index) => {
     // Reused nodes may carry transient state from a finished drag.
     node.classList.remove("dragging", "target", "reorder-pending");
@@ -2606,7 +2621,6 @@ function getStorageUsage() {
 
 // Thumbnail convention (mirrors lib/thumbnail-urls.mjs, which public/app.js
 // cannot import): planner/<uuid>.<ext> -> planner/thumbs/<uuid>.jpg.
-const THUMB_MIN_SOURCE_BYTES = 150 * 1024;
 const THUMB_MAX_EDGE = 640;
 const THUMB_TIMEOUT_MS = 5000;
 function thumbKeyFor(key) {
@@ -2680,24 +2694,23 @@ async function uploadAssetFile(file) {
       access: "public",
       handleUploadUrl: "/api/assets/upload-token",
       contentType: file.type,
-      clientPayload: file.type
+      clientPayload: JSON.stringify({ type: file.type, size: file.size })
     });
     // Best effort: a missing thumbnail only means tiles fall back to the
-    // original, so nothing here may fail the asset upload.
-    if (file.size >= THUMB_MIN_SOURCE_BYTES) {
-      try {
-        const thumb = await makeThumbnailBlob(file);
-        const thumbPath = thumbKeyFor(pathname);
-        if (thumb && thumbPath) {
-          await upload(thumbPath, thumb, {
-            access: "public",
-            handleUploadUrl: "/api/assets/upload-token",
-            contentType: "image/jpeg",
-            clientPayload: "image/jpeg"
-          });
-        }
-      } catch {}
-    }
+    // original, so nothing here may fail the asset upload. Every upload gets
+    // one (even small files) so tiles never request a thumbnail that is absent.
+    try {
+      const thumb = await makeThumbnailBlob(file);
+      const thumbPath = thumbKeyFor(pathname);
+      if (thumb && thumbPath) {
+        await upload(thumbPath, thumb, {
+          access: "public",
+          handleUploadUrl: "/api/assets/upload-token",
+          contentType: "image/jpeg",
+          clientPayload: JSON.stringify({ type: "image/jpeg", size: thumb.size })
+        });
+      }
+    } catch {}
     return { url: result.url, kind: file.type.startsWith("video/") ? "video" : "image" };
   }
   const uploadFile = await prepareUploadFile(file);

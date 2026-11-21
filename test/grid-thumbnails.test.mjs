@@ -15,9 +15,10 @@ function makeContext() {
     document: { createElement: tag => ({ tag, dataset: {}, classList: { add() {} }, style: {} }) }
   });
   vm.runInContext(slice("function thumbKeyFor", "function canvasToThumbBlob"), context);
-  vm.runInContext(slice("function assetKindOf", "function assetSourceOf"), context);
+  vm.runInContext(slice("function assetKindOf", "function needsCanvaPreviewRefresh"), context);
   vm.runInContext(slice("function hasReelCover", "function carouselImages"), context);
   vm.runInContext(slice("function tileImageAttrs", "function libraryAssetBadges"), context);
+  vm.runInContext(slice("function resetTileDeleteButton", "function createGridTile"), context);
   vm.runInContext(slice("const BROKEN_IMAGE_PLACEHOLDER", "if (typeof document.addEventListener"), context);
   return context;
 }
@@ -87,4 +88,29 @@ test("the image error handler swaps a failed video thumbnail for a metadata-only
   assert.equal(replacement.src, `${HOST}/planner/v.mov`);
   assert.equal(replacement.preload, "metadata");
   assert.equal(replacement.className, "tile-media crop-rendered");
+});
+
+test("a video thumbnail outside the grid and library has no video fallback (it would render an unstyled full-size video)", () => {
+  const context = makeContext();
+  const html = context.tileImageMarkup({ image: `${HOST}/planner/v.mov`, type: "REEL", assetKind: "video" }, "");
+  assert.match(html, /planner\/thumbs\/v\.jpg/);
+  assert.doesNotMatch(html, /data-fallback-video/);
+});
+
+test("Canva exports are never given a thumbnail URL (the server does not create one)", () => {
+  const context = makeContext();
+  const html = context.tileImageMarkup({ image: `${HOST}/planner/c.jpg`, type: "IMAGE", assetSource: "canva" });
+  assert.ok(html.includes(`src="${HOST}/planner/c.jpg"`));
+  assert.doesNotMatch(html, /thumbs|data-fallback/);
+  const byUrl = context.tileImageMarkup({ image: `${HOST}/planner/c2.jpg`, type: "IMAGE", canvaUrl: "https://canva.com/x" });
+  assert.doesNotMatch(byUrl, /thumbs/);
+});
+
+test("resetTileDeleteButton re-enables a delete button left disabled by a failed delete", () => {
+  const context = makeContext();
+  const attrs = {};
+  const button = { disabled: true, setAttribute(name, value) { attrs[name] = value; } };
+  context.resetTileDeleteButton(button);
+  assert.equal(button.disabled, false);
+  assert.equal(attrs["aria-label"], "Delete asset");
 });

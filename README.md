@@ -218,7 +218,7 @@ Do not use GitHub Pages for this app: it cannot run the server, protect the page
 
 Vercel Blob's Hobby plan caps data transfer (10 GB/month) and advanced operations (2,000/month), and blocks the whole store when either is exceeded. To stay under them:
 
-- Every upload of 150 KB or more also stores a ~640 px JPEG thumbnail at `planner/thumbs/<uuid>.jpg` (same store, same UUID). Grid, library, calendar, approvals and task tiles load the thumbnail lazily and fall back to the original, then to the "Image unavailable" placeholder. The editor and crop view still use the original.
+- Every upload also stores a ~640 px JPEG thumbnail at `planner/thumbs/<uuid>.jpg` (same store, same UUID). Grid, library, calendar, approvals and task tiles (except Canva exports, which have none) load the thumbnail lazily and fall back to the original, then to the "Image unavailable" placeholder. The editor and crop view still use the original.
 - Only the visible view renders its media, and unchanged grid tiles are reused, so polling and tile selection do not re-request images.
 - The storage-usage total is persisted in `planner_store` (key `blob-usage`) and recounted at most every 10 minutes; Settings-only fetches (usage, Canva status, team) run only on the Settings view.
 - Proxied Instagram images are cached by the browser for a day.
