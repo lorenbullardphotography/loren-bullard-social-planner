@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { createUsageCache } from "./lib/blob-usage-cache.mjs";
+import { thumbUrlFor } from "./lib/thumbnail-urls.mjs";
 import { dataDir, deleteStored, getDatabaseClient, hasDirectDatabase, readStored, readStoredField, readStoredIds, storageMode, writeStored, writeStoredField } from "./lib/store.mjs";
 import { applyWorkflowAutomations, normalizeWorkflowAutomations } from "./lib/workflow-automations.mjs";
 import { createPlannerRepository } from "./lib/planner-repository.mjs";
@@ -460,38 +462,34 @@ async function blobClient() {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
   return import("@vercel/blob");
 }
-// blobUsage() used to re-list every blob in the store (paginating the full
-// result set) on every single upload request, to answer "is there room for
-// this one more file?" — fine with a handful of assets, but it means every
-// upload does O(blob count) Vercel Blob API calls, getting slower and more
-// rate-limit-prone as the library grows. Cached for a short window instead:
-// uploads/deletes we perform ourselves nudge the cached figure immediately
-// (see recordBlobUsageDelta below), so it won't drift for long, and anything
-// else (a blob removed outside this app) is caught at the next refresh.
-const BLOB_USAGE_CACHE_MS = 30_000;
-let blobUsageCache = null;
-async function blobUsage() {
-  const client = await blobClient();
-  if (!client) return { configured: false, usedBytes: 0, limitBytes: ASSET_STORAGE_LIMIT_MB * 1024 * 1024 };
-  if (blobUsageCache && Date.now() - blobUsageCache.fetchedAt < BLOB_USAGE_CACHE_MS) {
-    return blobUsageCache;
+// Total usage is persisted (planner_store key "blob-usage") and shared across
+// serverless instances: list() is an advanced Blob operation (2,000/month on
+// Hobby), so it runs at most once per 10 minutes instead of on every request.
+// Uploads/deletes we perform ourselves adjust the stored total in place.
+const BLOB_USAGE_KEY = "blob-usage";
+const blobUsageTracker = createUsageCache({
+  load: () => readStored(BLOB_USAGE_KEY, null),
+  save: snapshot => writeStored(BLOB_USAGE_KEY, snapshot),
+  list: async () => {
+    const client = await blobClient();
+    let cursor;
+    let usedBytes = 0;
+    do {
+      const page = await client.list({ prefix: "planner/", ...(cursor ? { cursor } : {}) });
+      usedBytes += (page.blobs || []).reduce((total, blob) => total + Number(blob.size || 0), 0);
+      cursor = page.hasMore ? page.cursor : null;
+    } while (cursor);
+    return usedBytes;
   }
-  let cursor;
-  let usedBytes = 0;
-  do {
-    const page = await client.list({ prefix: "planner/", ...(cursor ? { cursor } : {}) });
-    usedBytes += (page.blobs || []).reduce((total, blob) => total + Number(blob.size || 0), 0);
-    cursor = page.hasMore ? page.cursor : null;
-  } while (cursor);
-  blobUsageCache = { configured: true, usedBytes, limitBytes: ASSET_STORAGE_LIMIT_MB * 1024 * 1024, fetchedAt: Date.now() };
-  return blobUsageCache;
+});
+async function blobUsage() {
+  const limitBytes = ASSET_STORAGE_LIMIT_MB * 1024 * 1024;
+  if (!(await blobClient())) return { configured: false, usedBytes: 0, limitBytes };
+  const snapshot = await blobUsageTracker.get();
+  return { configured: true, usedBytes: snapshot.usedBytes, limitBytes, fetchedAt: snapshot.fetchedAt };
 }
-// Called right after a put/delete we performed ourselves so the cached
-// total reflects it immediately, rather than waiting out the cache window
-// (during which a burst of uploads could otherwise all under-count usage
-// off the same stale snapshot).
 function recordBlobUsageDelta(bytes) {
-  if (blobUsageCache) blobUsageCache.usedBytes = Math.max(0, blobUsageCache.usedBytes + bytes);
+  blobUsageTracker.nudge(bytes).catch(() => {});
 }
 export function isPlannerUploadPathname(pathname) {
   return typeof pathname === "string" && pathname.startsWith("planner/");
@@ -500,6 +498,34 @@ export function allowedUploadContentType(clientPayload) {
   const mime = String(clientPayload || "").toLowerCase();
   return mime.startsWith("image/") || mime.startsWith("video/") ? mime : null;
 }
+// Uploaded files have unique UUID keys and are never overwritten, so browsers
+// and the CDN may cache them for a year instead of Blob's one-month default.
+export const UPLOAD_CACHE_MAX_AGE_SECONDS = 31536000;
+// Browsers send {"type","size"} so the server can count an upload the moment
+// its token is issued (a direct browser upload never passes through us);
+// a bare mime string is still accepted.
+export function parseUploadPayload(clientPayload) {
+  const raw = String(clientPayload || "");
+  if (raw.trimStart().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(raw);
+      const size = Number(parsed.size);
+      return { mime: String(parsed.type || "").toLowerCase(), size: Number.isFinite(size) && size > 0 ? Math.floor(size) : 0 };
+    } catch {}
+  }
+  return { mime: raw.toLowerCase(), size: 0 };
+}
+export function uploadTokenOptions(pathname, clientPayload, usage) {
+  if (!isPlannerUploadPathname(pathname)) throw new Error("Invalid upload path.");
+  const mime = allowedUploadContentType(parseUploadPayload(clientPayload).mime);
+  if (!mime) throw new Error("Only images and reels are supported.");
+  return {
+    allowedContentTypes: [mime],
+    addRandomSuffix: false,
+    cacheControlMaxAge: UPLOAD_CACHE_MAX_AGE_SECONDS,
+    maximumSizeInBytes: remainingUploadBytes(usage)
+  };
+}
 export function remainingUploadBytes(usage) {
   return Math.max(0, Number(usage?.limitBytes || 0) - Number(usage?.usedBytes || 0));
 }
@@ -507,11 +533,13 @@ async function deleteBlobUrl(url) {
   if (!url || !url.includes(".blob.vercel-storage.com")) return;
   try {
     const client = await blobClient();
-    if (client) await client.del(url);
-    // Size of the deleted blob isn't known here cheaply, so rather than
-    // guess, just drop the cache — the next blobUsage() call pays for one
-    // fresh recount instead of drifting low forever.
-    blobUsageCache = null;
+    // The thumbnail uploaded beside the asset goes with it (best effort: old
+    // assets have none, and deleting a missing blob is not an error).
+    const thumb = thumbUrlFor(url);
+    if (client) await client.del(thumb && thumb !== url ? [url, thumb] : url);
+    // The deleted size isn't known cheaply, so recount at the next read
+    // rather than let the stored total drift.
+    blobUsageTracker.invalidate();
   } catch (error) {
     console.error("Blob cleanup failed:", error.message);
   }
@@ -1487,7 +1515,10 @@ export async function handleRequest(req, res) {
       if (!response.ok) return sendJson(res, 502, { error: "Instagram photo could not be loaded." });
       const contentType = response.headers.get("content-type") || "";
       if (!contentType.startsWith("image/")) return sendJson(res, 502, { error: "Instagram did not return a photo." });
-      res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "private, max-age=3600" });
+      // A day of browser caching (and a week of stale-while-revalidate) keeps the
+// ~1,000 Instagram tiles from re-streaming through a serverless function on
+// every page load; the proxy always resolves a fresh media_url on a miss.
+      res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "private, max-age=86400, stale-while-revalidate=604800" });
       return res.end(Buffer.from(await response.arrayBuffer()));
     }
 
@@ -1669,14 +1700,11 @@ export async function handleRequest(req, res) {
           body,
           request: req,
           onBeforeGenerateToken: async (pathname, clientPayload) => {
-            if (!isPlannerUploadPathname(pathname)) throw new Error("Invalid upload path.");
-            const mime = allowedUploadContentType(clientPayload);
-            if (!mime) throw new Error("Only images and reels are supported.");
-            return {
-              allowedContentTypes: [mime],
-              addRandomSuffix: false,
-              maximumSizeInBytes: remainingUploadBytes(usage)
-            };
+            const options = uploadTokenOptions(pathname, clientPayload, usage);
+            // Count it now; an upload that never completes is corrected by the next recount.
+            const { size } = parseUploadPayload(clientPayload);
+            if (size) recordBlobUsageDelta(size);
+            return options;
           }
         });
         return sendJson(res, 200, responseBody);

@@ -14,13 +14,36 @@ let calCursor = new Date();
 // — so this covers every image in the app, present and future, without
 // needing an onerror attribute on each one.
 const BROKEN_IMAGE_PLACEHOLDER = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect width="100%" height="100%" fill="#e4e4e4"/><g fill="none" stroke="#9a9a9a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><rect x="38" y="48" width="124" height="94" rx="8"/><circle cx="72" cy="80" r="10"/><path d="M38 128l34-34 24 24 30-36 36 44"/></g><text x="100" y="172" text-anchor="middle" font-family="system-ui,sans-serif" font-size="14" fill="#8a8a8a">Image unavailable</text></svg>`)}`;
+// Tiles load a small thumbnail first (see tileImageMarkup). On failure the
+// original is tried once (or, for videos, a metadata-only <video>), and only
+// then the placeholder, so a missing thumbnail never shows as a broken image.
+function resolveImageError(img) {
+  if (img.dataset.fallbackApplied) return "ignored";
+  if (img.dataset.fallbackVideo) {
+    const video = document.createElement("video");
+    video.src = img.dataset.fallbackVideo;
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    video.className = img.className;
+    video.style.cssText = img.style.cssText;
+    img.replaceWith(video);
+    return "video";
+  }
+  if (img.dataset.fallbackSrc) {
+    const original = img.dataset.fallbackSrc;
+    delete img.dataset.fallbackSrc;
+    img.src = original;
+    return "fallback";
+  }
+  img.dataset.fallbackApplied = "true";
+  img.classList.add("img-broken");
+  img.src = BROKEN_IMAGE_PLACEHOLDER;
+  return "placeholder";
+}
 if (typeof document.addEventListener === "function") {
   document.addEventListener("error", event => {
-    const img = event.target;
-    if (!(img instanceof HTMLImageElement) || img.dataset.fallbackApplied) return;
-    img.dataset.fallbackApplied = "true";
-    img.classList.add("img-broken");
-    img.src = BROKEN_IMAGE_PLACEHOLDER;
+    if (event.target instanceof HTMLImageElement) resolveImageError(event.target);
   }, true);
 }
 
@@ -159,10 +182,33 @@ function carouselImages(post) {
   const images = Array.isArray(post.images) ? post.images.filter(Boolean) : [];
   return images.length ? images : (post.image ? [post.image] : []);
 }
+// Tiles show a ~640px thumbnail stored beside each upload (planner/thumbs/),
+// lazily loaded, instead of the full-size original. Instagram, data: and
+// local /uploads/ images have no thumbnail and are used as-is.
+function isVideoTile(post) {
+  return !hasReelCover(post) && (post.assetKind === "video" || post.type === "REEL" && /\.((mp4)|(mov)|(webm))($|\?)/i.test(post.image));
+}
+function tileImageAttrs(url, { video = false, thumb: useThumb = true } = {}) {
+  const src = String(url || "");
+  const thumb = useThumb ? thumbUrlFor(src) : "";
+  if (!thumb) return { src, fallbackSrc: "", fallbackVideo: "", nativeVideo: video };
+  return video
+    ? { src: thumb, fallbackSrc: "", fallbackVideo: src, nativeVideo: false }
+    : { src: thumb, fallbackSrc: src, fallbackVideo: "", nativeVideo: false };
+}
+function tileImageMarkup(post, className = "", { url = gridImageOf(post), video, allowVideo = false } = {}) {
+  const isVideo = video ?? (url === post.image && assetKindOf(post) === "video");
+  // Canva exports are written by the server, which makes no thumbnail.
+  const attrs = tileImageAttrs(url, { video: isVideo, thumb: assetSourceOf(post) !== "canva" });
+  if (attrs.nativeVideo && allowVideo) {
+    return `<video class="${className}" src="${esc(attrs.src)}" muted playsinline preload="metadata"></video>`;
+  }
+  // A failed video thumbnail may only become a <video> where the surrounding
+  // styles size one (grid, library); elsewhere it falls through to the placeholder.
+  return `<img class="${className}" src="${esc(attrs.src)}"${attrs.fallbackSrc ? ` data-fallback-src="${esc(attrs.fallbackSrc)}"` : ""}${attrs.fallbackVideo && allowVideo ? ` data-fallback-video="${esc(attrs.fallbackVideo)}"` : ""} loading="lazy" decoding="async" alt="">`;
+}
 function assetMediaMarkup(post, className = "") {
-  return assetKindOf(post) === "video"
-    ? `<video class="${className}" src="${esc(post.image)}" muted playsinline preload="metadata"></video>`
-    : `<img class="${className}" src="${esc(post.image)}" alt="">`;
+  return tileImageMarkup(post, className, { url: post.image, video: assetKindOf(post) === "video", allowVideo: true });
 }
 function libraryAssetBadges(post) {
   const assetKind = assetKindOf(post);
@@ -920,11 +966,27 @@ async function importBackup(file) {
   notify("Backup restored");
 }
 
+// Only the visible view renders its media: rebuilding the grid, calendar,
+// library and approvals on every change meant every poll or click re-created
+// every image/video element in views nobody was looking at. switchView()
+// renders the target view, so a hidden view is never stale when shown.
+const VIEW_RENDERERS = {
+  grid: () => renderGrid(),
+  calendar: () => renderCalendar(),
+  library: () => { renderLibrary(); renderScratch(); },
+  tasks: () => { renderTasks(); renderApprovals(); },
+  approvals: () => { renderTasks(); renderApprovals(); },
+  // Fetches storage usage, Canva status and team members, so it must not run
+  // on every planner change from other views.
+  settings: () => renderPlannerSettings()
+};
+function renderViewContent(name) {
+  VIEW_RENDERERS[name]?.();
+}
 function renderAll() {
   syncTopActions(currentView);
   renderStats();
-  renderTasks();
-  renderGrid();
+  renderViewContent(currentView);
   // Only render the editor that is currently visible. Rendering both produced
   // duplicate control IDs, so document-wide selectors could bind to the hidden
   // grid inspector instead of the standalone asset editor.
@@ -932,13 +994,8 @@ function renderAll() {
   else $("#inspector").innerHTML = "";
   if (currentView === "editor") renderInspector("#postEditor");
   else $("#postEditor").innerHTML = "";
-  renderCalendar();
-  renderLibrary();
-  renderScratch();
-  renderApprovals();
   renderTeam();
   renderActivity();
-  renderPlannerSettings();
 }
 function assetPreview(post, lockCrop = false) {
   const mediaKind = assetKindOf(post);
@@ -1147,7 +1204,7 @@ function renderTasks() {
   $("#approvalsTab")?.setAttribute("aria-selected", String(isApprovals));
   $("#activityTab")?.setAttribute("aria-selected", String(taskTab === "activity"));
   if (isApprovals) { renderApprovals(); return; }
-  host.innerHTML = items.length ? items.map(post => `<button class="attention-card task-card" data-open="${post.id}"><img src="${post.image}" alt=""><span><b>${esc(post.notes || post.caption || "Untitled content")}</b><small>${esc(taskReason(post))} · ${esc(post.dueDate || post.date || "No due date")}</small></span><strong class="task-assignee">${esc(post.assignee || "Unassigned")}</strong><i>›</i></button>`).join("") : `<div class="empty">No ${taskTab === "mine" ? "tasks assigned to you" : "team tasks"} right now.</div>`;
+  host.innerHTML = items.length ? items.map(post => `<button class="attention-card task-card" data-open="${post.id}">${tileImageMarkup(post, "", { url: post.image })}<span><b>${esc(post.notes || post.caption || "Untitled content")}</b><small>${esc(taskReason(post))} · ${esc(post.dueDate || post.date || "No due date")}</small></span><strong class="task-assignee">${esc(post.assignee || "Unassigned")}</strong><i>›</i></button>`).join("") : `<div class="empty">No ${taskTab === "mine" ? "tasks assigned to you" : "team tasks"} right now.</div>`;
   $$("#taskList [data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open, true));
 }
 function renderStats() {
@@ -1180,10 +1237,31 @@ function renderActivity() {
     }).join("")
     : `<div class="empty">Shared activity will appear here as the team edits, approves, and syncs content.</div>`;
 }
-function renderGrid() {
-  const grid = $("#grid");
-  grid.innerHTML = "";
-  for (const post of ordered()) {
+// Tiles are cached by post id and reused while the post is unchanged, so
+// selecting a tile or applying a poll delta to one asset does not re-create
+// (and re-request) the media of every other tile.
+const gridTileCache = new Map();
+function reconcileTileNodes(cache, items, { signatureOf, create, isStale = () => false }) {
+  const seen = new Set();
+  const nodes = items.map(item => {
+    seen.add(item.id);
+    const signature = signatureOf(item);
+    const cached = cache.get(item.id);
+    if (cached && cached.signature === signature && !isStale(cached.node)) return cached.node;
+    const node = create(item);
+    cache.set(item.id, { signature, node });
+    return node;
+  });
+  for (const id of [...cache.keys()]) if (!seen.has(id)) cache.delete(id);
+  return nodes;
+}
+// A failed delete leaves the (reused) tile's button disabled; put it back.
+function resetTileDeleteButton(button) {
+  button.disabled = false;
+  button.setAttribute("aria-label", "Delete asset");
+}
+function createGridTile(post) {
+  {
     const node = $("#tileTpl").content.firstElementChild.cloneNode(true);
     node.dataset.id = post.id;
     node.dataset.status = post.status;
@@ -1192,13 +1270,21 @@ function renderGrid() {
     // touch behavior. Native HTML drag events are inconsistent in responsive
     // Chrome and unavailable on many mobile browsers.
     node.draggable = false;
-    if (!hasReelCover(post) && (post.assetKind === "video" || post.type === "REEL" && /\.((mp4)|(mov)|(webm))($|\?)/i.test(post.image))) {
+    const tileAttrs = tileImageAttrs(gridImageOf(post), { video: isVideoTile(post), thumb: assetSourceOf(post) !== "canva" });
+    if (tileAttrs.nativeVideo) {
       const video = document.createElement("video");
-      video.src = post.image;
+      video.src = tileAttrs.src;
       configureGridVideo(video);
       video.className = "tile-media";
       node.querySelector("img").replaceWith(video);
-    } else node.querySelector("img").src = gridImageOf(post);
+    } else {
+      const tileImg = node.querySelector("img");
+      tileImg.loading = "lazy";
+      tileImg.decoding = "async";
+      if (tileAttrs.fallbackSrc) tileImg.dataset.fallbackSrc = tileAttrs.fallbackSrc;
+      if (tileAttrs.fallbackVideo) { tileImg.dataset.fallbackVideo = tileAttrs.fallbackVideo; tileImg.classList.add("tile-media"); }
+      tileImg.src = tileAttrs.src;
+    }
     const tileMedia = node.querySelector("img, video");
     if (tileMedia) tileMedia.draggable = false;
     const media = node.querySelector(".tile-media") || node.querySelector("img");
@@ -1233,6 +1319,7 @@ function renderGrid() {
         notify("Post deleted from the shared planner");
       } catch (error) {
         posts = previousPosts;
+        resetTileDeleteButton(quickDelete);
         renderAll();
         notify(error.message || "The post could not be deleted");
       }
@@ -1323,9 +1410,27 @@ function renderGrid() {
       node.addEventListener("pointerup", finishTouchDrag);
       node.addEventListener("pointercancel", finishTouchDrag);
     }
-    grid.appendChild(node);
+    return node;
   }
-  $("#gridEmpty").classList.toggle("hidden", ordered().length > 0);
+}
+function renderGrid() {
+  const grid = $("#grid");
+  const posts = ordered();
+  const nodes = reconcileTileNodes(gridTileCache, posts, {
+    signatureOf: post => JSON.stringify(post),
+    create: createGridTile,
+    // A tile showing the "Image unavailable" placeholder (e.g. after a network
+    // blip) is rebuilt so the image is requested again.
+    isStale: node => Boolean(node.querySelector(".img-broken"))
+  });
+  nodes.forEach((node, index) => {
+    // Reused nodes may carry transient state from a finished drag.
+    node.classList.remove("dragging", "target", "reorder-pending");
+    node.style.cssText = "";
+    node.classList.toggle("selected", selected === posts[index].id);
+  });
+  grid.replaceChildren(...nodes);
+  $("#gridEmpty").classList.toggle("hidden", posts.length > 0);
 }
 
 function activateGridDrag(state, event) {
@@ -2099,7 +2204,7 @@ function renderCalendar() {
   $$("#calendarViewSwitcher [data-calendar-view]").forEach(button => button.classList.toggle("active", button.dataset.calendarView === calendarView));
   if (calendarView === "year") return renderCalendarYear(year);
   const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const calendarPostMarkup = (post, extraClass = "") => `<div class="cal-post ${extraClass}" data-workflow="${workflowOf(post)}" draggable="true" data-open="${post.id}" data-drag-post="${post.id}" role="button" tabindex="0" aria-label="Edit ${esc(post.notes || post.caption || post.type || "post")}"><img src="${esc(gridImageOf(post))}" alt=""><span>${esc((post.caption || post.notes || post.type || "Post").slice(0, 28))}<small>${esc(post.time || scheduleLabel(post))}</small></span></div>`;
+  const calendarPostMarkup = (post, extraClass = "") => `<div class="cal-post ${extraClass}" data-workflow="${workflowOf(post)}" draggable="true" data-open="${post.id}" data-drag-post="${post.id}" role="button" tabindex="0" aria-label="Edit ${esc(post.notes || post.caption || post.type || "post")}">${tileImageMarkup(post)}<span>${esc((post.caption || post.notes || post.type || "Post").slice(0, 28))}<small>${esc(post.time || scheduleLabel(post))}</small></span></div>`;
   let html = names.map(name => `<div class="cal-head">${name}</div>`).join("");
   for (let i = 0; i < (calendarView === "week" ? 7 : 42); i++) {
     const day = new Date(begin);
@@ -2391,14 +2496,14 @@ function renderApprovals() {
   if (approvalDetail) {
     const section = sections.find(item => item.key === approvalDetail);
     if (!section) { approvalDetail = null; return renderApprovals(); }
-    host.innerHTML = `<div class="approval-detail-head"><div><p class="eyebrow">APPROVAL QUEUE</p><h3>${esc(section.label)}</h3><p>Review every item in this section.</p></div><button id="backToApprovals" class="ghost" type="button">← All approvals</button></div><div class="approval-detail-list">${section.posts.map(post => `<button class="approval-card" data-open="${post.id}" type="button"><img src="${esc(post.image)}" alt=""><span>${workflowPill(section.key)}<b>${esc(post.notes || post.caption || post.type)}</b><small>${esc(formatSchedule(post))}</small></span></button>`).join("") || `<div class="empty">Nothing here.</div>`}</div>`;
+    host.innerHTML = `<div class="approval-detail-head"><div><p class="eyebrow">APPROVAL QUEUE</p><h3>${esc(section.label)}</h3><p>Review every item in this section.</p></div><button id="backToApprovals" class="ghost" type="button">← All approvals</button></div><div class="approval-detail-list">${section.posts.map(post => `<button class="approval-card" data-open="${post.id}" type="button">${tileImageMarkup(post, "", { url: post.image })}<span>${workflowPill(section.key)}<b>${esc(post.notes || post.caption || post.type)}</b><small>${esc(formatSchedule(post))}</small></span></button>`).join("") || `<div class="empty">Nothing here.</div>`}</div>`;
     $("#backToApprovals").onclick = () => { approvalDetail = null; renderTasks(); };
     $$("#approvalPanel [data-open]").forEach(node => node.onclick = () => openPost(node.dataset.open, true));
     return;
   }
   host.innerHTML = `<div class="approval-intro"><div><p class="eyebrow">REVIEW QUEUE</p><h3>Approvals</h3><p>Keep every stage of review visible without stacking the queue.</p></div></div><div class="approval-board">${sections.map(section => {
     const post = section.posts[0];
-    return `<section class="approval-col" data-workflow="${section.key}"><h4>${esc(section.label)}</h4>${post ? `<button class="approval-summary" data-approval-section="${section.key}" type="button"><img src="${esc(post.image)}" alt=""><span>${workflowPill(section.key)}<b>${esc(post.notes || post.caption || post.type)}</b><small>${esc(formatSchedule(post))}</small></span>${section.remaining ? `<strong class="approval-more">+${section.remaining}</strong>` : ""}</button>` : `<div class="empty">Nothing here.</div>`}</section>`;
+    return `<section class="approval-col" data-workflow="${section.key}"><h4>${esc(section.label)}</h4>${post ? `<button class="approval-summary" data-approval-section="${section.key}" type="button">${tileImageMarkup(post, "", { url: post.image })}<span>${workflowPill(section.key)}<b>${esc(post.notes || post.caption || post.type)}</b><small>${esc(formatSchedule(post))}</small></span>${section.remaining ? `<strong class="approval-more">+${section.remaining}</strong>` : ""}</button>` : `<div class="empty">Nothing here.</div>`}</section>`;
   }).join("")}</div>`;
   $$("#approvalPanel [data-approval-section]").forEach(node => node.onclick = () => {
     const section = sections.find(item => item.key === node.dataset.approvalSection);
@@ -2444,10 +2549,10 @@ function switchView(name) {
     closeMobileMenu();
     return;
   }
-  if (name === "settings") renderPlannerSettings();
   if (name === "activity") { renderActivity(); refreshActivityFeed().then(refreshed => refreshed && renderActivity()); }
-  if (name === "tasks") { renderTasks(); renderActivity(); refreshActivityFeed().then(refreshed => refreshed && renderActivity()); }
-  if (name === "library") { setLibrarySection(librarySection); renderLibrary(); }
+  if (name === "tasks") { renderActivity(); refreshActivityFeed().then(refreshed => refreshed && renderActivity()); }
+  if (name === "library") setLibrarySection(librarySection);
+  renderViewContent(name);
   if (name === "grid") renderInspector();
   if (name === "editor") renderInspector("#postEditor");
   closeMobileMenu();
@@ -2514,6 +2619,68 @@ function getStorageUsage() {
   return storageUsagePromise;
 }
 
+// Thumbnail convention (mirrors lib/thumbnail-urls.mjs, which public/app.js
+// cannot import): planner/<uuid>.<ext> -> planner/thumbs/<uuid>.jpg.
+const THUMB_MAX_EDGE = 640;
+const THUMB_TIMEOUT_MS = 5000;
+function thumbKeyFor(key) {
+  const value = String(key || "");
+  if (value.startsWith("planner/thumbs/")) return value;
+  if (!value.startsWith("planner/")) return "";
+  const name = value.slice("planner/".length).replace(/\.[^./]+$/, "");
+  return name ? "planner/thumbs/" + name + ".jpg" : "";
+}
+function thumbUrlFor(url) {
+  let parsed;
+  try { parsed = new URL(String(url || "")); } catch { return ""; }
+  if (!/^https?:$/.test(parsed.protocol)) return "";
+  const key = thumbKeyFor(parsed.pathname.replace(/^\//, ""));
+  if (!key) return "";
+  parsed.pathname = "/" + key;
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.toString();
+}
+function canvasToThumbBlob(source, width, height) {
+  const scale = Math.min(1, THUMB_MAX_EDGE / Math.max(width, height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  canvas.getContext("2d").drawImage(source, 0, 0, canvas.width, canvas.height);
+  return new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.8));
+}
+// Returns a small JPEG preview of an image or video file, or null when the
+// browser cannot decode it (HEIC, corrupt files) — callers treat null as
+// "no thumbnail" and carry on with the original only.
+async function makeThumbnailBlob(file) {
+  const work = (async () => {
+    if (file.type.startsWith("image/")) {
+      const bitmap = await createImageBitmap(file);
+      try { return await canvasToThumbBlob(bitmap, bitmap.width, bitmap.height); } finally { bitmap.close(); }
+    }
+    if (file.type.startsWith("video/")) {
+      const objectUrl = URL.createObjectURL(file);
+      try {
+        const video = document.createElement("video");
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = "auto";
+        video.src = objectUrl;
+        await new Promise((resolve, reject) => {
+          video.onloadeddata = resolve;
+          video.onerror = () => reject(new Error("video decode failed"));
+        });
+        video.currentTime = Math.min(0.1, (video.duration || 0.1) / 2);
+        await new Promise(resolve => { video.onseeked = resolve; setTimeout(resolve, 1500); });
+        return video.videoWidth ? await canvasToThumbBlob(video, video.videoWidth, video.videoHeight) : null;
+      } finally { URL.revokeObjectURL(objectUrl); }
+    }
+    return null;
+  })();
+  const timeout = new Promise(resolve => setTimeout(() => resolve(null), THUMB_TIMEOUT_MS));
+  try { return await Promise.race([work, timeout]); } catch { return null; }
+}
+
 async function uploadAssetFile(file) {
   if (file.size > 30 * 1024 * 1024) throw new Error("Assets must be 30 MB or smaller.");
   const usage = await getStorageUsage();
@@ -2527,8 +2694,23 @@ async function uploadAssetFile(file) {
       access: "public",
       handleUploadUrl: "/api/assets/upload-token",
       contentType: file.type,
-      clientPayload: file.type
+      clientPayload: JSON.stringify({ type: file.type, size: file.size })
     });
+    // Best effort: a missing thumbnail only means tiles fall back to the
+    // original, so nothing here may fail the asset upload. Every upload gets
+    // one (even small files) so tiles never request a thumbnail that is absent.
+    try {
+      const thumb = await makeThumbnailBlob(file);
+      const thumbPath = thumbKeyFor(pathname);
+      if (thumb && thumbPath) {
+        await upload(thumbPath, thumb, {
+          access: "public",
+          handleUploadUrl: "/api/assets/upload-token",
+          contentType: "image/jpeg",
+          clientPayload: JSON.stringify({ type: "image/jpeg", size: thumb.size })
+        });
+      }
+    } catch {}
     return { url: result.url, kind: file.type.startsWith("video/") ? "video" : "image" };
   }
   const uploadFile = await prepareUploadFile(file);

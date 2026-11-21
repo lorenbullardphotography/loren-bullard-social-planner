@@ -214,6 +214,24 @@ The included `render.yaml` is retained as an alternative for a traditional Node 
 
 Do not use GitHub Pages for this app: it cannot run the server, protect the page with the password gate, or keep the Instagram token private.
 
+## Asset performance (Vercel Blob limits)
+
+Vercel Blob's Hobby plan caps data transfer (10 GB/month) and advanced operations (2,000/month), and blocks the whole store when either is exceeded. To stay under them:
+
+- Every upload also stores a ~640 px JPEG thumbnail at `planner/thumbs/<uuid>.jpg` (same store, same UUID). Grid, library, calendar, approvals and task tiles (except Canva exports, which have none) load the thumbnail lazily and fall back to the original, then to the "Image unavailable" placeholder. The editor and crop view still use the original.
+- Only the visible view renders its media, and unchanged grid tiles are reused, so polling and tile selection do not re-request images.
+- The storage-usage total is persisted in `planner_store` (key `blob-usage`) and recounted at most every 10 minutes; Settings-only fetches (usage, Canva status, team) run only on the Settings view.
+- Proxied Instagram images are cached by the browser for a day.
+
+Existing uploads need thumbnails created once (requires an unblocked store and `BLOB_READ_WRITE_TOKEN` in `.env`):
+
+```bash
+npm run backfill:thumbs               # dry run: how many images lack a thumbnail
+npm run backfill:thumbs -- --apply    # create them
+```
+
+Check the Vercel dashboard (Storage -> Blob) 3 and 7 days after deploying: if projected monthly transfer is under 5 GB and advanced operations under 1,000, stay on Blob. Otherwise see `docs/superpowers/plans/2026-11-21-migrate-assets-to-r2.md`.
+
 ## Optional future additions
 
 - Granular team permissions and invitations
