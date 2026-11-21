@@ -1501,7 +1501,10 @@ export async function handleRequest(req, res) {
       if (!response.ok) return sendJson(res, 502, { error: "Instagram photo could not be loaded." });
       const contentType = response.headers.get("content-type") || "";
       if (!contentType.startsWith("image/")) return sendJson(res, 502, { error: "Instagram did not return a photo." });
-      res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "private, max-age=3600" });
+      // A day of browser caching (and a week of stale-while-revalidate) keeps the
+// ~1,000 Instagram tiles from re-streaming through a serverless function on
+// every page load; the proxy always resolves a fresh media_url on a miss.
+      res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "private, max-age=86400, stale-while-revalidate=604800" });
       return res.end(Buffer.from(await response.arrayBuffer()));
     }
 
