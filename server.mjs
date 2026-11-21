@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { createUsageCache } from "./lib/blob-usage-cache.mjs";
+import { thumbUrlFor } from "./lib/thumbnail-urls.mjs";
 import { dataDir, deleteStored, getDatabaseClient, hasDirectDatabase, readStored, readStoredField, readStoredIds, storageMode, writeStored, writeStoredField } from "./lib/store.mjs";
 import { applyWorkflowAutomations, normalizeWorkflowAutomations } from "./lib/workflow-automations.mjs";
 import { createPlannerRepository } from "./lib/planner-repository.mjs";
@@ -460,38 +462,34 @@ async function blobClient() {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
   return import("@vercel/blob");
 }
-// blobUsage() used to re-list every blob in the store (paginating the full
-// result set) on every single upload request, to answer "is there room for
-// this one more file?" — fine with a handful of assets, but it means every
-// upload does O(blob count) Vercel Blob API calls, getting slower and more
-// rate-limit-prone as the library grows. Cached for a short window instead:
-// uploads/deletes we perform ourselves nudge the cached figure immediately
-// (see recordBlobUsageDelta below), so it won't drift for long, and anything
-// else (a blob removed outside this app) is caught at the next refresh.
-const BLOB_USAGE_CACHE_MS = 30_000;
-let blobUsageCache = null;
-async function blobUsage() {
-  const client = await blobClient();
-  if (!client) return { configured: false, usedBytes: 0, limitBytes: ASSET_STORAGE_LIMIT_MB * 1024 * 1024 };
-  if (blobUsageCache && Date.now() - blobUsageCache.fetchedAt < BLOB_USAGE_CACHE_MS) {
-    return blobUsageCache;
+// Total usage is persisted (planner_store key "blob-usage") and shared across
+// serverless instances: list() is an advanced Blob operation (2,000/month on
+// Hobby), so it runs at most once per 10 minutes instead of on every request.
+// Uploads/deletes we perform ourselves adjust the stored total in place.
+const BLOB_USAGE_KEY = "blob-usage";
+const blobUsageTracker = createUsageCache({
+  load: () => readStored(BLOB_USAGE_KEY, null),
+  save: snapshot => writeStored(BLOB_USAGE_KEY, snapshot),
+  list: async () => {
+    const client = await blobClient();
+    let cursor;
+    let usedBytes = 0;
+    do {
+      const page = await client.list({ prefix: "planner/", ...(cursor ? { cursor } : {}) });
+      usedBytes += (page.blobs || []).reduce((total, blob) => total + Number(blob.size || 0), 0);
+      cursor = page.hasMore ? page.cursor : null;
+    } while (cursor);
+    return usedBytes;
   }
-  let cursor;
-  let usedBytes = 0;
-  do {
-    const page = await client.list({ prefix: "planner/", ...(cursor ? { cursor } : {}) });
-    usedBytes += (page.blobs || []).reduce((total, blob) => total + Number(blob.size || 0), 0);
-    cursor = page.hasMore ? page.cursor : null;
-  } while (cursor);
-  blobUsageCache = { configured: true, usedBytes, limitBytes: ASSET_STORAGE_LIMIT_MB * 1024 * 1024, fetchedAt: Date.now() };
-  return blobUsageCache;
+});
+async function blobUsage() {
+  const limitBytes = ASSET_STORAGE_LIMIT_MB * 1024 * 1024;
+  if (!(await blobClient())) return { configured: false, usedBytes: 0, limitBytes };
+  const snapshot = await blobUsageTracker.get();
+  return { configured: true, usedBytes: snapshot.usedBytes, limitBytes, fetchedAt: snapshot.fetchedAt };
 }
-// Called right after a put/delete we performed ourselves so the cached
-// total reflects it immediately, rather than waiting out the cache window
-// (during which a burst of uploads could otherwise all under-count usage
-// off the same stale snapshot).
 function recordBlobUsageDelta(bytes) {
-  if (blobUsageCache) blobUsageCache.usedBytes = Math.max(0, blobUsageCache.usedBytes + bytes);
+  blobUsageTracker.nudge(bytes).catch(() => {});
 }
 export function isPlannerUploadPathname(pathname) {
   return typeof pathname === "string" && pathname.startsWith("planner/");
@@ -521,11 +519,13 @@ async function deleteBlobUrl(url) {
   if (!url || !url.includes(".blob.vercel-storage.com")) return;
   try {
     const client = await blobClient();
-    if (client) await client.del(url);
-    // Size of the deleted blob isn't known here cheaply, so rather than
-    // guess, just drop the cache — the next blobUsage() call pays for one
-    // fresh recount instead of drifting low forever.
-    blobUsageCache = null;
+    // The thumbnail uploaded beside the asset goes with it (best effort: old
+    // assets have none, and deleting a missing blob is not an error).
+    const thumb = thumbUrlFor(url);
+    if (client) await client.del(thumb && thumb !== url ? [url, thumb] : url);
+    // The deleted size isn't known cheaply, so recount at the next read
+    // rather than let the stored total drift.
+    blobUsageTracker.invalidate();
   } catch (error) {
     console.error("Blob cleanup failed:", error.message);
   }

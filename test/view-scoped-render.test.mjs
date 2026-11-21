@@ -16,10 +16,10 @@ function renderContext(currentView) {
 }
 
 test("renderAll renders media-heavy views only for the current view", () => {
-  for (const [view, expected] of [["grid", ["renderGrid"]], ["calendar", ["renderCalendar"]], ["library", ["renderLibrary", "renderScratch"]], ["tasks", ["renderTasks", "renderApprovals"]]]) {
+  for (const [view, expected] of [["grid", ["renderGrid"]], ["calendar", ["renderCalendar"]], ["library", ["renderLibrary", "renderScratch"]], ["tasks", ["renderTasks", "renderApprovals"]], ["settings", ["renderPlannerSettings"]], ["activity", []]]) {
     const { context, calls } = renderContext(view);
     context.renderAll();
-    const heavy = calls.filter(name => ["renderGrid", "renderCalendar", "renderLibrary", "renderScratch", "renderTasks", "renderApprovals"].includes(name));
+    const heavy = calls.filter(name => ["renderGrid", "renderCalendar", "renderLibrary", "renderScratch", "renderTasks", "renderApprovals", "renderPlannerSettings"].includes(name));
     assert.deepEqual(heavy, expected, view);
   }
 });
@@ -27,7 +27,16 @@ test("renderAll renders media-heavy views only for the current view", () => {
 test("renderAll still refreshes the light panels that carry no media on every view", () => {
   const { context, calls } = renderContext("calendar");
   context.renderAll();
-  for (const name of ["renderStats", "renderTeam", "renderActivity", "renderPlannerSettings"]) assert.ok(calls.includes(name), name);
+  for (const name of ["renderStats", "renderTeam", "renderActivity"]) assert.ok(calls.includes(name), name);
+  // renderPlannerSettings fetches storage usage, Canva status and team members,
+  // so it must not run on every change from other views.
+  assert.equal(calls.includes("renderPlannerSettings"), false);
+});
+
+test("renderViewContent renders the settings panel only for the settings view", () => {
+  const { context, calls } = renderContext("grid");
+  context.renderViewContent("settings");
+  assert.deepEqual(calls, ["renderPlannerSettings"]);
 });
 
 test("renderViewContent renders exactly the named view, and nothing for views without media", () => {
@@ -35,8 +44,8 @@ test("renderViewContent renders exactly the named view, and nothing for views wi
   context.renderViewContent("calendar");
   assert.deepEqual(calls, ["renderCalendar"]);
   calls.length = 0;
-  context.renderViewContent("settings");
   context.renderViewContent("editor");
+  context.renderViewContent("activity");
   assert.deepEqual(calls, []);
 });
 

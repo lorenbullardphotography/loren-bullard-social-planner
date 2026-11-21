@@ -972,7 +972,10 @@ const VIEW_RENDERERS = {
   calendar: () => renderCalendar(),
   library: () => { renderLibrary(); renderScratch(); },
   tasks: () => { renderTasks(); renderApprovals(); },
-  approvals: () => { renderTasks(); renderApprovals(); }
+  approvals: () => { renderTasks(); renderApprovals(); },
+  // Fetches storage usage, Canva status and team members, so it must not run
+  // on every planner change from other views.
+  settings: () => renderPlannerSettings()
 };
 function renderViewContent(name) {
   VIEW_RENDERERS[name]?.();
@@ -990,7 +993,6 @@ function renderAll() {
   else $("#postEditor").innerHTML = "";
   renderTeam();
   renderActivity();
-  renderPlannerSettings();
 }
 function assetPreview(post, lockCrop = false) {
   const mediaKind = assetKindOf(post);
@@ -2532,7 +2534,6 @@ function switchView(name) {
     closeMobileMenu();
     return;
   }
-  if (name === "settings") renderPlannerSettings();
   if (name === "activity") { renderActivity(); refreshActivityFeed().then(refreshed => refreshed && renderActivity()); }
   if (name === "tasks") { renderActivity(); refreshActivityFeed().then(refreshed => refreshed && renderActivity()); }
   if (name === "library") setLibrarySection(librarySection);
